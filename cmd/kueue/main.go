@@ -124,15 +124,15 @@ func main() {
 	var featureGates string
 	flag.StringVar(&featureGates, "feature-gates", "", "A set of key=value pairs that describe feature gates for alpha/experimental features.")
 
+	var visibilitySecurePort int
+	flag.IntVar(&visibilitySecurePort, "visibility-secure-port", 8082, "The port the visibility server binds to.")
+
 	opts := zap.Options{
 		TimeEncoder: zapcore.RFC3339NanoTimeEncoder,
 		ZapOpts:     []zaplog.Option{zaplog.AddCaller()},
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
-
-	var visibilitySecurePort int
-	flag.IntVar(&visibilitySecurePort, "visibility-secure-port", 8082, "The port the visibility server binds to.")
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	options, cfg, err := apply(configFile)
