@@ -133,9 +133,6 @@ func main() {
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
-
-	var visibilityServerPort int
-	flag.IntVar(&visibilityServerPort, "visibility-server-port", 8082, "The port the visibility server binds to.")
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	options, cfg, err := apply(configFile)
