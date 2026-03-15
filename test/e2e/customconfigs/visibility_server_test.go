@@ -97,6 +97,9 @@ var _ = ginkgo.Describe("Visibility Server", func() {
 		ginkgo.DeferCleanup(func() {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, sa, true)
 		})
+		ginkgo.DeferCleanup(func() {
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, sa, true)
+		})
 
 		ginkgo.By("Creating a token Secret for the custom SA")
 		secret := &corev1.Secret{
@@ -108,6 +111,9 @@ var _ = ginkgo.Describe("Visibility Server", func() {
 			Type: corev1.SecretTypeServiceAccountToken,
 		}
 		util.MustCreate(ctx, k8sClient, secret)
+		ginkgo.DeferCleanup(func() {
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, secret, true)
+		})
 		ginkgo.DeferCleanup(func() {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, secret, true)
 		})
@@ -131,9 +137,18 @@ var _ = ginkgo.Describe("Visibility Server", func() {
 		ginkgo.DeferCleanup(func() {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, cm, true)
 		})
+		ginkgo.DeferCleanup(func() {
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, cm, true)
+		})
 
 		ginkgo.By("Cloning all base permissions to our custom SA so the main controller can boot, explicitly holding back the auth delegation permission for our negative test.")
 		cloneControllerRBAC(ctx)
+		ginkgo.DeferCleanup(func() {
+			ginkgo.By("Cleaning up our dynamically cloned roles")
+			gomega.Expect(k8sClient.DeleteAllOf(ctx, &rbacv1.ClusterRoleBinding{}, client.MatchingLabels{testLabelKey: testLabelValue})).To(gomega.Succeed())
+			gomega.Expect(k8sClient.DeleteAllOf(ctx, &rbacv1.RoleBinding{}, client.InNamespace(kueueNS), client.MatchingLabels{testLabelKey: testLabelValue})).To(gomega.Succeed())
+			gomega.Expect(k8sClient.DeleteAllOf(ctx, &rbacv1.RoleBinding{}, client.InNamespace(kubeSystemNamespace), client.MatchingLabels{testLabelKey: testLabelValue})).To(gomega.Succeed())
+		})
 		ginkgo.DeferCleanup(func() {
 			ginkgo.By("Cleaning up our dynamically cloned roles")
 			gomega.Expect(k8sClient.DeleteAllOf(ctx, &rbacv1.ClusterRoleBinding{}, client.MatchingLabels{testLabelKey: testLabelValue})).To(gomega.Succeed())
@@ -174,20 +189,11 @@ var _ = ginkgo.Describe("Visibility Server", func() {
 					corev1.VolumeMount{Name: kubeconfigVolName, MountPath: "/etc/kubeconfig", ReadOnly: true},
 					corev1.VolumeMount{Name: customSAVolName, MountPath: customSAMountPath, ReadOnly: true},
 				)
-				container.Args = append(c.Args, "--kubeconfig=/etc/kubeconfig/config", fmt.Sprintf("--visibility-secure-port=%d", visibilityServerPort))
+				container.Args = append(c.Args, "--kubeconfig=/etc/kubeconfig/config")
 			}
 		}
 
 		gomega.Expect(k8sClient.Update(ctx, patchedDeployment)).To(gomega.Succeed())
-
-		patchedService := originalService.DeepCopy()
-		for i, p := range patchedService.Spec.Ports {
-			if p.Name == "https" {
-				patchedService.Spec.Ports[i].TargetPort = intstr.FromInt32(visibilityServerPort)
-			}
-		}
-		gomega.Expect(k8sClient.Update(ctx, patchedService)).To(gomega.Succeed())
-
 		util.WaitForKueueAvailabilityNoRestartCountCheck(ctx, k8sClient)
 
 		// NEGATIVE TEST: The custom SA lacks 'system:auth-delegator'. The visibility server
