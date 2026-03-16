@@ -961,24 +961,24 @@ func TestValidate(t *testing.T) {
 				},
 			},
 		},
-		"invalid .visibility.bindAddress": {
+		"invalid .visibilityServer.bindAddress": {
 			cfg: &configapi.Configuration{
 				Integrations: defaultIntegrations,
-				Visibility: &configapi.VisibilityServerConfiguration{
+				VisibilityServer: &configapi.VisibilityServerConfiguration{
 					BindAddress: ptr.To("invalid"),
 				},
 			},
 			wantErr: field.ErrorList{
 				&field.Error{
 					Type:  field.ErrorTypeInvalid,
-					Field: "visibility.bindAddress",
+					Field: "visibilityServer.bindAddress",
 				},
 			},
 		},
-		"valid .visibility.bindAddress": {
+		"valid .visibilityServer.bindAddress": {
 			cfg: &configapi.Configuration{
 				Integrations: defaultIntegrations,
-				Visibility: &configapi.VisibilityServerConfiguration{
+				VisibilityServer: &configapi.VisibilityServerConfiguration{
 					BindAddress: ptr.To("127.0.0.1"),
 				},
 			},

@@ -65,7 +65,7 @@ var (
 	objectRetentionPoliciesWorkloadsPath         = objectRetentionPoliciesPath.Child("workloads")
 	tlsPath                                      = field.NewPath("tls")
 	featureGatesPath                             = field.NewPath("featureGates")
-	visibilityBindAddressPath                    = field.NewPath("visibility", "bindAddress")
+	visibilityServerBindAddressPath              = field.NewPath("visibilityServer", "bindAddress")
 )
 
 func validate(c *configapi.Configuration, scheme *runtime.Scheme) field.ErrorList {
@@ -81,7 +81,7 @@ func validate(c *configapi.Configuration, scheme *runtime.Scheme) field.ErrorLis
 	allErrs = append(allErrs, validateManagedJobsNamespaceSelector(c)...)
 	allErrs = append(allErrs, validateObjectRetentionPolicies(c)...)
 	allErrs = append(allErrs, validateTLS(c)...)
-	allErrs = append(allErrs, validateVisibility(c)...)
+	allErrs = append(allErrs, validateVisibilityServer(c)...)
 	return allErrs
 }
 
@@ -567,13 +567,13 @@ func validateTLS(c *configapi.Configuration) field.ErrorList {
 	return allErrs
 }
 
-func validateVisibility(c *configapi.Configuration) field.ErrorList {
+func validateVisibilityServer(c *configapi.Configuration) field.ErrorList {
 	var allErrs field.ErrorList
-	if c.Visibility == nil || c.Visibility.BindAddress == nil || *c.Visibility.BindAddress == "" {
+	if c.VisibilityServer == nil || c.VisibilityServer.BindAddress == nil || *c.VisibilityServer.BindAddress == "" {
 		return allErrs
 	}
-	if net.ParseIP(*c.Visibility.BindAddress) == nil {
-		allErrs = append(allErrs, field.Invalid(visibilityBindAddressPath, *c.Visibility.BindAddress, "must be a valid IP address"))
+	if net.ParseIP(*c.VisibilityServer.BindAddress) == nil {
+		allErrs = append(allErrs, field.Invalid(visibilityServerBindAddressPath, *c.VisibilityServer.BindAddress, "must be a valid IP address"))
 	}
 	return allErrs
 }

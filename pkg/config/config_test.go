@@ -437,7 +437,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: defaultControlOptions(configapi.DefaultNamespace),
 		},
@@ -455,7 +455,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: defaultControlOptions(configapi.DefaultNamespace),
 		},
@@ -493,7 +493,7 @@ objectRetentionPolicies:
 						},
 					},
 				},
-				Visibility: defaultVisibility,
+				VisibilityServer: defaultVisibility,
 			},
 			wantOptions: defaultControlOptions("kueue-tenant-a"),
 		},
@@ -512,7 +512,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: ctrl.Options{
 				Cache:                  defaultControlCacheOptions(configapi.DefaultNamespace),
@@ -548,7 +548,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: defaultControlOptions(configapi.DefaultNamespace),
 		},
@@ -569,7 +569,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: defaultControlOptions(configapi.DefaultNamespace),
 		},
@@ -588,7 +588,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: ctrl.Options{
 				Cache:                  defaultControlCacheOptions("kueue-system"),
@@ -631,7 +631,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: defaultControlOptions(configapi.DefaultNamespace),
 		},
@@ -653,7 +653,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: defaultControlOptions(configapi.DefaultNamespace),
 		},
@@ -675,7 +675,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: ctrl.Options{
 				Cache:                  defaultControlCacheOptions(configapi.DefaultNamespace),
@@ -722,7 +722,7 @@ objectRetentionPolicies:
 				},
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: defaultControlOptions(configapi.DefaultNamespace),
 		},
@@ -763,7 +763,7 @@ objectRetentionPolicies:
 					},
 				},
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 			},
 			wantOptions: defaultControlOptions(configapi.DefaultNamespace),
 		},
@@ -782,7 +782,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 				Resources: &configapi.Resources{
 					Transformations: []configapi.ResourceTransformation{
 						{
@@ -836,7 +836,7 @@ objectRetentionPolicies:
 				Integrations:                 defaultIntegrations,
 				MultiKueue:                   defaultMultiKueue,
 				ManagedJobsNamespaceSelector: defaultManagedJobsNamespaceSelector,
-				Visibility:                   defaultVisibility,
+				VisibilityServer:                   defaultVisibility,
 				ObjectRetentionPolicies: &configapi.ObjectRetentionPolicies{
 					Workloads: &configapi.WorkloadRetentionPolicy{
 						AfterFinished:           &metav1.Duration{Duration: 30 * time.Minute},
@@ -1122,7 +1122,7 @@ webhook:
 
 			// Compare the loaded configuration
 			configCmpOpts := cmp.Options{
-				cmpopts.IgnoreFields(configapi.Configuration{}, "ControllerManager", "Visibility"),
+				cmpopts.IgnoreFields(configapi.Configuration{}, "ControllerManager", "VisibilityServer"),
 			}
 			if diff := cmp.Diff(tc.wantConfiguration, cfg, configCmpOpts...); diff != "" {
 				t.Errorf("Unexpected config (-want +got):\n%s", diff)
@@ -1236,7 +1236,7 @@ func TestEncode(t *testing.T) {
 					"workerLostTimeout": "15m0s",
 					"dispatcherName":    configapi.MultiKueueDispatcherModeAllAtOnce,
 				},
-				"visibility": map[string]any{
+				"visibilityServer": map[string]any{
 					"bindPort": int64(8082),
 				},
 			},

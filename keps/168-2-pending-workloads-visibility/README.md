@@ -234,7 +234,7 @@ GET /apis/visibility.kueue.x-k8s.io/VERSION/clusterqueues/CQ_NAME/admitted_workl
 
 ### Technical Details
 
-The Visibility server can be configured in the `kueueconfigurations` API under `visibility`. The following options are available:
+The Visibility server can be configured in the `kueueconfigurations` API under `visibilityServer`. The following options are available:
 
 - `bindAddress`: The IP address on which to listen for the visibility server. If not specified, the server will listen on all available network interfaces.
 - `bindPort`: The port on which to listen for the visibility server. Defaults to `8082`.
