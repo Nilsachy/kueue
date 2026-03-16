@@ -106,9 +106,9 @@ type Configuration struct {
 	// +optional
 	ObjectRetentionPolicies *ObjectRetentionPolicies `json:"objectRetentionPolicies,omitempty"`
 
-	// Visibility configures the visibility server.
+	// VisibilityServer configures the visibility server.
 	// +optional
-	Visibility *VisibilityServerConfiguration `json:"visibility,omitempty"`
+	VisibilityServer *VisibilityServerConfiguration `json:"visibilityServer,omitempty"`
 }
 
 type ControllerManager struct {
@@ -594,11 +594,11 @@ type WorkloadRetentionPolicy struct {
 }
 
 type VisibilityServerConfiguration struct {
-	// BindAddress is the IP address on which to listen for the visibility server.
+	// BindAddress is the IP address the visibility server listens on.
 	// +optional
 	BindAddress *string `json:"bindAddress,omitempty"`
 
-	// BindPort is the port on which to listen for the visibility server.
+	// BindPort is the port the visibility server listens on.
 	// Defaults to 8082.
 	// +optional
 	BindPort *int32 `json:"bindPort,omitempty"`
