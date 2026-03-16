@@ -126,6 +126,8 @@ func main() {
 
 	var visibilityServerPort int
 	flag.IntVar(&visibilityServerPort, "visibility-server-port", 8082, "The port the visibility server binds to.")
+	var visibilityServerPort int
+	flag.IntVar(&visibilityServerPort, "visibility-server-port", 8082, "The port the visibility server binds to.")
 
 	opts := zap.Options{
 		TimeEncoder: zapcore.RFC3339NanoTimeEncoder,
