@@ -624,7 +624,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 				Obj())
 		})
 		ginkgo.AfterEach(func() {
-			_ = features.SetEnable(features.FlavorFungibilityImplicitPreferenceDefault, false)
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.FlavorFungibilityImplicitPreferenceDefault, false)
 		})
 
 		// Since CohortA has 18CPU quota, we expect that
@@ -636,7 +636,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 		// WeightedShare(CohortA) = 0/20 * 1000 = 0
 		// WeightedShare(cq-p1)  = 12/20 * 1000 = 600
 		ginkgo.It("Prefers flavor with remaining guarantees at Cohort level (FlavorFungibilityImplicitPreferenceDefault=false)", framework.SlowSpec, func() {
-			_ = features.SetEnable(features.FlavorFungibilityImplicitPreferenceDefault, false)
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.FlavorFungibilityImplicitPreferenceDefault, false)
 			ginkgo.By("Creating workloads")
 			for range 18 {
 				createWorkload("cq-p1", "1")
@@ -650,7 +650,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			expectCohortWeightedShare("cohort-a", 0.0)
 		})
 		ginkgo.It("Prefers flavor with remaining guarantees at Cohort level (FlavorFungibilityImplicitPreferenceDefault=true)", func() {
-			_ = features.SetEnable(features.FlavorFungibilityImplicitPreferenceDefault, true)
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.FlavorFungibilityImplicitPreferenceDefault, true)
 			for range 18 {
 				createWorkload("cq-p1", "1")
 			}
@@ -669,7 +669,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 		// WeightedShare(CohortB) = 0/20 * 1000 = 0
 		// WeightedShare(cq-p5)   = 2/20 * 1000 = 100
 		ginkgo.It("CohortB preempts and schedules in flavor which has guarantees", func() {
-			_ = features.SetEnable(features.FlavorFungibilityImplicitPreferenceDefault, true)
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.FlavorFungibilityImplicitPreferenceDefault, true)
 			ginkgo.By("Create workload which saturate all cohort resources")
 			for range 20 {
 				createWorkload("cq-p1", "1")
@@ -740,10 +740,10 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 				FlavorFungibility(fungibility).
 				Preemption(preemption).
 				Obj())
-			_ = features.SetEnable(features.FlavorFungibilityImplicitPreferenceDefault, true)
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.FlavorFungibilityImplicitPreferenceDefault, true)
 		})
 		ginkgo.AfterEach(func() {
-			_ = features.SetEnable(features.FlavorFungibilityImplicitPreferenceDefault, false)
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.FlavorFungibilityImplicitPreferenceDefault, false)
 		})
 
 		// The first workload preempted satisfies
@@ -945,7 +945,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
 			ginkgo.By("Create another admissible workload in queue1")
-			createWorkloadWithPriority("cq1", "2", 9)
+			secondAdmissibleWorkload := createWorkloadWithPriority("cq1", "2", 9)
 
 			ginkgo.By("Validate pending workloads")
 			util.ExpectPendingWorkloadsMetric(cq1, 2, 0)
@@ -969,14 +969,12 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 				g.Expect(cond.Message).To(gomega.ContainSubstring("insufficient quota"))
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
-			ginkgo.By("Validate pending workloads")
-			util.ExpectPendingWorkloadsMetric(cq1, 1, 1)
-
 			ginkgo.By("Complete preemption")
 			util.FinishEvictionOfWorkloadsInCQ(ctx, k8sClient, cq2, 2)
 
 			ginkgo.By("Expected Total Admitted Workloads and Weighted Share")
 			util.ExpectAdmittedWorkloadsTotalMetric(cq1, "", 1)
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, secondAdmissibleWorkload)
 			util.ExpectClusterQueueWeightedShareMetric(cq1, 1000)
 			util.ExpectClusterQueueWeightedShareMetric(cq2, 0.0)
 		})
@@ -1025,7 +1023,6 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 		)
 
 		ginkgo.BeforeEach(func() {
-			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.AdmissionFairSharing, true)
 			cq1 = utiltestingapi.MakeClusterQueue("cq1").
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(defaultFlavor.Name).Resource(corev1.ResourceCPU, "8").Obj()).
 				AdmissionMode(kueue.UsageBasedAdmissionFairSharing).
@@ -1378,8 +1375,6 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing", "featur
 		)
 
 		ginkgo.BeforeEach(func() {
-			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.AdmissionFairSharing, true)
-
 			cq1 = utiltestingapi.MakeClusterQueue("cq1").
 				Cohort("all").
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(defaultFlavor.Name).Resource(corev1.ResourceCPU, "16").Obj()).
@@ -1521,8 +1516,6 @@ var _ = ginkgo.Describe("Scheduler with AdmissionFairSharing = nil", ginkgo.Labe
 		)
 
 		ginkgo.BeforeEach(func() {
-			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.AdmissionFairSharing, true)
-
 			cq1 = utiltestingapi.MakeClusterQueue("cq1").
 				Cohort("all").
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(defaultFlavor.Name).Resource(corev1.ResourceCPU, "32").Obj()).

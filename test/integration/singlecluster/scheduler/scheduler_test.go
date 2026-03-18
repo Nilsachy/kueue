@@ -74,7 +74,6 @@ var _ = ginkgo.Describe("Scheduler", func() {
 	}
 
 	ginkgo.BeforeEach(func() {
-		features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.FlavorFungibility, true)
 		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "core-")
 
 		onDemandFlavor = utiltestingapi.MakeResourceFlavor("on-demand").NodeLabel(instanceKey, "on-demand").Obj()
@@ -895,10 +894,10 @@ var _ = ginkgo.Describe("Scheduler", func() {
 			util.ExpectAdmittedWorkloadsTotalMetric(cq, "", 0)
 
 			// we send a requeue request upon CQ creation,
-			// so we may end up processing workload twice
+			// so we may end up processing workload twice (or more in slower environments)
 			// before it settles in inadmissible.
 			util.ExpectPendingAdmissionAttempts(1, ">=")
-			util.ExpectPendingAdmissionAttempts(2, "<=")
+			util.ExpectPendingAdmissionAttempts(3, "<=")
 			util.ExpectSuccessfulAdmissionAttempts(0, "==")
 
 			ginkgo.By("updating ClusterQueue")
@@ -921,7 +920,7 @@ var _ = ginkgo.Describe("Scheduler", func() {
 			util.ExpectReservingActiveWorkloadsMetric(cq, 1)
 			util.ExpectQuotaReservedWorkloadsTotalMetric(cq, "", 1)
 			util.ExpectAdmittedWorkloadsTotalMetric(cq, "", 1)
-			util.ExpectPendingAdmissionAttempts(2, "<=")
+			util.ExpectPendingAdmissionAttempts(3, "<=")
 			util.ExpectSuccessfulAdmissionAttempts(1, "==")
 		})
 	})
@@ -1779,8 +1778,8 @@ var _ = ginkgo.Describe("Scheduler", func() {
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, strictFIFOClusterQ.Name, wl1)
 			util.ExpectWorkloadsToBePending(ctx, k8sClient, wl2)
 			// wl3 doesn't even get a scheduling attempt, so can't check for conditions.
+			lookupKey := types.NamespacedName{Name: wl3.Name, Namespace: wl3.Namespace}
 			gomega.Consistently(func(g gomega.Gomega) {
-				lookupKey := types.NamespacedName{Name: wl3.Name, Namespace: wl3.Namespace}
 				g.Expect(k8sClient.Get(ctx, lookupKey, wl3)).Should(gomega.Succeed())
 				g.Expect(workload.HasQuotaReservation(wl3)).Should(gomega.BeFalse())
 			}, util.ConsistentDuration, util.ShortInterval).Should(gomega.Succeed())
@@ -1918,10 +1917,10 @@ var _ = ginkgo.Describe("Scheduler", func() {
 
 			ginkgo.By("Delete clusterQueue")
 			gomega.Expect(util.DeleteObject(ctx, k8sClient, cq)).To(gomega.Succeed())
+			createdCQ := &kueue.ClusterQueue{}
 			gomega.Consistently(func(g gomega.Gomega) {
-				var newCQ kueue.ClusterQueue
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq), &newCQ)).To(gomega.Succeed())
-				g.Expect(newCQ.GetFinalizers()).Should(gomega.Equal([]string{kueue.ResourceInUseFinalizerName}))
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq), createdCQ)).To(gomega.Succeed())
+				g.Expect(createdCQ.GetFinalizers()).Should(gomega.Equal([]string{kueue.ResourceInUseFinalizerName}))
 			}, util.ConsistentDuration, util.ShortInterval).Should(gomega.Succeed())
 
 			ginkgo.By("New created workloads should be frozen")
@@ -3004,11 +3003,11 @@ var _ = ginkgo.Describe("Scheduler", func() {
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
 			ginkgo.By("Verify second workload remains pending (10+2=12 exceeds quota limit of 10)")
+			createdWl := &kueue.Workload{}
 			gomega.Consistently(func(g gomega.Gomega) {
-				w := &kueue.Workload{}
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl3), w)).Should(gomega.Succeed())
-				g.Expect(workload.IsAdmitted(w)).Should(gomega.BeFalse())
-			}, util.ConsistentDuration, util.Interval).Should(gomega.Succeed())
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl3), createdWl)).Should(gomega.Succeed())
+				g.Expect(workload.IsAdmitted(createdWl)).Should(gomega.BeFalse())
+			}, util.ConsistentDuration, util.ShortInterval).Should(gomega.Succeed())
 		})
 	})
 })

@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
@@ -41,7 +43,7 @@ import (
 	utiltaints "sigs.k8s.io/kueue/pkg/util/taints"
 )
 
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups="",resources=pods/status,verbs=get;patch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
@@ -49,7 +51,7 @@ var realClock = clock.RealClock{}
 
 const (
 	KueueFailureRecoveryConditionType = "KueueFailureRecovery"
-	KueueForcefulTerminationReason    = "KueueForcefullyTerminated"
+	KueueForcefulTerminationReason    = "KueueForcefullyDeleted"
 )
 
 type TerminatingPodReconciler struct {
@@ -127,6 +129,8 @@ func (r *TerminatingPodReconciler) Delete(event.TypedDeleteEvent[*corev1.Pod]) b
 }
 
 func (r *TerminatingPodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
 	pod := &corev1.Pod{}
 	if err := r.client.Get(ctx, req.NamespacedName, pod); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -134,6 +138,7 @@ func (r *TerminatingPodReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Pod was updated in the meantime and should not be forcefully terminated
 	if !podEligibleForTermination(pod) {
+		log.V(4).Info("Terminating pod changed and is not eligible for forceful termination anymore")
 		return ctrl.Result{}, nil
 	}
 
@@ -152,6 +157,7 @@ func (r *TerminatingPodReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	// Pod is not scheduled on an unreachable node
 	if !utiltaints.TaintKeyExists(node.Spec.Taints, corev1.TaintNodeUnreachable) {
+		log.V(4).Info("Forceful termination threshold reached, but pod is not scheduled on an unreachable node", "node", klog.KObj(node))
 		return ctrl.Result{}, nil
 	}
 
@@ -160,7 +166,7 @@ func (r *TerminatingPodReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"Pod forcefully terminated after %s grace period due to unreachable node `%s` (triggered by `%s` annotation)",
 		totalDeletionGracePeriod,
 		node.Name,
-		constants.SafeToForcefullyTerminateAnnotationKey,
+		constants.SafeToForcefullyDeleteAnnotationKey,
 	)
 
 	err := utilclient.PatchStatus(ctx, r.client, pod, func() (bool, error) {
@@ -173,19 +179,24 @@ func (r *TerminatingPodReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		})
 		return true, nil
 	})
-
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	r.recorder.Event(pod, corev1.EventTypeWarning, KueueForcefulTerminationReason, eventMessage)
+	log.V(4).Info(eventMessage)
+
+	// Forcefully delete the pod object
+	if err = r.client.Delete(ctx, pod, &client.DeleteOptions{GracePeriodSeconds: ptr.To(int64(0))}); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
 
 	return ctrl.Result{}, nil
 }
 
 func podEligibleForTermination(p *corev1.Pod) bool {
-	annotationValue, hasAnnotation := p.Annotations[constants.SafeToForcefullyTerminateAnnotationKey]
-	if !hasAnnotation || annotationValue != constants.SafeToForcefullyTerminateAnnotationValue {
+	annotationValue, hasAnnotation := p.Annotations[constants.SafeToForcefullyDeleteAnnotationKey]
+	if !hasAnnotation || annotationValue != constants.SafeToForcefullyDeleteAnnotationValue {
 		return false
 	}
 
@@ -193,11 +204,17 @@ func podEligibleForTermination(p *corev1.Pod) bool {
 		return false
 	}
 
-	if utilpod.IsTerminated(p) {
-		return false
-	}
+	// Do not filter out partially terminated (condition set, but not deleted) pods to handle
+	// partial executions of the controller caused by errors (for example network errors).
+	return isPodPartiallyForcefullyTerminated(p) || !utilpod.IsTerminated(p)
+}
 
-	return true
+func isPodPartiallyForcefullyTerminated(p *corev1.Pod) bool {
+	return utilpod.HasCondition(p, &corev1.PodCondition{
+		Type:   KueueFailureRecoveryConditionType,
+		Reason: KueueForcefulTerminationReason,
+		Status: corev1.ConditionTrue,
+	})
 }
 
 func (r *TerminatingPodReconciler) SetupWithManager(mgr ctrl.Manager, cfg *configapi.Configuration) (string, error) {

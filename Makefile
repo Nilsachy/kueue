@@ -90,7 +90,7 @@ LD_FLAGS += -X '$(version_pkg).BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)'
 
 # Update these variables when preparing a new release or a release branch.
 # Then run `make prepare-release-branch`
-RELEASE_VERSION=v0.15.5
+RELEASE_VERSION=v0.15.6
 RELEASE_BRANCH=release-0.15
 # Application version for Helm and npm (strips leading 'v' from RELEASE_VERSION)
 APP_VERSION := $(shell echo $(RELEASE_VERSION) | cut -c2-)
@@ -147,7 +147,7 @@ update-helm: compile-crd-manifests yq yaml-processor
 	$(YAML_PROCESSOR) -zap-log-level=$(YAML_PROCESSOR_LOG_LEVEL) hack/processing-plan.yaml
 
 .PHONY: generate
-generate: generate-mocks generate-apiref generate-code generate-kueuectl-docs generate-helm-docs generate-metrics-tables
+generate: generate-mocks generate-apiref generate-code generate-kueuectl-docs generate-helm-docs generate-metrics-tables generate-featuregates
 
 .PHONY: generate-code
 generate-code: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations and client-go libraries.
@@ -344,6 +344,7 @@ prepare-release-branch: yq kustomize ## Prepare the release branch with the rele
 	$(YQ) e '.appVersion = "$(RELEASE_VERSION)" | .version = "$(APP_VERSION)" | .dependencies[0].version = "~$(APP_VERSION)"' -i cmd/experimental/kueue-populator/charts/kueue-populator/Chart.yaml
 	$(YQ) e '.kueuePopulator.image.tag = "$(RELEASE_BRANCH)"' -i cmd/experimental/kueue-populator/charts/kueue-populator/values.yaml
 	$(SED) -r 's/[0-9]+\.[0-9]+\.[0-9]+/$(APP_VERSION)/g' -i cmd/experimental/kueue-populator/README.md -i cmd/experimental/kueue-populator/charts/kueue-populator/README.md
+	$(MAKE) generate-helm-docs
 
 .PHONY: update-security-insights
 update-security-insights: yq
@@ -458,6 +459,12 @@ kueuectl:
 generate-apiref: genref
 	cd $(PROJECT_DIR)/hack/genref/ && $(GENREF) -o $(PROJECT_DIR)/site/content/en/docs/reference
 
+##@ Documentation
+
+.PHONY: generate-featuregates
+generate-featuregates: ## Regenerate feature-gate YAML and site data.
+	$(TOOLS_DIR)/compatibility-lifecycle/generate.sh
+
 .PHONY: generate-kueuectl-docs
 generate-kueuectl-docs: kueuectl-docs
 	rm -Rf $(PROJECT_DIR)/site/content/en/docs/reference/kubectl-kueue/commands/kueuectl*
@@ -466,7 +473,7 @@ generate-kueuectl-docs: kueuectl-docs
 		$(PROJECT_DIR)/site/content/en/docs/reference/kubectl-kueue/commands
 
 .PHONY: generate-helm-docs
-generate-helm-docs: prepare-release-branch helm-docs
+generate-helm-docs: helm-docs
 	$(HELM_DOCS) -c $(PROJECT_DIR)/charts/kueue
 
 .PHONY: generate-metrics-tables

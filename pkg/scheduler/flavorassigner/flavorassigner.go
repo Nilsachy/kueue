@@ -74,7 +74,7 @@ type Assignment struct {
 }
 
 // UpdateForTASResult updates the Assignment with the TAS result
-func (a *Assignment) UpdateForTASResult(result schdcache.TASAssignmentsResult) {
+func (a *Assignment) UpdateForTASResult(cq *schdcache.ClusterQueueSnapshot, result schdcache.TASAssignmentsResult) {
 	for psName, psResult := range result {
 		psAssignment := a.podSetAssignmentByName(psName)
 		psAssignment.TopologyAssignment = psResult.TopologyAssignment
@@ -82,19 +82,32 @@ func (a *Assignment) UpdateForTASResult(result schdcache.TASAssignmentsResult) {
 			psAssignment.DelayedTopologyRequest = ptr.To(kueue.DelayedTopologyRequestStateReady)
 		}
 	}
-	a.Usage.TAS = a.ComputeTASNetUsage(nil)
+	a.Usage.TAS = a.ComputeTASNetUsage(cq, nil)
 }
 
 // ComputeTASNetUsage computes the net TAS usage for the assignment
-func (a *Assignment) ComputeTASNetUsage(prevAdmission *kueue.Admission) workload.TASUsage {
+func (a *Assignment) ComputeTASNetUsage(cq *schdcache.ClusterQueueSnapshot, prevAdmission *kueue.Admission) workload.TASUsage {
 	result := make(workload.TASUsage)
 	for i, psa := range a.PodSets {
 		if psa.TopologyAssignment != nil {
 			if prevAdmission != nil && prevAdmission.PodSetAssignments[i].TopologyAssignment != nil {
 				continue
 			}
-			singlePodRequests := resources.NewRequests(psa.Requests).ScaledDown(int64(psa.Count))
+			tasRequests := make(corev1.ResourceList, len(psa.Requests))
+			for resourceName, quantity := range psa.Requests {
+				flv := psa.Flavors[resourceName]
+				if flv == nil || cq.TASFlavors[flv.Name] == nil {
+					// This is the quota-only resources, skip when computing TAS usage.
+					continue
+				}
+				tasRequests[resourceName] = quantity
+			}
+			singlePodRequests := resources.NewRequests(tasRequests).ScaledDown(int64(psa.Count))
 			for _, flv := range psa.Flavors {
+				if cq.TASFlavors[flv.Name] == nil {
+					// This is a quota-only flavor, skip when computing TAS usage.
+					continue
+				}
 				if _, ok := result[flv.Name]; !ok {
 					result[flv.Name] = make(workload.TASFlavorUsage, 0)
 				}
@@ -662,7 +675,7 @@ func (a *FlavorAssigner) assignFlavors(log logr.Logger, counts []int32) Assignme
 				assignment.representativeMode = ptr.To(Preempt)
 			} else {
 				// All PodSets fit, we just update the TopologyAssignments
-				assignment.UpdateForTASResult(result)
+				assignment.UpdateForTASResult(a.cq, result)
 			}
 		}
 		if assignment.RepresentativeMode() == Preempt && !workload.HasUnhealthyNodes(a.wl.Obj) {
@@ -762,15 +775,11 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 		attemptedFlavorIdx = idx
 		fName := resourceGroup.Flavors[idx]
 
-		flavorStatus := NewStatus()
-
-		if fit, err := a.checkFlavorForPodSets(log, fName, psIDs, podSets, selectors, flavorStatus); !fit {
-			if flavorStatus != nil {
-				status.reasons = append(status.reasons, flavorStatus.reasons...)
-			}
+		if flavorStatus := a.checkFlavorForPodSets(log, fName, psIDs, podSets, selectors, resourceGroup); !flavorStatus.IsFit() {
+			status.reasons = append(status.reasons, flavorStatus.reasons...)
 			consideredFlavors.AddNoFitFlavorAttempt(fName, flavorStatus)
-			if err != nil {
-				status.err = err
+			if flavorStatus.err != nil {
+				status.err = flavorStatus.err
 				return nil, status, consideredFlavors
 			}
 			continue
@@ -873,22 +882,24 @@ func (a *FlavorAssigner) checkFlavorForPodSets(
 	psIDs []int,
 	podSets []*kueue.PodSet,
 	selectors []nodeaffinity.RequiredNodeAffinity,
-	status *Status,
-) (bool, error) {
+	rg *schdcache.ResourceGroup,
+) *Status {
+	status := NewStatus()
+
 	flavor, exist := a.resourceFlavors[flavorName]
 	if !exist {
 		log.Error(nil, "Flavor not found", "Flavor", flavorName)
 		status.appendf("flavor %s not found", flavorName)
-		return false, nil
+		return status
 	}
 
 	for psIdx, psID := range psIDs {
 		if features.Enabled(features.TopologyAwareScheduling) {
 			ps := &a.wl.Obj.Spec.PodSets[psID]
-			if message := checkPodSetAndFlavorMatchForTAS(a.cq, ps, flavor); message != nil {
+			if message := checkPodSetAndFlavorMatchForTAS(a.cq, ps, flavor, rg); message != nil {
 				log.Error(nil, *message)
 				status.appendf("%s", *message)
-				return false, nil
+				return status
 			}
 		}
 		podSpec := podSets[psIdx].Template.Spec
@@ -897,19 +908,19 @@ func (a *FlavorAssigner) checkFlavorForPodSets(
 		})
 		if untolerated {
 			status.appendf("untolerated taint %s in flavor %s", taint, flavorName)
-			return false, nil
+			return status
 		}
 		selector := selectors[psIdx]
 		if match, err := selector.Match(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: flavor.Spec.NodeLabels}}); !match || err != nil {
 			if err != nil {
 				status.err = err
-				return false, err
+				return status
 			}
 			status.appendf("flavor %s doesn't match node affinity", flavorName)
-			return false, nil
+			return status
 		}
 	}
-	return true, nil
+	return status
 }
 
 func shouldTryNextFlavor(representativeMode granularMode, flavorFungibility kueue.FlavorFungibility) bool {

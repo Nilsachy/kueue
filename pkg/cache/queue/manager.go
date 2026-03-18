@@ -323,17 +323,19 @@ func (m *Manager) AddLocalQueue(ctx context.Context, q *kueue.LocalQueue) error 
 			continue
 		}
 
+		log := ctrl.LoggerFrom(ctx).WithValues("workload", klog.KObj(&w))
 		if features.Enabled(features.DynamicResourceAllocation) && workload.HasDRA(&w) {
 			if m.draReconcileChannel != nil {
 				m.draReconcileChannel <- event.TypedGenericEvent[*kueue.Workload]{Object: &w}
-				log := ctrl.LoggerFrom(ctx).WithValues("workload", klog.KObj(&w))
 				log.V(4).Info("Sent DRA workload to reconcile channel due to LocalQueue creation")
 			}
 			continue
 		}
 
 		workload.AdjustResources(ctx, m.client, &w)
-		qImpl.AddOrUpdate(workload.NewInfo(&w, m.workloadInfoOptions...))
+		wInfo := workload.NewInfo(&w, m.workloadInfoOptions...)
+		wInfo.UpdateSchedulingHash(log)
+		qImpl.AddOrUpdate(wInfo)
 	}
 
 	if cq != nil && cq.AddFromLocalQueue(qImpl) {
@@ -447,6 +449,7 @@ func (m *Manager) AddOrUpdateWorkloadWithoutLock(w *kueue.Workload, opts ...work
 	}
 	allOptions := append(m.workloadInfoOptions, opts...)
 	wInfo := workload.NewInfo(w, allOptions...)
+	wInfo.UpdateSchedulingHash(ctrl.Log)
 	q.AddOrUpdate(wInfo)
 	cq := m.hm.ClusterQueue(q.ClusterQueue)
 	if cq == nil {
@@ -478,7 +481,9 @@ func (m *Manager) RequeueWorkload(ctx context.Context, info *workload.Info, reas
 	if q == nil {
 		return false
 	}
-	info.Update(&w)
+	log := ctrl.LoggerFrom(ctx)
+	workload.AdjustResources(ctx, m.client, &w)
+	info.Update(log, &w)
 	q.AddOrUpdate(info)
 	cq := m.hm.ClusterQueue(q.ClusterQueue)
 	if cq == nil {
@@ -492,6 +497,22 @@ func (m *Manager) RequeueWorkload(ctx context.Context, info *workload.Info, reas
 		m.Broadcast()
 	}
 	return added
+}
+
+// HandleInadmissibleHash bulk-moves all workloads in the ClusterQueue's heap
+// that share the given scheduling hash to inadmissibleWorkloads.
+func (m *Manager) HandleInadmissibleHash(cqName kueue.ClusterQueueReference, hash string) int {
+	m.RLock()
+	defer m.RUnlock()
+	cq := m.hm.ClusterQueue(cqName)
+	if cq == nil {
+		return 0
+	}
+	moved := cq.handleInadmissibleHash(hash)
+	if moved > 0 {
+		reportPendingWorkloads(m, cqName)
+	}
+	return moved
 }
 
 func (m *Manager) DeleteWorkload(log logr.Logger, w *kueue.Workload) {
@@ -676,6 +697,7 @@ func (m *Manager) queueSecondPass(ctx context.Context, w *kueue.Workload, iterat
 
 	log := ctrl.LoggerFrom(ctx)
 	wInfo := workload.NewInfo(w, m.workloadInfoOptions...)
+	wInfo.UpdateSchedulingHash(log)
 	wInfo.SecondPassIteration = iteration
 	if m.secondPassQueue.queue(wInfo) {
 		log.V(3).Info("Workload queued for second pass of scheduling", "workload", workload.Key(w))
