@@ -193,7 +193,7 @@ func TestSetDefaults_Configuration(t *testing.T) {
 				InternalCertManagement: &InternalCertManagement{
 					Enable: ptr.To(false),
 				},
-				Integrations: defaultIntegrations,
+				Integrations:     defaultIntegrations,
 				VisibilityServer: defaultVisibilityServer,
 			},
 			want: &Configuration{
