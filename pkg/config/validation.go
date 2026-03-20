@@ -571,6 +571,17 @@ func validateTLS(c *configapi.Configuration) field.ErrorList {
 	return allErrs
 }
 
+func validateVisibilityServer(c *configapi.Configuration) field.ErrorList {
+	var allErrs field.ErrorList
+	if c.VisibilityServer == nil || c.VisibilityServer.BindAddress == nil || *c.VisibilityServer.BindAddress == "" {
+		return allErrs
+	}
+	if net.ParseIP(*c.VisibilityServer.BindAddress) == nil {
+		allErrs = append(allErrs, field.Invalid(visibilityServerBindAddressPath, *c.VisibilityServer.BindAddress, "must be a valid IP address"))
+	}
+	return allErrs
+}
+
 var customLabelNameRegexp = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*$`)
 
 func validateCustomLabels(c *configapi.Configuration) field.ErrorList {
@@ -612,15 +623,4 @@ func validateQualifiedName(fldPath *field.Path, value string) field.ErrorList {
 		return field.ErrorList{field.Invalid(fldPath, value, strings.Join(errs, "; "))}
 	}
 	return nil
-}
-
-func validateVisibilityServer(c *configapi.Configuration) field.ErrorList {
-	var allErrs field.ErrorList
-	if c.VisibilityServer == nil || c.VisibilityServer.BindAddress == nil || *c.VisibilityServer.BindAddress == "" {
-		return allErrs
-	}
-	if net.ParseIP(*c.VisibilityServer.BindAddress) == nil {
-		allErrs = append(allErrs, field.Invalid(visibilityServerBindAddressPath, *c.VisibilityServer.BindAddress, "must be a valid IP address"))
-	}
-	return allErrs
 }
