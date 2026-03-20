@@ -58,4 +58,13 @@ const (
 	// ComponentWorkloadIndexAnnotation stores the numeric index for component workloads
 	// in multi-workload jobs (e.g., LeaderWorkerSet replicas).
 	ComponentWorkloadIndexAnnotation = "kueue.x-k8s.io/component-workload-index"
+
+	// MultiKueuePreemptionGate is the name of the preemption gate managed by MultiKueue.
+	// This gate is automatically applied to remote Workloads to eliminate parallel preemptions.
+	MultiKueuePreemptionGate = "kueue.x-k8s.io/multikueue"
+
+	// PriorityBoostAnnotationKey is the annotation key on a Workload that allows
+	// external controllers to adjust a workload's effective priority.
+	// Positive values increase priority; negative values decrease it.
+	PriorityBoostAnnotationKey = "kueue.x-k8s.io/priority-boost"
 )

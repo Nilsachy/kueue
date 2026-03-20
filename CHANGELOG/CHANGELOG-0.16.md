@@ -1,3 +1,89 @@
+## v0.16.4
+
+Changes since `v0.16.3`:
+
+## Changes by Kind
+
+### Feature
+
+- Helm: Allow setting log level (#9944, @gabesaba)
+- TAS: Extend the support for handling NoSchedule taints when the TASReplaceNodeOnNodeTaints feature gate is enabled. (#10003, @j-skiba)
+- VisibilityOnDemand: Introduce a new Kueue deployment argument, --visibility-server-port, which allows passing custom port when starting the visibility server. (#9976, @Nilsachy)
+
+### Bug or Regression
+
+- LWS integration: Fixed a bug that the `kueue.x-k8s.io/job-uid` label was not set on the workloads. (#10010, @mbobrovskyi)
+- MultiKueue: Enable AllowWatchBookmarks for remote client watches to prevent idle watch connections from being terminated by HTTP proxies with idle timeouts (e.g., Cloudflare 524 errors). (#9990, @trilamsr)
+- Scheduling: fix the issue that scheduler could indefinitely try re-queueing a workload which was once 
+  inadmissible, but is admissible after an update. The issue affected workloads which don't specify 
+  resource requests explicitly, but rely on defaulting based on limits. (#9913, @mimowo)
+- Scheduling: fixed SchedulingEquivalenceHashing so equivalent workloads that become inadmissible through
+  the preemption path with no candidates are also covered by the mechanism. 
+  
+  As a safety measure while the broader fix is validated, the beta SchedulingEquivalenceHashing feature gate
+  is temporarily disabled by default. (#10007, @mimowo)
+- StatefulSet integration: Fixed a bug that the `kueue.x-k8s.io/job-uid` label was not set on the workloads. (#9902, @mbobrovskyi)
+- TAS: Fixed a bug where pods could become stuck in a `Pending` state during node replacement.
+  This may occur when a node gets tainted or `NotReady` after the topology assignment phase, but before
+  the pods are ungated. (#9978, @j-skiba)
+- TAS: fix the bug that workloads which only specify resource limits, without requests, are not able to perform 
+  the second-pass scheduling correctly, responsible for NodeHotSwap and ProvisioningRequests. (#9947, @mimowo)
+- VisibilityOnDemand: Fix non-deterministic workload ordering with UsageBasedAdmissionFairSharing enabled. (#9955, @sohankunkerkar)
+
+### Other (Cleanup or Flake)
+
+- Restore the FlavorFungibilityImplicitPreferenceDefault feature gate. (#9991, @mimowo)
+
+## v0.16.3
+
+Changes since `v0.16.2`:
+
+## Changes by Kind
+
+### Feature
+
+- Observability: Add scheduler logs for the scheduling cycle phase boundaries. (#9813, @sohankunkerkar)
+- Scheduling: Add the alpha SchedulerLongRequeueInterval feature gate (disabled by default) to increase the 
+  inadmissible workload requeue interval from 1s to 10s. This may help to mitigate, on large environments with 
+  many pending workloads, issues with frequent re-queues that prevent the scheduler from reaching schedulable 
+  workloads deeper in the queue and result in constant re-evaluation of the same top workloads. (#9819, @mbobrovskyi)
+- Scheduling: Add the alpha SchedulerTimestampPreemptionBuffer feature gate (disabled by default) to use
+  5-minute buffer so that workloads with scheduling timestamps within this buffer don’t preempt each other
+  based on LowerOrNewerEqualPriority. (#9837, @mbobrovskyi)
+
+### Bug or Regression
+
+- FailureRecoveryPolicy: forcefully delete stuck pods (without grace period) in addition to transitioning them
+  to the `Failed` phase. This fixes a scenario where foreground propagating deletions were blocked by a stuck pod. (#9673, @kshalot)
+- Fix a race where updated workload priority could remain stuck in the inadmissible queue and delay rescheduling. (#9678, @sohankunkerkar)
+- In fair sharing preemption, bypass DRS strategy gates when the preemptor ClusterQueue is within nominal quota for contested resources, allowing preemption even if the CQ's aggregate DRS is high due to borrowing on other flavors. (#9592, @mukund-wayve)
+- Kueueviz: fetch Cohort CRD directly, instead of deriving from ClusterQueues (#9720, @samzong)
+- LeaderWorkerSet: fix workload recreation delay during rolling updates by watching for workload deletions. (#9680, @PannagaRao)
+- Observability: Fix missing replica_role=leader gauge metrics after HA role transition. (#9794, @IrvingMg)
+- Scheduling: Fix a BestEffortFIFO performance issue where many equivalent workloads could
+  prevent the scheduler from reaching schedulable workloads deeper in the queue. Kueue now
+  skips redundant evaluation by bulk-moving same-hash workloads to inadmissible when one
+  representative is categorized as NoFit. (#9698, @sohankunkerkar)
+- Scheduling: Fix that the Kueue's scheduler could issue duplicate preemption requests and events for the same workload. (#9627, @sohankunkerkar)
+- Scheduling: Fixed a race condition where a workload could simultaneously exist in the scheduler's heap
+  and the "inadmissible workloads" list. This fix prevents unnecessary scheduler cycles and prevents temporary 
+  double counting for the metric of pending workloads. (#9638, @sohankunkerkar)
+- Scheduling: Reduced the maximum sleep time between scheduling cycles from 100ms to 10ms.
+  This change fixes a bug where the 100ms delay was excessive on busy systems, in which completed
+  workloads can trigger requeue events every second. In such cases, the scheduler could spend up to 10%
+  of the time between requeue events sleeping. Reducing the delay allows the scheduler to spend more time
+  progressing through the ClusterQueue heap between requeue events. (#9763, @mimowo)
+- StatefulSet integration: fix the bug that when using `generateName` the Workload names generated
+  for two different StatefulSets would conflict, not allowing to run the second StatefulSet. (#9693, @IrvingMg)
+- TAS: Fix performance bug where snapshotting would take very long due to List and DeepCopy
+  of all Nodes. Now the cached set of nodes is maintained in event-driven fashion. (#9783, @mbobrovskyi)
+- TAS: support ResourceTransformations to define "virtual" resources which allow putting a cap on
+  some "virtual" credits across multiple-flavors, see [sharing quotas](https://kueue.sigs.k8s.io/docs/tasks/manage/share_quotas_across_flavors/) for quota-only resources.
+  This is considered a bug since there was no validation preventing such configuration before. (#9688, @mbobrovskyi)
+- VisibilityOnDemand: Fix the bug that when running Kueue with the custom `--kubeconfig` flag the visibility server
+  fails to initialize, because the custom value of the flag is not propagated to it, leading to errors such as:
+  "Unable to create and start visibility server","error":"unable to apply VisibilityServerOptions: failed to get delegated authentication kubeconfig:  failed to get delegated authentication kubeconfig: ..." (#9805, @Nilsachy)
+
 ## v0.16.2
 
 Changes since `v0.16.1`:

@@ -19,10 +19,12 @@ package config
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	apimachineryvalidation "k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/validation"
@@ -66,6 +68,7 @@ var (
 	tlsPath                                      = field.NewPath("tls")
 	featureGatesPath                             = field.NewPath("featureGates")
 	visibilityServerBindAddressPath              = field.NewPath("visibilityServer", "bindAddress")
+	customLabelsPath                             = field.NewPath("metrics", "customLabels")
 )
 
 func validate(c *configapi.Configuration, scheme *runtime.Scheme) field.ErrorList {
@@ -82,6 +85,7 @@ func validate(c *configapi.Configuration, scheme *runtime.Scheme) field.ErrorLis
 	allErrs = append(allErrs, validateObjectRetentionPolicies(c)...)
 	allErrs = append(allErrs, validateTLS(c)...)
 	allErrs = append(allErrs, validateVisibilityServer(c)...)
+	allErrs = append(allErrs, validateCustomLabels(c)...)
 	return allErrs
 }
 
@@ -115,7 +119,7 @@ func validateMultiKueue(c *configapi.Configuration) field.ErrorList {
 				c.MultiKueue.WorkerLostTimeout.Duration, apimachineryvalidation.IsNegativeErrorMsg))
 		}
 		if c.MultiKueue.Origin != nil {
-			if errs := apimachineryutilvalidation.IsValidLabelValue(*c.MultiKueue.Origin); len(errs) != 0 {
+			if errs := content.IsLabelValue(*c.MultiKueue.Origin); len(errs) != 0 {
 				allErrs = append(allErrs, field.Invalid(multiKueuePath.Child("origin"), *c.MultiKueue.Origin, strings.Join(errs, ",")))
 			}
 		}
@@ -414,7 +418,7 @@ func validateDeviceClassMappings(c *configapi.Configuration) field.ErrorList {
 	for idx, mapping := range mappings {
 		mappingPath := dynamicResourceAllocationPath.Index(idx)
 
-		if errs := apimachineryutilvalidation.IsQualifiedName(string(mapping.Name)); len(errs) > 0 {
+		if errs := content.IsLabelKey(string(mapping.Name)); len(errs) > 0 {
 			allErrs = append(allErrs, field.Invalid(mappingPath.Child("name"), mapping.Name, strings.Join(errs, "; ")))
 		}
 
@@ -442,7 +446,7 @@ func validateDeviceClassMappings(c *configapi.Configuration) field.ErrorList {
 		for dcIdx, deviceClass := range mapping.DeviceClassNames {
 			dcPath := mappingPath.Child("deviceClassNames").Index(dcIdx)
 
-			if errs := apimachineryutilvalidation.IsQualifiedName(string(deviceClass)); len(errs) > 0 {
+			if errs := content.IsLabelKey(string(deviceClass)); len(errs) > 0 {
 				allErrs = append(allErrs, field.Invalid(dcPath, deviceClass, strings.Join(errs, "; ")))
 			}
 
@@ -565,6 +569,49 @@ func validateTLS(c *configapi.Configuration) field.ErrorList {
 			c.TLS.CipherSuites, "may not be specified when `minVersion` is 'VersionTLS13'"))
 	}
 	return allErrs
+}
+
+var customLabelNameRegexp = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*$`)
+
+func validateCustomLabels(c *configapi.Configuration) field.ErrorList {
+	if len(c.Metrics.CustomLabels) == 0 {
+		return nil
+	}
+	var allErrs field.ErrorList
+	seenNames := sets.New[string]()
+	for i, entry := range c.Metrics.CustomLabels {
+		fldPath := customLabelsPath.Index(i)
+
+		if !customLabelNameRegexp.MatchString(entry.Name) {
+			allErrs = append(allErrs, field.Invalid(fldPath.Child("name"), entry.Name,
+				"must match ^[a-zA-Z][a-zA-Z0-9_]*$"))
+		}
+		if seenNames.Has(entry.Name) {
+			allErrs = append(allErrs, field.Duplicate(fldPath.Child("name"), entry.Name))
+		} else {
+			seenNames.Insert(entry.Name)
+		}
+		if entry.SourceLabelKey != "" && entry.SourceAnnotationKey != "" {
+			allErrs = append(allErrs, field.Invalid(fldPath, entry,
+				"sourceLabelKey and sourceAnnotationKey are mutually exclusive"))
+		}
+		switch {
+		case entry.SourceLabelKey != "":
+			allErrs = append(allErrs, validateQualifiedName(fldPath.Child("sourceLabelKey"), entry.SourceLabelKey)...)
+		case entry.SourceAnnotationKey != "":
+			allErrs = append(allErrs, validateQualifiedName(fldPath.Child("sourceAnnotationKey"), entry.SourceAnnotationKey)...)
+		default:
+			allErrs = append(allErrs, validateQualifiedName(fldPath.Child("name"), entry.Name)...)
+		}
+	}
+	return allErrs
+}
+
+func validateQualifiedName(fldPath *field.Path, value string) field.ErrorList {
+	if errs := content.IsLabelKey(value); len(errs) > 0 {
+		return field.ErrorList{field.Invalid(fldPath, value, strings.Join(errs, "; "))}
+	}
+	return nil
 }
 
 func validateVisibilityServer(c *configapi.Configuration) field.ErrorList {

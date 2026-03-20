@@ -40,6 +40,7 @@ import (
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/features"
+	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/scheduler/flavorassigner"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/classical"
@@ -47,6 +48,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/fairsharing"
 	"sigs.k8s.io/kueue/pkg/util/expectations"
 	"sigs.k8s.io/kueue/pkg/util/logging"
+	"sigs.k8s.io/kueue/pkg/util/priority"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/util/routine"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -66,6 +68,7 @@ type Preemptor struct {
 
 	enabledAfs             bool
 	roleTracker            *roletracker.RoleTracker
+	customLabels           *metrics.CustomLabels
 	preemptionExpectations *expectations.Store
 }
 
@@ -89,6 +92,7 @@ func New(
 	clock clock.Clock,
 	tracker *roletracker.RoleTracker,
 	preemptionExpectations *expectations.Store,
+	customLabels *metrics.CustomLabels,
 ) *Preemptor {
 	p := &Preemptor{
 		clock:                  clock,
@@ -99,6 +103,7 @@ func New(
 		fsStrategies:           parseStrategies(fs),
 		enabledAfs:             enabledAfs,
 		roleTracker:            tracker,
+		customLabels:           customLabels,
 		preemptionExpectations: preemptionExpectations,
 	}
 	return p
@@ -156,6 +161,13 @@ var HumanReadablePreemptionReasons = map[string]string{
 	"": "UNKNOWN",
 }
 
+func priorityInfo(log logr.Logger, w *kueue.Workload) (effectivePri int64, basePri, boost int32) {
+	basePri = priority.Priority(w)
+	effectivePri = priority.EffectivePriority(log, w)
+	boost = int32(effectivePri - int64(basePri))
+	return effectivePri, basePri, boost
+}
+
 func preemptionMessage(preemptor *kueue.Workload, reason, preemptorPath, preempteePath string) string {
 	wUID := cmp.Or(string(preemptor.UID), "UNKNOWN")
 	uid := preemptor.Labels[constants.JobUIDLabel]
@@ -197,7 +209,7 @@ func (p *Preemptor) IssuePreemptions(ctx context.Context, preemptor *workload.In
 		message := preemptionMessage(preemptor.Obj, target.Reason, preemptorPath, preempteePath)
 		wlCopy := target.WorkloadInfo.Obj.DeepCopy()
 		err := workload.Evict(
-			ctx, p.client, p.recorder, wlCopy, kueue.WorkloadEvictedByPreemption, message, "", p.clock, p.roleTracker,
+			ctx, p.client, p.recorder, wlCopy, kueue.WorkloadEvictedByPreemption, message, "", p.clock, p.roleTracker, p.customLabels,
 			workload.WithCustomPrepare(func(wl *kueue.Workload) {
 				workload.SetPreemptedCondition(wl, p.clock.Now(), target.Reason, message)
 			}),
@@ -209,11 +221,21 @@ func (p *Preemptor) IssuePreemptions(ctx context.Context, preemptor *workload.In
 			preemptionErrors.Add(1)
 			return
 		}
+		preemptorEffPri, preemptorBase, preemptorBoost := priorityInfo(log, preemptor.Obj)
+		targetEffPri, targetBase, targetBoost := priorityInfo(log, target.WorkloadInfo.Obj)
 		log.V(3).Info("Preempted", "targetWorkload", klog.KObj(target.WorkloadInfo.Obj), "preemptingWorkload", klog.KObj(preemptor.Obj), "preemptorUID", string(preemptor.Obj.UID),
 			"preemptorJobUID", preemptor.Obj.Labels[constants.JobUIDLabel], "reason", target.Reason, "message", message, "targetClusterQueue", klog.KRef("", string(target.WorkloadInfo.ClusterQueue)),
-			"preemptorPath", preemptorPath, "preempteePath", preempteePath)
-		p.recorder.Eventf(target.WorkloadInfo.Obj, corev1.EventTypeNormal, "Preempted", message)
-		workload.ReportPreemption(preemptor.ClusterQueue, target.Reason, target.WorkloadInfo.ClusterQueue, p.roleTracker)
+			"preemptorPath", preemptorPath, "preempteePath", preempteePath,
+			"preemptorEffectivePriority", preemptorEffPri, "preemptorBoost", preemptorBoost,
+			"targetEffectivePriority", targetEffPri, "targetBoost", targetBoost)
+		p.recorder.Eventf(target.WorkloadInfo.Obj, corev1.EventTypeNormal, "Preempted", message+
+			fmt.Sprintf("; preemptor effective priority: %d (base: %d, boost: %d); preemptee effective priority: %d (base: %d, boost: %d)",
+				preemptorEffPri, preemptorBase, preemptorBoost, targetEffPri, targetBase, targetBoost))
+		p.recorder.Eventf(preemptor.Obj, corev1.EventTypeNormal, "PreemptedWorkload",
+			"Preempted workload %s (UID: %s) in ClusterQueue %s; preemptor effective priority: %d (base: %d, boost: %d); preemptee effective priority: %d (base: %d, boost: %d)",
+			klog.KObj(target.WorkloadInfo.Obj), target.WorkloadInfo.Obj.UID, target.WorkloadInfo.ClusterQueue,
+			preemptorEffPri, preemptorBase, preemptorBoost, targetEffPri, targetBase, targetBoost)
+		workload.ReportPreemption(preemptor.ClusterQueue, target.Reason, target.WorkloadInfo.ClusterQueue, p.roleTracker, p.customLabels)
 		successfullyPreempted.Add(1)
 	})
 	return int(successfullyPreempted.Load()), int(preemptionErrors.Load()), errCh.ReceiveError()
@@ -427,7 +449,7 @@ func runSecondFsStrategy(retryCandidates []*workload.Info, preemptionCtx *preemp
 }
 
 func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []fairsharing.Strategy) []*Target {
-	candidates := p.findCandidates(preemptionCtx.preemptor.Obj, preemptionCtx.preemptorCQ, preemptionCtx.frsNeedPreemption)
+	candidates := p.findCandidates(preemptionCtx.log, preemptionCtx.preemptor.Obj, preemptionCtx.preemptorCQ, preemptionCtx.frsNeedPreemption)
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -485,10 +507,11 @@ func flavorResourcesNeedPreemption(assignment flavorassigner.Assignment) sets.Se
 	return resPerFlavor
 }
 
-func findCandidatesForPolicy(wl *kueue.Workload, workloadsToFilter map[workload.Reference]*workload.Info, policy kueue.PreemptionPolicy, frsNeedPreemption sets.Set[resources.FlavorResource], workloadOrdering workload.Ordering) []*workload.Info {
+func findCandidatesForPolicy(log logr.Logger, wl *kueue.Workload, workloadsToFilter map[workload.Reference]*workload.Info, policy kueue.PreemptionPolicy, frsNeedPreemption sets.Set[resources.FlavorResource], workloadOrdering workload.Ordering) []*workload.Info {
 	var candidates []*workload.Info
 	for _, candidateWl := range workloadsToFilter {
 		if !preemptioncommon.SatisfiesPreemptionPolicy(
+			log,
 			wl,
 			candidateWl.Obj,
 			workloadOrdering,
@@ -507,11 +530,11 @@ func findCandidatesForPolicy(wl *kueue.Workload, workloadsToFilter map[workload.
 // findCandidates obtains candidates for preemption within the ClusterQueue and
 // cohort that respect the preemption policy and are using a resource that the
 // preempting workload needs.
-func (p *Preemptor) findCandidates(wl *kueue.Workload, cq *schdcache.ClusterQueueSnapshot, frsNeedPreemption sets.Set[resources.FlavorResource]) []*workload.Info {
+func (p *Preemptor) findCandidates(log logr.Logger, wl *kueue.Workload, cq *schdcache.ClusterQueueSnapshot, frsNeedPreemption sets.Set[resources.FlavorResource]) []*workload.Info {
 	var candidates []*workload.Info
 
 	if cq.Preemption.WithinClusterQueue != kueue.PreemptionPolicyNever {
-		newCandidates := findCandidatesForPolicy(wl, cq.Workloads, cq.Preemption.WithinClusterQueue, frsNeedPreemption, p.workloadOrdering)
+		newCandidates := findCandidatesForPolicy(log, wl, cq.Workloads, cq.Preemption.WithinClusterQueue, frsNeedPreemption, p.workloadOrdering)
 		candidates = append(candidates, newCandidates...)
 	}
 
@@ -521,7 +544,7 @@ func (p *Preemptor) findCandidates(wl *kueue.Workload, cq *schdcache.ClusterQueu
 				// Can't reclaim quota from itself or ClusterQueues that are not borrowing.
 				continue
 			}
-			newCandidates := findCandidatesForPolicy(wl, cohortCQ.Workloads, cq.Preemption.ReclaimWithinCohort, frsNeedPreemption, p.workloadOrdering)
+			newCandidates := findCandidatesForPolicy(log, wl, cohortCQ.Workloads, cq.Preemption.ReclaimWithinCohort, frsNeedPreemption, p.workloadOrdering)
 			candidates = append(candidates, newCandidates...)
 		}
 	}

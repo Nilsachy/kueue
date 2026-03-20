@@ -405,6 +405,16 @@ func (w *WorkloadWrapper) NominatedClusterNames(nominatedClusterNames ...string)
 	return w
 }
 
+func (w *WorkloadWrapper) PreemptionGates(preemptionGates ...kueue.PreemptionGate) *WorkloadWrapper {
+	w.Spec.PreemptionGates = preemptionGates
+	return w
+}
+
+func (w *WorkloadWrapper) PreemptionGateStates(preemptionGateStates ...kueue.PreemptionGateState) *WorkloadWrapper {
+	w.Status.PreemptionGates = preemptionGateStates
+	return w
+}
+
 func AppendOwnerReference(obj client.Object, gvk schema.GroupVersionKind, name, uid string, controller, blockDeletion *bool) {
 	obj.SetOwnerReferences(append(obj.GetOwnerReferences(), metav1.OwnerReference{
 		APIVersion:         gvk.GroupVersion().String(),
@@ -838,6 +848,22 @@ func (c *CohortWrapper) FairWeight(w resource.Quantity) *CohortWrapper {
 	return c
 }
 
+func (c *CohortWrapper) Label(k, v string) *CohortWrapper {
+	if c.Labels == nil {
+		c.Labels = make(map[string]string)
+	}
+	c.Labels[k] = v
+	return c
+}
+
+func (c *CohortWrapper) Annotation(k, v string) *CohortWrapper {
+	if c.Annotations == nil {
+		c.Annotations = make(map[string]string)
+	}
+	c.Annotations[k] = v
+	return c
+}
+
 // ClusterQueueWrapper wraps a ClusterQueue.
 type ClusterQueueWrapper struct{ kueue.ClusterQueue }
 
@@ -995,6 +1021,14 @@ func (c *ClusterQueueWrapper) Label(k, v string) *ClusterQueueWrapper {
 		c.Labels = make(map[string]string)
 	}
 	c.Labels[k] = v
+	return c
+}
+
+func (c *ClusterQueueWrapper) Annotation(k, v string) *ClusterQueueWrapper {
+	if c.Annotations == nil {
+		c.Annotations = make(map[string]string)
+	}
+	c.Annotations[k] = v
 	return c
 }
 

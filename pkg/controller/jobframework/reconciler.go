@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -58,6 +60,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/util/equality"
 	"sigs.k8s.io/kueue/pkg/util/kubeversion"
 	utilpriority "sigs.k8s.io/kueue/pkg/util/priority"
+	utilqueue "sigs.k8s.io/kueue/pkg/util/queue"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/util/slices"
 	"sigs.k8s.io/kueue/pkg/util/waitforpodsready"
@@ -94,6 +97,7 @@ type JobReconciler struct {
 	clock                        clock.Clock
 	workloadRetentionPolicy      WorkloadRetentionPolicy
 	roleTracker                  *roletracker.RoleTracker
+	customLabels                 *metrics.CustomLabels
 }
 
 // RoleTracker returns the role tracker for HA logging.
@@ -116,6 +120,7 @@ type Options struct {
 	Clock                        clock.Clock
 	WorkloadRetentionPolicy      WorkloadRetentionPolicy
 	RoleTracker                  *roletracker.RoleTracker
+	CustomLabels                 *metrics.CustomLabels
 	NoopWebhook                  bool
 }
 
@@ -231,6 +236,13 @@ func WithRoleTracker(tracker *roletracker.RoleTracker) Option {
 	}
 }
 
+// WithCustomLabels sets the custom labels for metrics.
+func WithCustomLabels(cl *metrics.CustomLabels) Option {
+	return func(o *Options) {
+		o.CustomLabels = cl
+	}
+}
+
 // WithNoopWebhook sets the integration webhook to noopWebhook.
 // This is needed when the integration is disabled.
 func WithNoopWebhook(noop bool) Option {
@@ -259,6 +271,7 @@ func NewReconciler(
 		clock:                        options.Clock,
 		workloadRetentionPolicy:      options.WorkloadRetentionPolicy,
 		roleTracker:                  options.RoleTracker,
+		customLabels:                 options.CustomLabels,
 	}
 }
 
@@ -472,7 +485,7 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 			if !success {
 				reason = kueue.WorkloadFinishedReasonFailed
 			}
-			err := workload.Finish(ctx, r.client, wl, reason, message, r.clock, r.roleTracker)
+			err := workload.Finish(ctx, r.client, wl, reason, message, r.clock)
 			if err != nil && !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
@@ -543,13 +556,15 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 				cqName := wl.Status.Admission.ClusterQueue
 				priorityClassName := workload.PriorityClassName(wl)
 				queuedUntilReadyWaitTime := workload.QueuedWaitTime(wl, r.clock)
-				metrics.ReadyWaitTime(cqName, priorityClassName, queuedUntilReadyWaitTime, r.roleTracker)
+				metrics.ReadyWaitTime(cqName, priorityClassName, queuedUntilReadyWaitTime, r.customLabels.CQGet(cqName), r.roleTracker)
 				admittedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)
 				admittedUntilReadyWaitTime := condition.LastTransitionTime.Sub(admittedCond.LastTransitionTime.Time)
-				metrics.ReportAdmittedUntilReadyWaitTime(cqName, priorityClassName, admittedUntilReadyWaitTime, r.roleTracker)
+				metrics.ReportAdmittedUntilReadyWaitTime(cqName, priorityClassName, admittedUntilReadyWaitTime, r.customLabels.CQGet(cqName), r.roleTracker)
 				if features.Enabled(features.LocalQueueMetrics) {
-					metrics.LocalQueueReadyWaitTime(metrics.LQRefFromWorkload(wl), priorityClassName, queuedUntilReadyWaitTime, r.roleTracker)
-					metrics.ReportLocalQueueAdmittedUntilReadyWaitTime(metrics.LQRefFromWorkload(wl), priorityClassName, admittedUntilReadyWaitTime, r.roleTracker)
+					lqRef := metrics.LQRefFromWorkload(wl)
+					lqCustomLabels := r.customLabels.LQGet(utilqueue.KeyFromWorkload(wl))
+					metrics.LocalQueueReadyWaitTime(lqRef, priorityClassName, queuedUntilReadyWaitTime, lqCustomLabels, r.roleTracker)
+					metrics.ReportLocalQueueAdmittedUntilReadyWaitTime(lqRef, priorityClassName, admittedUntilReadyWaitTime, lqCustomLabels, r.roleTracker)
 				}
 			}
 			return ctrl.Result{}, nil
@@ -595,7 +610,7 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 				log.Error(err, "Unsuspending job")
 				if podset.IsPermanent(err) {
 					// Mark the workload as finished with failure since the is no point to retry.
-					errUpdateStatus := workload.Finish(ctx, r.client, wl, FailedToStartFinishedReason, err.Error(), r.clock, r.roleTracker)
+					errUpdateStatus := workload.Finish(ctx, r.client, wl, FailedToStartFinishedReason, err.Error(), r.clock)
 					if errUpdateStatus != nil {
 						log.Error(errUpdateStatus, "Updating workload status, on start failure", "err", err)
 					}
@@ -873,10 +888,25 @@ func (r *JobReconciler) ensureOneWorkload(ctx context.Context, job GenericJob, o
 			return nil, fmt.Errorf("failed to retrieve pod sets from job: %w", err)
 		}
 
+		if jobWithCustomAnnotations, ok := job.(JobWithCustomAnnotations); ok {
+			customAnnotations, err := jobWithCustomAnnotations.GetCustomAnnotations(ctx, r.client, podSets)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get custom annotations based on pod sets from job %s: %w", job.Object().GetName(), err)
+			}
+			if newAnnotations, updated := mergeAnnotations(job, customAnnotations); updated {
+				if err := clientutil.Patch(ctx, r.client, object, func() (bool, error) {
+					job.Object().SetAnnotations(newAnnotations)
+					return true, nil
+				}); err != nil {
+					return nil, fmt.Errorf("failed to update custom annotations on job %s: %w", job.Object().GetName(), err)
+				}
+			}
+		}
+
 		// Workload slices allow modifications only to PodSet.Count.
 		// Any other changes will result in the slice being marked as incompatible,
 		// and the workload will fall back to being processed by the original ensureOneWorkload function.
-		wl, compatible, err := workloadslicing.EnsureWorkloadSlices(ctx, r.client, r.clock, podSets, object, job.GVK(), r.roleTracker)
+		wl, compatible, err := workloadslicing.EnsureWorkloadSlices(ctx, r.client, r.clock, podSets, object, job.GVK())
 		if err != nil {
 			return nil, err
 		}
@@ -967,12 +997,77 @@ func (r *JobReconciler) ensureOneWorkload(ctx context.Context, job GenericJob, o
 	}
 
 	if match != nil {
+		if features.Enabled(features.AdmissionGatedBy) {
+			if err := UpdateAdmissionGatedBy(ctx, r.client, r.record, job.Object(), match); err != nil {
+				return nil, err
+			}
+		}
+
 		if err := UpdateWorkloadPriority(ctx, r.client, r.record, job.Object(), match, getCustomPriorityClassFuncFromJob(job)); err != nil {
 			return nil, err
 		}
 	}
 
 	return match, nil
+}
+
+// UpdateAdmissionGatedBy propagates the AdmissionGatedBy annotation from the job object
+// to its associated workload. Emits an event only if the annotation was actually changed
+// and the update succeeded.
+// The function returnes immediately if the AdmissionGatedBy feature is not enabled.
+func UpdateAdmissionGatedBy(ctx context.Context, c client.Client, r record.EventRecorder, obj client.Object, wl *kueue.Workload) error {
+	if !features.Enabled(features.AdmissionGatedBy) {
+		return nil
+	}
+
+	var propagated bool
+	if err := clientutil.Patch(ctx, c, wl, func() (bool, error) {
+		propagated = PropagateAdmissionGatedByAnnotation(obj, wl)
+		return propagated, nil
+	}); err != nil {
+		return fmt.Errorf("updating the AdmissionGatedBy of existing workload: %w", err)
+	}
+
+	if propagated {
+		r.Eventf(obj,
+			corev1.EventTypeNormal, ReasonUpdatedWorkload,
+			"Updated workload AdmissionGatedBy to %q", obj.GetAnnotations()[constants.AdmissionGatedByAnnotation],
+		)
+	}
+
+	return nil
+}
+
+// PropagateAdmissionGatedByAnnotation copies the AdmissionGatedBy annotation from the given object to
+// workload object but only in memory. It does not persist the changes to the API server.
+func PropagateAdmissionGatedByAnnotation(obj client.Object, wl *kueue.Workload) bool {
+	if !features.Enabled(features.AdmissionGatedBy) {
+		return false
+	}
+
+	jobGateValue := ""
+	if val, exists := obj.GetAnnotations()[constants.AdmissionGatedByAnnotation]; exists {
+		jobGateValue = val
+	}
+
+	wlGateValue := ""
+	if val, exists := wl.Annotations[constants.AdmissionGatedByAnnotation]; exists {
+		wlGateValue = val
+	}
+
+	if jobGateValue != wlGateValue {
+		if wl.Annotations == nil {
+			wl.Annotations = make(map[string]string)
+		}
+		if jobGateValue == "" {
+			delete(wl.Annotations, constants.AdmissionGatedByAnnotation)
+		} else {
+			wl.Annotations[constants.AdmissionGatedByAnnotation] = jobGateValue
+		}
+		return true
+	}
+
+	return false
 }
 
 // UpdateWorkloadPriority updates workload priority if object's kueue.x-k8s.io/priority-class label changed.
@@ -1026,7 +1121,7 @@ func EnsurePrebuiltWorkloadOwnership(ctx context.Context, c client.Client, wl *k
 			return err
 		}
 
-		if errs := validation.IsValidLabelValue(string(object.GetUID())); len(errs) == 0 {
+		if errs := content.IsLabelValue(string(object.GetUID())); len(errs) == 0 {
 			if wl.Labels == nil {
 				wl.Labels = make(map[string]string, 1)
 			}
@@ -1058,7 +1153,7 @@ func (r *JobReconciler) ensurePrebuiltWorkloadInSync(ctx context.Context, wl *ku
 		}
 		// mark the workload as finished
 		msg := "The prebuilt workload is out of sync with its user job"
-		return false, workload.Finish(ctx, r.client, wl, kueue.WorkloadFinishedReasonOutOfSync, msg, r.clock, r.roleTracker)
+		return false, workload.Finish(ctx, r.client, wl, kueue.WorkloadFinishedReasonOutOfSync, msg, r.clock)
 	}
 	return true, nil
 }
@@ -1282,7 +1377,7 @@ func ConstructWorkload(ctx context.Context, c client.Client, job GenericJob, lab
 		wl.Labels = make(map[string]string)
 	}
 	jobUID := string(job.Object().GetUID())
-	if errs := validation.IsValidLabelValue(jobUID); len(errs) == 0 {
+	if errs := content.IsLabelValue(jobUID); len(errs) == 0 {
 		wl.Labels[controllerconsts.JobUIDLabel] = jobUID
 	} else {
 		log.V(2).Info(
@@ -1356,10 +1451,15 @@ func PrepareWorkloadPriority(ctx context.Context, c client.Client, obj client.Ob
 	return nil
 }
 
-// prepareWorkload adds the priority information for the constructed workload
+// prepareWorkload adds the priority information for the constructed workload and
+// the AdmissionGatedBy annotation when the feature is on.
 // active is used to set the active field of the workload. If active is nil, the workload will be set to active by default.
 // for the existing workload, the original active status should be retained.
 func (r *JobReconciler) prepareWorkload(ctx context.Context, job GenericJob, wl *kueue.Workload, active *bool) error {
+	if features.Enabled(features.AdmissionGatedBy) {
+		PropagateAdmissionGatedByAnnotation(job.Object(), wl)
+	}
+
 	if err := PrepareWorkloadPriority(ctx, r.client, job.Object(), wl, getCustomPriorityClassFuncFromJob(job)); err != nil {
 		return err
 	}
@@ -1633,4 +1733,32 @@ func WorkloadSliceEnabled(job GenericJob) bool {
 		return false
 	}
 	return workloadslicing.Enabled(jobObject)
+}
+
+// mergeAnnotations merges customAnnotations into the job's existing annotations.
+// It returns a new merged annotation map and true only if there are effective changes to apply.
+// The job's existing annotations are not modified.
+func mergeAnnotations(job GenericJob, customAnnotations map[string]string) (map[string]string, bool) {
+	if len(customAnnotations) == 0 {
+		return nil, false
+	}
+
+	existing := job.Object().GetAnnotations()
+
+	var merged map[string]string
+	changed := false
+
+	for k, v := range customAnnotations {
+		if cur, ok := existing[k]; !ok || cur != v {
+			if !changed {
+				merged = maps.Clone(existing)
+				if merged == nil {
+					merged = make(map[string]string)
+				}
+				changed = true
+			}
+			merged[k] = v
+		}
+	}
+	return merged, changed
 }

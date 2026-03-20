@@ -2429,7 +2429,8 @@ func TestWorkloadPriorityClassChanged(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			gotChanged := PriorityChanged(tc.oldWorkload, tc.newWorkload)
+			_, log := utiltesting.ContextWithLog(t)
+			gotChanged := PriorityChanged(log, tc.oldWorkload, tc.newWorkload)
 			if gotChanged != tc.wantChanged {
 				t.Errorf("workloadPriorityChanged() = %v, want %v", gotChanged, tc.wantChanged)
 			}
@@ -2524,7 +2525,7 @@ func TestFinish(t *testing.T) {
 
 			fakeClock := testingclock.NewFakeClock(now)
 
-			gotErr := Finish(ctx, cl, tc.args.wl, tc.args.reason, tc.args.message, fakeClock, nil)
+			gotErr := Finish(ctx, cl, tc.args.wl, tc.args.reason, tc.args.message, fakeClock)
 			if diff := cmp.Diff(tc.want.err, gotErr, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("Unexpected error (-want,+got):\n%s", diff)
 			}
@@ -2571,9 +2572,10 @@ func TestGetLocalQueueFromWorkload(t *testing.T) {
 
 func TestSchedulingHash(t *testing.T) {
 	cases := map[string]struct {
-		wl1      *kueue.Workload
-		wl2      *kueue.Workload
-		wantSame bool
+		wl1          *kueue.Workload
+		wl2          *kueue.Workload
+		wantSame     bool
+		featureGates map[featuregate.Feature]bool
 	}{
 		"same spec different identity produces same hash": {
 			wl1: utiltestingapi.MakeWorkload("wl1", "ns1").
@@ -2582,14 +2584,16 @@ func TestSchedulingHash(t *testing.T) {
 			wl2: utiltestingapi.MakeWorkload("wl2", "ns2").
 				Request(corev1.ResourceCPU, "2").
 				Request(corev1.ResourceMemory, "1Gi").Obj(),
-			wantSame: true,
+			wantSame:     true,
+			featureGates: map[featuregate.Feature]bool{features.SchedulingEquivalenceHashing: true},
 		},
 		"different resource requests": {
 			wl1: utiltestingapi.MakeWorkload("wl1", "ns").
 				Request(corev1.ResourceCPU, "1").Obj(),
 			wl2: utiltestingapi.MakeWorkload("wl2", "ns").
 				Request(corev1.ResourceCPU, "2").Obj(),
-			wantSame: false,
+			wantSame:     false,
+			featureGates: map[featuregate.Feature]bool{features.SchedulingEquivalenceHashing: true},
 		},
 		"different pod counts": {
 			wl1: utiltestingapi.MakeWorkload("wl1", "ns").
@@ -2598,7 +2602,8 @@ func TestSchedulingHash(t *testing.T) {
 			wl2: utiltestingapi.MakeWorkload("wl2", "ns").
 				PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 5).
 					Request(corev1.ResourceCPU, "1").Obj()).Obj(),
-			wantSame: false,
+			wantSame:     false,
+			featureGates: map[featuregate.Feature]bool{features.SchedulingEquivalenceHashing: true},
 		},
 		"different workload priorities": {
 			wl1: utiltestingapi.MakeWorkload("wl1", "ns").
@@ -2607,11 +2612,32 @@ func TestSchedulingHash(t *testing.T) {
 			wl2: utiltestingapi.MakeWorkload("wl2", "ns").
 				Priority(200).
 				Request(corev1.ResourceCPU, "1").Obj(),
+			wantSame:     false,
+			featureGates: map[featuregate.Feature]bool{features.SchedulingEquivalenceHashing: true},
+		},
+		"same raw priority but different effective priority": {
+			wl1: func() *kueue.Workload {
+				wl := utiltestingapi.MakeWorkload("wl1", "ns").
+					Priority(100).
+					Request(corev1.ResourceCPU, "1").Obj()
+				wl.Annotations = map[string]string{"kueue.x-k8s.io/priority-boost": "10"}
+				return wl
+			}(),
+			wl2: utiltestingapi.MakeWorkload("wl2", "ns").
+				Priority(100).
+				Request(corev1.ResourceCPU, "1").Obj(),
 			wantSame: false,
+			featureGates: map[featuregate.Feature]bool{
+				features.SchedulingEquivalenceHashing: true,
+				features.PriorityBoost:                true,
+			},
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			for fg, enable := range tc.featureGates {
+				features.SetFeatureGateDuringTest(t, fg, enable)
+			}
 			info1 := NewInfo(tc.wl1)
 			info1.UpdateSchedulingHash(logr.Discard())
 			info2 := NewInfo(tc.wl2)
@@ -2624,6 +2650,250 @@ func TestSchedulingHash(t *testing.T) {
 			}
 			if !tc.wantSame && info1.SchedulingHash == info2.SchedulingHash {
 				t.Errorf("expected different hashes, got same %q", info1.SchedulingHash)
+			}
+		})
+	}
+}
+
+func TestUsedNodes(t *testing.T) {
+	cases := map[string]struct {
+		wl   *kueue.Workload
+		want []string
+	}{
+		"unadmitted workload": {
+			wl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Admission: nil,
+				},
+			},
+			want: nil,
+		},
+		"tas admission present but lacking admitted condition": {
+			wl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{{Type: kueue.WorkloadAdmitted, Status: metav1.ConditionFalse}},
+					Admission: &kueue.Admission{
+						PodSetAssignments: []kueue.PodSetAssignment{
+							{
+								TopologyAssignment: &kueue.TopologyAssignment{
+									Levels: []string{"zone", corev1.LabelHostname},
+									Slices: []kueue.TopologyAssignmentSlice{
+										{
+											DomainCount: 1,
+											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
+												{Universal: ptr.To("zone-1")},
+												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
+													Roots: []string{"node-1"},
+												}},
+											},
+											PodCounts: kueue.TopologyAssignmentSlicePodCounts{
+												Universal: ptr.To[int32](1),
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+		"quota reserved but waiting for admission check": {
+			wl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{{Type: kueue.WorkloadQuotaReserved, Status: metav1.ConditionTrue}},
+					Admission: &kueue.Admission{
+						PodSetAssignments: []kueue.PodSetAssignment{
+							{
+								TopologyAssignment: &kueue.TopologyAssignment{
+									Levels: []string{"zone", corev1.LabelHostname},
+									Slices: []kueue.TopologyAssignmentSlice{
+										{
+											DomainCount: 1,
+											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
+												{Universal: ptr.To("zone-1")},
+												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
+													Roots: []string{"node-1"},
+												}},
+											},
+											PodCounts: kueue.TopologyAssignmentSlicePodCounts{
+												Universal: ptr.To[int32](1),
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+		"admitted without tas": {
+			wl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{{Type: kueue.WorkloadAdmitted, Status: metav1.ConditionTrue}},
+					Admission: &kueue.Admission{
+						PodSetAssignments: []kueue.PodSetAssignment{{Name: "main"}},
+					},
+				},
+			},
+			want: nil,
+		},
+		"valid tas assignment": {
+			wl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{{Type: kueue.WorkloadAdmitted, Status: metav1.ConditionTrue}},
+					Admission: &kueue.Admission{
+						PodSetAssignments: []kueue.PodSetAssignment{
+							{
+								TopologyAssignment: &kueue.TopologyAssignment{
+									Levels: []string{"zone", corev1.LabelHostname},
+									Slices: []kueue.TopologyAssignmentSlice{
+										{
+											DomainCount: 2,
+											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
+												{Universal: ptr.To("zone-1")},
+												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
+													Roots: []string{"node-1", "node-2"},
+												}},
+											},
+											PodCounts: kueue.TopologyAssignmentSlicePodCounts{
+												Universal: ptr.To[int32](1),
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: []string{"node-1", "node-2"},
+		},
+		"duplicate node assignments across pod sets": {
+			wl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{{Type: kueue.WorkloadAdmitted, Status: metav1.ConditionTrue}},
+					Admission: &kueue.Admission{
+						PodSetAssignments: []kueue.PodSetAssignment{
+							{
+								TopologyAssignment: &kueue.TopologyAssignment{
+									Levels: []string{"zone", corev1.LabelHostname},
+									Slices: []kueue.TopologyAssignmentSlice{
+										{
+											DomainCount: 1,
+											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
+												{Universal: ptr.To("zone-1")},
+												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
+													Roots: []string{"node-1"},
+												}},
+											},
+											PodCounts: kueue.TopologyAssignmentSlicePodCounts{
+												Universal: ptr.To[int32](1),
+											},
+										},
+									},
+								},
+							},
+							{
+								TopologyAssignment: &kueue.TopologyAssignment{
+									Levels: []string{"zone", corev1.LabelHostname},
+									Slices: []kueue.TopologyAssignmentSlice{
+										{
+											DomainCount: 2,
+											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
+												{Universal: ptr.To("zone-1")},
+												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
+													Roots: []string{"node-1", "node-2"},
+												}},
+											},
+											PodCounts: kueue.TopologyAssignmentSlicePodCounts{
+												Universal: ptr.To[int32](1),
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: []string{"node-1", "node-2"},
+		},
+		"mixed tas and non-tas pod sets": {
+			wl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{{Type: kueue.WorkloadAdmitted, Status: metav1.ConditionTrue}},
+					Admission: &kueue.Admission{
+						PodSetAssignments: []kueue.PodSetAssignment{
+							{
+								TopologyAssignment: &kueue.TopologyAssignment{
+									Levels: []string{"zone", corev1.LabelHostname},
+									Slices: []kueue.TopologyAssignmentSlice{
+										{
+											DomainCount: 1,
+											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
+												{Universal: ptr.To("zone-1")},
+												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
+													Roots: []string{"node-1"},
+												}},
+											},
+											PodCounts: kueue.TopologyAssignmentSlicePodCounts{
+												Universal: ptr.To[int32](1),
+											},
+										},
+									},
+								},
+							},
+							{
+								Name: "non-tas-podset",
+							},
+						},
+					},
+				},
+			},
+			want: []string{"node-1"},
+		},
+		"non-hostname topology": {
+			wl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{{Type: kueue.WorkloadAdmitted, Status: metav1.ConditionTrue}},
+					Admission: &kueue.Admission{
+						PodSetAssignments: []kueue.PodSetAssignment{
+							{
+								TopologyAssignment: &kueue.TopologyAssignment{
+									Levels: []string{"zone", "rack"},
+									Slices: []kueue.TopologyAssignmentSlice{
+										{
+											DomainCount: 1,
+											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
+												{Universal: ptr.To("zone-1")},
+												{Universal: ptr.To("rack-1")},
+											},
+											PodCounts: kueue.TopologyAssignmentSlicePodCounts{
+												Universal: ptr.To[int32](1),
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
+	}
+
+	sortStrings := cmpopts.SortSlices(func(a, b string) bool { return a < b })
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := TASAssignedNodeNames(tc.wl)
+			if diff := cmp.Diff(tc.want, got, cmpopts.EquateEmpty(), sortStrings); diff != "" {
+				t.Errorf("Unexpected nodes (-want +got):\n%s", diff)
 			}
 		})
 	}

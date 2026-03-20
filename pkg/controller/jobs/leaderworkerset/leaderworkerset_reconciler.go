@@ -144,6 +144,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	eg.Go(func() error {
 		return parallelize.Until(ctx, len(toUpdate), func(i int) error {
+			if features.Enabled(features.AdmissionGatedBy) {
+				if err := jobframework.UpdateAdmissionGatedBy(ctx, r.client, r.record, lws, toUpdate[i]); err != nil {
+					return err
+				}
+			}
+
 			return jobframework.UpdateWorkloadPriority(ctx, r.client, r.record, lws, toUpdate[i], nil)
 		})
 	})
@@ -246,6 +252,11 @@ func (r *Reconciler) constructWorkload(lws *leaderworkersetv1.LeaderWorkerSet, w
 	}
 	createdWorkload := podcontroller.NewGroupWorkload(workloadName, lws, podSets, r.labelKeysToCopy)
 
+	if createdWorkload.Labels == nil {
+		createdWorkload.Labels = make(map[string]string, 1)
+	}
+	createdWorkload.Labels[constants.JobUIDLabel] = string(lws.UID)
+
 	// Add job owner annotations for reliable MultiKueue adapter lookup.
 	// These annotations persist even after Kubernetes GC removes owner references.
 	if createdWorkload.Annotations == nil {
@@ -254,6 +265,10 @@ func (r *Reconciler) constructWorkload(lws *leaderworkersetv1.LeaderWorkerSet, w
 	createdWorkload.Annotations[constants.JobOwnerGVKAnnotation] = gvk.String()
 	createdWorkload.Annotations[constants.JobOwnerNameAnnotation] = lws.Name
 	createdWorkload.Annotations[constants.ComponentWorkloadIndexAnnotation] = strconv.Itoa(index)
+
+	if features.Enabled(features.AdmissionGatedBy) {
+		jobframework.PropagateAdmissionGatedByAnnotation(lws, createdWorkload)
+	}
 
 	if err := controllerutil.SetOwnerReference(lws, createdWorkload, r.client.Scheme()); err != nil {
 		return nil, err

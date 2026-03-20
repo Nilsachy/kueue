@@ -17,7 +17,7 @@ limitations under the License.
 package queue
 
 import (
-	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -347,11 +347,11 @@ func Test_AddFromLocalQueue(t *testing.T) {
 		},
 	}
 	cq.PushOrUpdate(workload.NewInfo(wl))
-	if added := cq.AddFromLocalQueue(queue, nil); added {
+	if added := cq.AddFromLocalQueue(queue, nil, nil); added {
 		t.Error("expected workload not to be added")
 	}
 	cq.Delete(log, workload.Key(wl))
-	if added := cq.AddFromLocalQueue(queue, nil); !added {
+	if added := cq.AddFromLocalQueue(queue, nil, nil); !added {
 		t.Error("workload should be added to the ClusterQueue")
 	}
 }
@@ -412,6 +412,71 @@ func TestSnapshotDeterministicOrder(t *testing.T) {
 	}
 }
 
+func TestSnapshotStableWithConcurrentFSUpdates(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+
+	builder := utiltesting.NewClientBuilder().WithObjects(
+		utiltestingapi.MakeLocalQueue("lq1", defaultNamespace).
+			FairSharing(&kueue.FairSharing{Weight: ptr.To(resource.MustParse("1"))}).Obj(),
+		utiltestingapi.MakeLocalQueue("lq2", defaultNamespace).
+			FairSharing(&kueue.FairSharing{Weight: ptr.To(resource.MustParse("1"))}).Obj(),
+	)
+
+	afsConsumedResources := queueafs.NewAfsConsumedResources()
+	afsConsumedResources.Set("default/lq1", corev1.ResourceList{resourceGPU: resource.MustParse("5")}, now)
+	afsConsumedResources.Set("default/lq2", corev1.ResourceList{resourceGPU: resource.MustParse("5")}, now)
+
+	penaltyMap := queueafs.NewPenaltyMap()
+	ctx, _ := utiltesting.ContextWithLog(t)
+	cq, err := newClusterQueue(ctx, builder.Build(),
+		utiltestingapi.MakeClusterQueue("cq").AdmissionMode(kueue.UsageBasedAdmissionFairSharing).Obj(),
+		defaultOrdering,
+		&config.AdmissionFairSharing{ResourceWeights: map[corev1.ResourceName]float64{resourceGPU: 1.0}},
+		penaltyMap, afsConsumedResources)
+	if err != nil {
+		t.Fatalf("failed to create ClusterQueue: %v", err)
+	}
+
+	for _, w := range []*kueue.Workload{
+		utiltestingapi.MakeWorkload("wl1", defaultNamespace).Queue("lq1").Creation(now).UID("uid-1").Obj(),
+		utiltestingapi.MakeWorkload("wl2", defaultNamespace).Queue("lq2").Creation(now).UID("uid-2").Obj(),
+		utiltestingapi.MakeWorkload("wl3", defaultNamespace).Queue("lq1").Creation(now).UID("uid-3").Obj(),
+		utiltestingapi.MakeWorkload("wl4", defaultNamespace).Queue("lq2").Creation(now).UID("uid-4").Obj(),
+	} {
+		cq.PushOrUpdate(workload.NewInfo(w))
+	}
+
+	// Toggle lq1 penalty between 0 and 100 to create mid-sort inconsistency.
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				penaltyMap.Push("default/lq1", corev1.ResourceList{resourceGPU: resource.MustParse("100")})
+				penaltyMap.Sub("default/lq1", corev1.ResourceList{resourceGPU: resource.MustParse("100")})
+			}
+		}
+	}()
+	defer close(stop)
+
+	// Each snapshot must match one of two valid orderings:
+	// equal usage (by UID) or lq1 penalized (lq2 first).
+	validA := []string{"lq1", "lq2", "lq1", "lq2"}
+	validB := []string{"lq2", "lq2", "lq1", "lq1"}
+	for i := range 1000 {
+		snap := cq.Snapshot()
+		got := make([]string, len(snap))
+		for j, wInfo := range snap {
+			got[j] = string(wInfo.Obj.Spec.QueueName)
+		}
+		if !slices.Equal(got, validA) && !slices.Equal(got, validB) {
+			t.Fatalf("call %d: invalid ordering %v (expected %v or %v)", i+1, got, validA, validB)
+		}
+	}
+}
+
 func Test_DeleteFromLocalQueue(t *testing.T) {
 	ctx, log := utiltesting.ContextWithLog(t)
 	cq := newClusterQueueImpl(ctx, nil, defaultOrdering, testingclock.NewFakeClock(time.Now()))
@@ -444,7 +509,7 @@ func Test_DeleteFromLocalQueue(t *testing.T) {
 		t.Errorf("clusterQueue's workload number in inadmissibleWorkloads not right, want %v, got %v", len(inadmissibleWorkloads), cq.inadmissibleWorkloads.len())
 	}
 
-	cq.DeleteFromLocalQueue(log, qImpl, nil)
+	cq.DeleteFromLocalQueue(log, qImpl, nil, nil)
 	if cq.PendingTotal() != 0 {
 		t.Error("clusterQueue should be empty")
 	}
@@ -1204,14 +1269,13 @@ func TestFsAdmission(t *testing.T) {
 				builder = builder.WithObjects(&lq)
 			}
 			client := builder.Build()
-			ctx := context.Background()
 
 			afsConsumedResources := queueafs.NewAfsConsumedResources()
 			for lqKey, consumedResources := range tc.initConsumedResources {
 				afsConsumedResources.Set(utilqueue.LocalQueueReference(lqKey), consumedResources, time.Now())
 			}
 
-			cq, _ := newClusterQueue(ctx, client, tc.cq, defaultOrdering, tc.afsConfig, nil, afsConsumedResources)
+			cq, _ := newClusterQueue(t.Context(), client, tc.cq, defaultOrdering, tc.afsConfig, nil, afsConsumedResources)
 			for _, wl := range tc.wls {
 				cq.PushOrUpdate(workload.NewInfo(&wl))
 			}
