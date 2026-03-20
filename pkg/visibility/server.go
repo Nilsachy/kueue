@@ -104,7 +104,7 @@ func applyVisibilityServerOptions(config *genericapiserver.RecommendedConfig, cf
 		visibilityv1beta1.SchemeGroupVersion,
 	))
 	o.Etcd = nil
-	o.SecureServing.BindPort = 8082
+	o.SecureServing.BindPort = configapi.DefaultVisibilityBindPort
 	if cfg.InternalCertManagement != nil && *cfg.InternalCertManagement.Enable {
 		// The directory where TLS certs will be created
 		o.SecureServing.ServerCert.CertDirectory = certDir
