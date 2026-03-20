@@ -130,7 +130,7 @@ func main() {
 	flag.StringVar(&featureGates, "feature-gates", "", "A set of key=value pairs that describe feature gates for alpha/experimental features.")
 
 	var visibilityServerPort int
-	flag.IntVar(&visibilityServerPort, "visibility-server-port", 8082, "The port the visibility server binds to.")
+	flag.IntVar(&visibilityServerPort, "visibility-server-port", configapi.DefaultVisibilityBindPort, "The port the visibility server binds to.")
 
 	customLogProcessor := zaplog.WrapCore(utillogging.NewCustomLogProcessor)
 

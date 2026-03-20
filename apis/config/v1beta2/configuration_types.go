@@ -625,6 +625,7 @@ type WorkloadRetentionPolicy struct {
 
 type VisibilityServerConfiguration struct {
 	// BindAddress is the IP address the visibility server listens on.
+	// Defaults to 0.0.0.0 (all network interfaces).
 	// +optional
 	BindAddress *string `json:"bindAddress,omitempty"`
 

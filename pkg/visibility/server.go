@@ -112,18 +112,16 @@ func applyVisibilityServerOptions(config *genericapiserver.RecommendedConfig, cf
 		o.SecureServing.ServerCert.CertKey.KeyFile = certDir + "/tls.key"
 	}
 
-	// Apply visibility overrides from Configuration API if present
-	if cfg.VisibilityServer != nil {
-		if cfg.VisibilityServer.BindPort != nil {
-			o.SecureServing.BindPort = int(*cfg.VisibilityServer.BindPort)
-		} else {
-			o.SecureServing.BindPort = port
-		}
-		if cfg.VisibilityServer.BindAddress != nil && *cfg.VisibilityServer.BindAddress != "" {
-			o.SecureServing.BindAddress = net.ParseIP(*cfg.VisibilityServer.BindAddress)
-		}
+	// Apply visibility overrides from Configuration API if present and non-default.
+	// If the API value is non-default, it takes precedence.
+	// Otherwise, use the flag.
+	if cfg.VisibilityServer.BindPort != nil && *cfg.VisibilityServer.BindPort != configapi.DefaultVisibilityBindPort {
+		o.SecureServing.BindPort = int(*cfg.VisibilityServer.BindPort)
 	} else {
 		o.SecureServing.BindPort = port
+	}
+	if cfg.VisibilityServer.BindAddress != nil {
+		o.SecureServing.BindAddress = net.ParseIP(*cfg.VisibilityServer.BindAddress)
 	}
 
 	if f := flag.Lookup("kubeconfig"); f != nil {

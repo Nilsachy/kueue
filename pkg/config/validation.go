@@ -573,7 +573,7 @@ func validateTLS(c *configapi.Configuration) field.ErrorList {
 
 func validateVisibilityServer(c *configapi.Configuration) field.ErrorList {
 	var allErrs field.ErrorList
-	if c.VisibilityServer == nil || c.VisibilityServer.BindAddress == nil || *c.VisibilityServer.BindAddress == "" {
+	if c.VisibilityServer == nil || c.VisibilityServer.BindAddress == nil {
 		return allErrs
 	}
 	if net.ParseIP(*c.VisibilityServer.BindAddress) == nil {
