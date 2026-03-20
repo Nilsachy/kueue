@@ -983,6 +983,28 @@ func TestValidate(t *testing.T) {
 				},
 			},
 		},
+		"invalid .visibilityServer.bindPort": {
+			cfg: &configapi.Configuration{
+				Integrations: defaultIntegrations,
+				VisibilityServer: &configapi.VisibilityServerConfiguration{
+					BindPort: ptr.To[int32](0),
+				},
+			},
+			wantErr: field.ErrorList{
+				&field.Error{
+					Type:  field.ErrorTypeInvalid,
+					Field: "visibilityServer.bindPort",
+				},
+			},
+		},
+		"valid .visibilityServer.bindPort": {
+			cfg: &configapi.Configuration{
+				Integrations: defaultIntegrations,
+				VisibilityServer: &configapi.VisibilityServerConfiguration{
+					BindPort: ptr.To[int32](8080),
+				},
+			},
+		},
 	}
 
 	for name, tc := range testCases {

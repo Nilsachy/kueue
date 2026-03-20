@@ -68,6 +68,7 @@ var (
 	tlsPath                                      = field.NewPath("tls")
 	featureGatesPath                             = field.NewPath("featureGates")
 	visibilityServerBindAddressPath              = field.NewPath("visibilityServer", "bindAddress")
+	visibilityServerBindPortPath                 = field.NewPath("visibilityServer", "bindPort")
 	customLabelsPath                             = field.NewPath("metrics", "customLabels")
 )
 
@@ -573,11 +574,19 @@ func validateTLS(c *configapi.Configuration) field.ErrorList {
 
 func validateVisibilityServer(c *configapi.Configuration) field.ErrorList {
 	var allErrs field.ErrorList
-	if c.VisibilityServer == nil || c.VisibilityServer.BindAddress == nil {
+	if c.VisibilityServer == nil {
 		return allErrs
 	}
-	if net.ParseIP(*c.VisibilityServer.BindAddress) == nil {
-		allErrs = append(allErrs, field.Invalid(visibilityServerBindAddressPath, *c.VisibilityServer.BindAddress, "must be a valid IP address"))
+	if c.VisibilityServer.BindAddress != nil {
+		if net.ParseIP(*c.VisibilityServer.BindAddress) == nil {
+			allErrs = append(allErrs, field.Invalid(visibilityServerBindAddressPath, *c.VisibilityServer.BindAddress, "must be a valid IP address"))
+		}
+	}
+	if c.VisibilityServer.BindPort != nil {
+		port := *c.VisibilityServer.BindPort
+		if port < 1 || port > 65535 {
+			allErrs = append(allErrs, field.Invalid(visibilityServerBindPortPath, port, "must be a valid port number (1-65535)"))
+		}
 	}
 	return allErrs
 }
