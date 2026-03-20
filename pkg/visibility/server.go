@@ -76,9 +76,9 @@ func init() {
 // +kubebuilder:rbac:groups=flowcontrol.apiserver.k8s.io,resources=flowschemas/status,verbs=patch
 
 // CreateAndStartVisibilityServer creates a visibility server injecting KueueManager and starts it
-func CreateAndStartVisibilityServer(ctx context.Context, kueueMgr *qcache.Manager, cfg *configapi.Configuration, kubeConfig *rest.Config, port int, tlsOpts *tlsconfig.TLS) error {
+func CreateAndStartVisibilityServer(ctx context.Context, kueueMgr *qcache.Manager, cfg *configapi.Configuration, kubeConfig *rest.Config, tlsOpts *tlsconfig.TLS) error {
 	config := newVisibilityServerConfig(kubeConfig)
-	if err := applyVisibilityServerOptions(config, cfg, port, tlsOpts); err != nil {
+	if err := applyVisibilityServerOptions(config, cfg, tlsOpts); err != nil {
 		return fmt.Errorf("unable to apply VisibilityServerOptions: %w", err)
 	}
 
@@ -98,12 +98,13 @@ func CreateAndStartVisibilityServer(ctx context.Context, kueueMgr *qcache.Manage
 	return nil
 }
 
-func applyVisibilityServerOptions(config *genericapiserver.RecommendedConfig, cfg *configapi.Configuration, port int, tlsOpts *tlsconfig.TLS) error {
+func applyVisibilityServerOptions(config *genericapiserver.RecommendedConfig, cfg *configapi.Configuration, tlsOpts *tlsconfig.TLS) error {
 	o := genericoptions.NewRecommendedOptions("", codecs.LegacyCodec(
 		visibilityv1beta2.SchemeGroupVersion,
 		visibilityv1beta1.SchemeGroupVersion,
 	))
 	o.Etcd = nil
+	o.SecureServing.BindPort = 8082
 	if cfg.InternalCertManagement != nil && *cfg.InternalCertManagement.Enable {
 		// The directory where TLS certs will be created
 		o.SecureServing.ServerCert.CertDirectory = certDir
@@ -116,14 +117,10 @@ func applyVisibilityServerOptions(config *genericapiserver.RecommendedConfig, cf
 	if cfg.VisibilityServer != nil {
 		if cfg.VisibilityServer.BindPort != nil {
 			o.SecureServing.BindPort = int(*cfg.VisibilityServer.BindPort)
-		} else {
-			o.SecureServing.BindPort = port
 		}
 		if cfg.VisibilityServer.BindAddress != nil && *cfg.VisibilityServer.BindAddress != "" {
 			o.SecureServing.BindAddress = net.ParseIP(*cfg.VisibilityServer.BindAddress)
 		}
-	} else {
-		o.SecureServing.BindPort = port
 	}
 
 	if f := flag.Lookup("kubeconfig"); f != nil {
