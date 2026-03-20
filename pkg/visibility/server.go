@@ -104,8 +104,15 @@ func applyVisibilityServerOptions(config *genericapiserver.RecommendedConfig, cf
 		visibilityv1beta1.SchemeGroupVersion,
 	))
 	o.Etcd = nil
-  o.SecureServing.BindPort = port
-  
+	o.SecureServing.BindPort = port
+	if cfg.InternalCertManagement != nil && *cfg.InternalCertManagement.Enable {
+		// The directory where TLS certs will be created
+		o.SecureServing.ServerCert.CertDirectory = certDir
+	} else {
+		o.SecureServing.ServerCert.CertKey.CertFile = certDir + "/tls.crt"
+		o.SecureServing.ServerCert.CertKey.KeyFile = certDir + "/tls.key"
+	}
+
 	// Apply visibility overrides from Configuration API if present
 	if cfg.VisibilityServer != nil {
 		if cfg.VisibilityServer.BindPort != nil {
@@ -114,14 +121,6 @@ func applyVisibilityServerOptions(config *genericapiserver.RecommendedConfig, cf
 		if cfg.VisibilityServer.BindAddress != nil && *cfg.VisibilityServer.BindAddress != "" {
 			o.SecureServing.BindAddress = net.ParseIP(*cfg.VisibilityServer.BindAddress)
 		}
-	}
-
-	if cfg.InternalCertManagement != nil && *cfg.InternalCertManagement.Enable {
-		// The directory where TLS certs will be created
-		o.SecureServing.ServerCert.CertDirectory = certDir
-	} else {
-		o.SecureServing.ServerCert.CertKey.CertFile = certDir + "/tls.crt"
-		o.SecureServing.ServerCert.CertKey.KeyFile = certDir + "/tls.key"
 	}
 
 	if f := flag.Lookup("kubeconfig"); f != nil {
