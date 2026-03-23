@@ -115,12 +115,12 @@ func applyVisibilityServerOptions(config *genericapiserver.RecommendedConfig, cf
 	// Apply visibility overrides from Configuration API if present and non-default.
 	// If the API value is non-default, it takes precedence.
 	// Otherwise, use the flag.
-	if cfg.VisibilityServer.BindPort != nil && *cfg.VisibilityServer.BindPort != configapi.DefaultVisibilityBindPort {
+	if cfg.VisibilityServer != nil && cfg.VisibilityServer.BindPort != nil && *cfg.VisibilityServer.BindPort != configapi.DefaultVisibilityBindPort {
 		o.SecureServing.BindPort = int(*cfg.VisibilityServer.BindPort)
 	} else {
 		o.SecureServing.BindPort = port
 	}
-	if cfg.VisibilityServer.BindAddress != nil {
+	if cfg.VisibilityServer != nil && cfg.VisibilityServer.BindAddress != nil {
 		o.SecureServing.BindAddress = net.ParseIP(*cfg.VisibilityServer.BindAddress)
 	}
 
