@@ -367,6 +367,11 @@ const (
 	// stale workload accumulation (e.g., after PodsReady timeout eviction
 	// deletes a Deployment-owned pod).
 	FinishOrphanedWorkloads featuregate.Feature = "FinishOrphanedWorkloads"
+
+	// owner: @user
+	//
+	// Enables extracting the Visibility Server into a standalone deployment.
+	StandaloneVisibilityServer featuregate.Feature = "StandaloneVisibilityServer"
 )
 
 func init() {
@@ -567,6 +572,9 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 
 	FinishOrphanedWorkloads: {
 		{Version: version.MustParse("0.18"), Default: true, PreRelease: featuregate.Beta},
+	},
+	StandaloneVisibilityServer: {
+		{Version: version.MustParse("0.18"), Default: false, PreRelease: featuregate.Alpha},
 	},
 }
 

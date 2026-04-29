@@ -200,6 +200,7 @@ sync-hugo-version:
 .PHONY: build
 build:
 	$(GO_BUILD_ENV) $(GO_CMD) build -ldflags="$(LD_FLAGS)" -o bin/manager cmd/kueue/main.go
+	$(GO_BUILD_ENV) $(GO_CMD) build -ldflags="$(LD_FLAGS)" -o bin/visibility-on-demand cmd/visibility-on-demand/main.go
 
 .PHONY: run
 run: compile-crd-manifests generate fmt vet ## Run a controller from your host.
@@ -405,6 +406,7 @@ importer-image-push: importer-image-build
 importer-image: PLATFORMS=$(HOST_IMAGE_PLATFORM)
 importer-image: PUSH=--load
 importer-image: importer-image-build
+
 
 
 # Build the kueueviz dashboard images (frontend and backend)

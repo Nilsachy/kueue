@@ -18,3 +18,4 @@ WORKDIR /
 USER 65532:65532
 ENTRYPOINT ["/manager"]
 COPY --from=builder /workspace/bin/manager /manager
+COPY --from=builder /workspace/bin/visibility-on-demand /visibility-on-demand

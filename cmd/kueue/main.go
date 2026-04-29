@@ -376,7 +376,7 @@ func main() {
 	go queues.CleanUpOnContext(ctx)
 	go cCache.CleanUpOnContext(ctx)
 
-	if features.Enabled(features.VisibilityOnDemand) {
+	if features.Enabled(features.VisibilityOnDemand) && !features.Enabled(features.StandaloneVisibilityServer) {
 		go func() {
 			if err := visibility.CreateAndStartVisibilityServer(ctx, queues, &cfg, kubeConfig, visibilityServerPort, parsedTLSConfig); err != nil {
 				setupLog.Error(err, "Unable to create and start visibility server")
