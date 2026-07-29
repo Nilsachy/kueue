@@ -452,7 +452,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wlA, wlB)
 
 			ginkgo.By("Creating preemptor-wl in cq-1")
-			preemptorWl := createWorkloadWithCPUAndMemory(cq1.Name, "10", "10", 0)
+			createWorkloadWithCPUAndMemory(cq1.Name, "10", "10", 0)
 
 			ginkgo.By("Waiting for wlA and wlB to be preempted/evicted")
 			util.ExpectWorkloadsToBePreempted(ctx, k8sClient, wlA, wlB)
