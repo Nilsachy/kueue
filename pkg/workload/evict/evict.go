@@ -208,6 +208,7 @@ func prepareForEviction(w *kueue.Workload, now time.Time, reason, message string
 	resetChecksOnEviction(w, now)
 	resetUnhealthyNodes(w)
 	unsetBlockedOnPreemptionGatesCondition(w, now, reason, message)
+	unsetTopologyPlacementFailedCondition(w, now, reason, message)
 	closeAllPreemptionGates(w, now)
 }
 
@@ -251,6 +252,23 @@ func unsetBlockedOnPreemptionGatesCondition(w *kueue.Workload, now time.Time, re
 
 	condition := metav1.Condition{
 		Type:               kueue.WorkloadBlockedOnPreemptionGates,
+		Status:             metav1.ConditionFalse,
+		LastTransitionTime: metav1.NewTime(now),
+		Reason:             reason,
+		Message:            api.TruncateConditionMessage(message),
+		ObservedGeneration: w.Generation,
+	}
+	apimeta.SetStatusCondition(&w.Status.Conditions, condition)
+}
+
+func unsetTopologyPlacementFailedCondition(w *kueue.Workload, now time.Time, reason, message string) {
+	cond := apimeta.FindStatusCondition(w.Status.Conditions, kueue.WorkloadTopologyPlacementFailed)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		return
+	}
+
+	condition := metav1.Condition{
+		Type:               kueue.WorkloadTopologyPlacementFailed,
 		Status:             metav1.ConditionFalse,
 		LastTransitionTime: metav1.NewTime(now),
 		Reason:             reason,

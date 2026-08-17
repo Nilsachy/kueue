@@ -29,6 +29,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -3715,5 +3716,36 @@ func TestTotalExecutionTime(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTopologyPlacementFailedCondition(t *testing.T) {
+	now := time.Now()
+	wl := utiltestingapi.MakeWorkload("wl", "ns").Obj()
+
+	if cond := TopologyPlacementFailedCondition(wl); cond != nil {
+		t.Errorf("Expected nil condition, got %v", cond)
+	}
+
+	updated := SetTopologyPlacementFailedCondition(wl, now, kueue.WorkloadTopologyPlacementFailed, "no domain fits")
+	if !updated {
+		t.Errorf("Expected SetTopologyPlacementFailedCondition to return true")
+	}
+
+	cond := TopologyPlacementFailedCondition(wl)
+	if cond == nil {
+		t.Fatalf("Expected non-nil condition")
+	}
+	if cond.Status != metav1.ConditionTrue || cond.Reason != kueue.WorkloadTopologyPlacementFailed || cond.Message != "no domain fits" {
+		t.Errorf("Unexpected condition: %v", cond)
+	}
+
+	// Test that SetQuotaReservation resets the condition
+	fakeClock := testingclock.NewFakeClock(now)
+	SetQuotaReservation(wl, &kueue.Admission{ClusterQueue: "cq"}, fakeClock)
+
+	condAfterReservation := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadTopologyPlacementFailed)
+	if condAfterReservation == nil || condAfterReservation.Status != metav1.ConditionFalse {
+		t.Errorf("Expected TopologyPlacementFailed condition to be False after quota reservation, got %v", condAfterReservation)
 	}
 }

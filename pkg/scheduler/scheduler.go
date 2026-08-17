@@ -263,6 +263,10 @@ func (e *entry) markPreemptionGated(msg string) {
 	e.LastAssignment = nil
 }
 
+func (e *entry) markTopologyPlacementFailed() {
+	e.status = topologyPlacementFailed
+}
+
 func (e *entry) markEvicted() {
 	e.status = evicted
 }
@@ -419,7 +423,7 @@ func (s *Scheduler) processEntry(
 	// We may also recompute in case of overlapping preemption targets with another workload.
 	// Recompute when needed so CQs considered later in the cycle don't repeatedly
 	// lose to earlier CQs and starve for prolonged periods.
-	usage, fits := s.updateAssignmentIfNeeded(ctx, log, e, snapshot, cq, preemptedWorkloads)
+	usage, assignmentFits := s.updateAssignmentIfNeeded(ctx, log, e, snapshot, cq, preemptedWorkloads)
 	mode := e.assignment.RepresentativeMode()
 
 	if features.Enabled(features.TASFailedNodeReplacementFailFast) && workload.HasTopologyAssignmentWithUnhealthyNode(e.Obj) && mode != flavorassigner.Fit {
@@ -437,6 +441,9 @@ func (s *Scheduler) processEntry(
 	if mode == flavorassigner.Preempt {
 		if len(e.preemptionTargets) == 0 {
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
+			if fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets) == schdcache.FitsCheckNoTAS {
+				e.markTopologyPlacementFailed()
+			}
 			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
 			s.reserveCapacityForUnreclaimablePreempt(log, e, cq)
 			return
@@ -474,7 +481,7 @@ func (s *Scheduler) processEntry(
 		return
 	}
 
-	if !fits {
+	if !assignmentFits {
 		e.markSkipped("Workload no longer fits after processing another workload")
 		e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
 		if mode == flavorassigner.Preempt {
@@ -620,6 +627,8 @@ const (
 	skipped entryStatus = "skipped"
 	// indicates if the workload was preemptionGated in this cycle.
 	preemptionGated entryStatus = "preemptionGated"
+	// indicates if the workload could not be admitted because no topology domain satisfied its requirements while quota was available.
+	topologyPlacementFailed entryStatus = "topologyPlacementFailed"
 	// indicates if the workload was evicted in this cycle.
 	evicted entryStatus = "evicted"
 	// indicates if the workload was assumed to have been admitted.
@@ -1168,7 +1177,7 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 	added := s.queues.RequeueWorkload(ctx, &e.Info, e.requeueReason, qcache.QuotaReservedReason(e.quotaReservedReason))
 	log.V(2).
 		Info("Workload re-queued", "workload", klog.KObj(e.Obj), "clusterQueue", klog.KRef("", string(e.ClusterQueue)), "queue", klog.KRef(e.Obj.Namespace, string(e.Obj.Spec.QueueName)), "requeueReason", e.requeueReason, "added", added, "status", e.status)
-	if e.status == notNominated || e.status == skipped || e.status == preemptionGated {
+	if e.status == notNominated || e.status == skipped || e.status == preemptionGated || e.status == topologyPlacementFailed {
 		if e.skipStatusUpdate {
 			log.V(3).Info("Skipping Workload status update", "workload", klog.KObj(e.Obj), "reason", e.inadmissibleMsg)
 			return
@@ -1182,6 +1191,9 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 			}
 			if e.status == preemptionGated {
 				updated = workload.SetBlockedOnPreemptionGatesCondition(wl, s.clock.Now(), kueue.PreemptionGated, e.inadmissibleMsg)
+			}
+			if e.status == topologyPlacementFailed {
+				updated = workload.SetTopologyPlacementFailedCondition(wl, s.clock.Now(), kueue.WorkloadTopologyPlacementFailed, e.inadmissibleMsg)
 			}
 			return updated, nil
 		}, workloadpatching.WithLooseOnApply(), workloadpatching.WithRetryOnConflict()); err != nil {
