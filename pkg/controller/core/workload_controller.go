@@ -717,6 +717,11 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 			if workload.SyncAdmittedCondition(wl, r.clock.Now()) {
 				updated = true
 			}
+			if workload.IsAdmitted(wl) {
+				if workload.ResetTopologyPlacementFailedCondition(wl, r.clock) {
+					updated = true
+				}
+			}
 			return updated, nil
 		})
 		if err != nil {

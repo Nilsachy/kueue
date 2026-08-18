@@ -950,10 +950,6 @@ func SetQuotaReservation(w *kueue.Workload, admission *kueue.Admission, clock cl
 		changed = true
 	}
 
-	if resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadTopologyPlacementFailed, reason, clock) {
-		changed = true
-	}
-
 	return changed
 }
 
@@ -1157,14 +1153,9 @@ func SetTopologyPlacementFailedCondition(w *kueue.Workload, now time.Time, reaso
 	return apimeta.SetStatusCondition(&w.Status.Conditions, condition)
 }
 
-// TopologyPlacementFailedCondition returns kueue.WorkloadTopologyPlacementFailed condition type
-// if condition status equals metav1.ConditionTrue returns condition otherwise returns nil
-func TopologyPlacementFailedCondition(w *kueue.Workload) *metav1.Condition {
-	cond := apimeta.FindStatusCondition(w.Status.Conditions, kueue.WorkloadTopologyPlacementFailed)
-	if cond != nil && cond.Status == metav1.ConditionTrue {
-		return cond
-	}
-	return nil
+// ResetTopologyPlacementFailedCondition resets the TopologyPlacementFailed condition to false if it was true.
+func ResetTopologyPlacementFailedCondition(w *kueue.Workload, clock clock.Clock) bool {
+	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadTopologyPlacementFailed, "Admitted", clock)
 }
 
 // PropagateResourceRequests synchronizes w.Status.ResourceRequests to

@@ -3721,31 +3721,36 @@ func TestTotalExecutionTime(t *testing.T) {
 
 func TestTopologyPlacementFailedCondition(t *testing.T) {
 	now := time.Now()
+	fakeClock := testingclock.NewFakeClock(now)
 	wl := utiltestingapi.MakeWorkload("wl", "ns").Obj()
 
-	if cond := TopologyPlacementFailedCondition(wl); cond != nil {
-		t.Errorf("Expected nil condition, got %v", cond)
+	// Initial reset returns false when condition does not exist
+	if ResetTopologyPlacementFailedCondition(wl, fakeClock) {
+		t.Errorf("Expected ResetTopologyPlacementFailedCondition to return false when condition does not exist")
 	}
 
-	updated := SetTopologyPlacementFailedCondition(wl, now, kueue.WorkloadTopologyPlacementFailed, "no domain fits")
-	if !updated {
+	// Set condition to True
+	if !SetTopologyPlacementFailedCondition(wl, now, kueue.WorkloadTopologyPlacementFailed, "no domain fits") {
 		t.Errorf("Expected SetTopologyPlacementFailedCondition to return true")
 	}
 
-	cond := TopologyPlacementFailedCondition(wl)
-	if cond == nil {
-		t.Fatalf("Expected non-nil condition")
-	}
-	if cond.Status != metav1.ConditionTrue || cond.Reason != kueue.WorkloadTopologyPlacementFailed || cond.Message != "no domain fits" {
-		t.Errorf("Unexpected condition: %v", cond)
+	cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadTopologyPlacementFailed)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != kueue.WorkloadTopologyPlacementFailed || cond.Message != "no domain fits" {
+		t.Errorf("Unexpected condition after set: %v", cond)
 	}
 
-	// Test that SetQuotaReservation resets the condition
-	fakeClock := testingclock.NewFakeClock(now)
-	SetQuotaReservation(wl, &kueue.Admission{ClusterQueue: "cq"}, fakeClock)
+	// Reset condition to False
+	if !ResetTopologyPlacementFailedCondition(wl, fakeClock) {
+		t.Errorf("Expected ResetTopologyPlacementFailedCondition to return true when condition was True")
+	}
 
-	condAfterReservation := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadTopologyPlacementFailed)
-	if condAfterReservation == nil || condAfterReservation.Status != metav1.ConditionFalse {
-		t.Errorf("Expected TopologyPlacementFailed condition to be False after quota reservation, got %v", condAfterReservation)
+	cond = apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadTopologyPlacementFailed)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "Admitted" {
+		t.Errorf("Unexpected condition after reset: %v", cond)
+	}
+
+	// Second reset returns false when already False
+	if ResetTopologyPlacementFailedCondition(wl, fakeClock) {
+		t.Errorf("Expected ResetTopologyPlacementFailedCondition to return false when condition is already False")
 	}
 }

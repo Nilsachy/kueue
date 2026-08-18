@@ -767,6 +767,51 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 		},
+		"admit and reset TopologyPlacementFailed condition": {
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				AdmissionCheck(kueue.AdmissionCheckState{
+					Name:  "check",
+					State: kueue.CheckStateReady,
+				}).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadTopologyPlacementFailed,
+					Status:             metav1.ConditionTrue,
+					Reason:             kueue.WorkloadTopologyPlacementFailed,
+					Message:            "no domain fits",
+					LastTransitionTime: metav1.NewTime(now),
+				}).
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
+				AdmissionCheck(kueue.AdmissionCheckState{
+					Name:  "check",
+					State: kueue.CheckStateReady,
+				}).
+				Condition(metav1.Condition{
+					Type:               kueue.WorkloadTopologyPlacementFailed,
+					Status:             metav1.ConditionFalse,
+					Reason:             "Admitted",
+					Message:            "Previously: no domain fits",
+					LastTransitionTime: metav1.NewTime(now),
+				}).
+				Condition(metav1.Condition{
+					Type:    "Admitted",
+					Status:  "True",
+					Reason:  "Admitted",
+					Message: "The workload is admitted",
+				}).
+				Obj(),
+			wantEvents: []utiltesting.EventRecord{
+				{
+					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
+					EventType: "Normal",
+					Reason:    "Admitted",
+					Message: fmt.Sprintf("Admitted by ClusterQueue q1, wait time since reservation was %.0fs",
+						fakeClock.Since(metav1.NewTime(now).Time.Truncate(time.Second)).Seconds()),
+				},
+			},
+		},
 		"already admitted": {
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
