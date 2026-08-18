@@ -939,6 +939,7 @@ const (
 
 	// WorkloadTopologyPlacementFailed means that the Workload attempted to be admitted,
 	// quota was available, but no topology domain satisfied its requirements.
+	// It's only set if the ConfigurablePreemption feature gate is enabled.
 	WorkloadTopologyPlacementFailed = "TopologyPlacementFailed"
 
 	// WorkloadQuotaReserved means that the Workload has reserved quota a ClusterQueue.
