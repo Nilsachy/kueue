@@ -768,6 +768,7 @@ func TestReconcile(t *testing.T) {
 			},
 		},
 		"admit and reset TopologyPlacementFailed condition": {
+			featureGates: map[featuregate.Feature]bool{features.ConfigurablePreemption: true},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
 				AdmissionCheck(kueue.AdmissionCheckState{

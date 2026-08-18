@@ -4776,6 +4776,9 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			// waiting workload does not let the second workload in the queue
 			// to get in, as it is awaiting for the running workloads to
 			// complete.
+			featureGates: map[featuregate.Feature]bool{
+				features.ConfigurablePreemption: true,
+			},
 			nodes:           defaultSingleNode,
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
 			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},
@@ -6046,6 +6049,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			// tas-flavor-1 and fails topology, instead of incorrectly switching to tas-flavor-2.
 			featureGates: map[featuregate.Feature]bool{
 				features.TASRecomputeAssignmentWithinSchedulingCycle: true,
+				features.ConfigurablePreemption:                      true,
 			},
 			nodes: []corev1.Node{
 				*testingnode.MakeNode("node-1").
@@ -6619,6 +6623,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			// it correctly reserves capacity, preventing lower priority workloads from using it.
 			featureGates: map[featuregate.Feature]bool{
 				features.TASRecomputeAssignmentWithinSchedulingCycle: true,
+				features.ConfigurablePreemption:                      true,
 			},
 			nodes:           []corev1.Node{defaultNodeY1},
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
@@ -6797,6 +6802,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			// ensures correct capacity reservation.
 			featureGates: map[featuregate.Feature]bool{
 				features.TASRecomputeAssignmentWithinSchedulingCycle: true,
+				features.ConfigurablePreemption:                      true,
 			},
 			nodes:           []corev1.Node{defaultNodeY1},
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
@@ -9333,6 +9339,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			// when no explicit targets are set.
 			featureGates: map[featuregate.Feature]bool{
 				features.TASRecomputeAssignmentWithinSchedulingCycle: false,
+				features.ConfigurablePreemption:                      true,
 			},
 			nodes:           []corev1.Node{defaultNodeY1},
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
@@ -9485,6 +9492,9 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 		},
 		"preempting workload without targets doesn't reserve capacity when it can always reclaim": {
+			featureGates: map[featuregate.Feature]bool{
+				features.ConfigurablePreemption: true,
+			},
 			nodes:           []corev1.Node{defaultNodeY1},
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
 			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},

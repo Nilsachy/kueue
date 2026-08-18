@@ -441,7 +441,7 @@ func (s *Scheduler) processEntry(
 	if mode == flavorassigner.Preempt {
 		if len(e.preemptionTargets) == 0 {
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
-			if fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets) == schdcache.FitsCheckNoTAS {
+			if features.Enabled(features.ConfigurablePreemption) && fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets) == schdcache.FitsCheckNoTAS {
 				e.markTopologyPlacementFailed()
 			}
 			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
