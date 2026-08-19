@@ -4865,9 +4865,9 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadTopologyPlacementFailed,
+						Type:               kueue.WorkloadInsufficientTopology,
 						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadTopologyPlacementFailed,
+						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -6170,9 +6170,9 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadTopologyPlacementFailed,
+						Type:               kueue.WorkloadInsufficientTopology,
 						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadTopologyPlacementFailed,
+						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -6761,9 +6761,9 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadTopologyPlacementFailed,
+						Type:               kueue.WorkloadInsufficientTopology,
 						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadTopologyPlacementFailed,
+						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 3 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -6893,9 +6893,9 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadTopologyPlacementFailed,
+						Type:               kueue.WorkloadInsufficientTopology,
 						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadTopologyPlacementFailed,
+						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -6928,9 +6928,9 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadTopologyPlacementFailed,
+						Type:               kueue.WorkloadInsufficientTopology,
 						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadTopologyPlacementFailed,
+						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 3 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -9430,9 +9430,9 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadTopologyPlacementFailed,
+						Type:               kueue.WorkloadInsufficientTopology,
 						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadTopologyPlacementFailed,
+						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -9584,9 +9584,9 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadTopologyPlacementFailed,
+						Type:               kueue.WorkloadInsufficientTopology,
 						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadTopologyPlacementFailed,
+						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).

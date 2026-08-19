@@ -263,8 +263,8 @@ func (e *entry) markPreemptionGated(msg string) {
 	e.LastAssignment = nil
 }
 
-func (e *entry) markTopologyPlacementFailed() {
-	e.status = topologyPlacementFailed
+func (e *entry) markInsufficientTopology() {
+	e.status = insufficientTopology
 }
 
 func (e *entry) markEvicted() {
@@ -442,7 +442,7 @@ func (s *Scheduler) processEntry(
 		if len(e.preemptionTargets) == 0 {
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
 			if features.Enabled(features.ConfigurablePreemption) && fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets) == schdcache.FitsCheckNoTAS {
-				e.markTopologyPlacementFailed()
+				e.markInsufficientTopology()
 			}
 			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
 			s.reserveCapacityForUnreclaimablePreempt(log, e, cq)
@@ -628,7 +628,7 @@ const (
 	// indicates if the workload was preemptionGated in this cycle.
 	preemptionGated entryStatus = "preemptionGated"
 	// indicates if the workload could not be admitted because no topology domain satisfied its requirements while quota was available.
-	topologyPlacementFailed entryStatus = "topologyPlacementFailed"
+	insufficientTopology entryStatus = "insufficientTopology"
 	// indicates if the workload was evicted in this cycle.
 	evicted entryStatus = "evicted"
 	// indicates if the workload was assumed to have been admitted.
@@ -1177,7 +1177,7 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 	added := s.queues.RequeueWorkload(ctx, &e.Info, e.requeueReason, qcache.QuotaReservedReason(e.quotaReservedReason))
 	log.V(2).
 		Info("Workload re-queued", "workload", klog.KObj(e.Obj), "clusterQueue", klog.KRef("", string(e.ClusterQueue)), "queue", klog.KRef(e.Obj.Namespace, string(e.Obj.Spec.QueueName)), "requeueReason", e.requeueReason, "added", added, "status", e.status)
-	if e.status == notNominated || e.status == skipped || e.status == preemptionGated || e.status == topologyPlacementFailed {
+	if e.status == notNominated || e.status == skipped || e.status == preemptionGated || e.status == insufficientTopology {
 		if e.skipStatusUpdate {
 			log.V(3).Info("Skipping Workload status update", "workload", klog.KObj(e.Obj), "reason", e.inadmissibleMsg)
 			return
@@ -1192,8 +1192,8 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 			if e.status == preemptionGated {
 				updated = workload.SetBlockedOnPreemptionGatesCondition(wl, s.clock.Now(), kueue.PreemptionGated, e.inadmissibleMsg)
 			}
-			if e.status == topologyPlacementFailed {
-				updated = workload.SetTopologyPlacementFailedCondition(wl, s.clock.Now(), kueue.WorkloadTopologyPlacementFailed, e.inadmissibleMsg)
+			if e.status == insufficientTopology {
+				updated = workload.SetInsufficientTopologyCondition(wl, s.clock.Now(), kueue.WorkloadInsufficientTopology, e.inadmissibleMsg)
 			}
 			return updated, nil
 		}, workloadpatching.WithLooseOnApply(), workloadpatching.WithRetryOnConflict()); err != nil {

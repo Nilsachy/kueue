@@ -767,7 +767,7 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 		},
-		"admit and reset TopologyPlacementFailed condition": {
+		"admit and reset InsufficientTopology condition": {
 			featureGates: map[featuregate.Feature]bool{features.ConfigurablePreemption: true},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
@@ -776,9 +776,9 @@ func TestReconcile(t *testing.T) {
 					State: kueue.CheckStateReady,
 				}).
 				Condition(metav1.Condition{
-					Type:               kueue.WorkloadTopologyPlacementFailed,
+					Type:               kueue.WorkloadInsufficientTopology,
 					Status:             metav1.ConditionTrue,
-					Reason:             kueue.WorkloadTopologyPlacementFailed,
+					Reason:             kueue.WorkloadInsufficientTopology,
 					Message:            "no domain fits",
 					LastTransitionTime: metav1.NewTime(now),
 				}).
@@ -790,7 +790,7 @@ func TestReconcile(t *testing.T) {
 					State: kueue.CheckStateReady,
 				}).
 				Condition(metav1.Condition{
-					Type:               kueue.WorkloadTopologyPlacementFailed,
+					Type:               kueue.WorkloadInsufficientTopology,
 					Status:             metav1.ConditionFalse,
 					Reason:             "Admitted",
 					Message:            "Previously: no domain fits",

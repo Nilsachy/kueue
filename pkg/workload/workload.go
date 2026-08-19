@@ -1141,9 +1141,9 @@ func BlockedOnPreemptionGatesCondition(w *kueue.Workload) *metav1.Condition {
 	return nil
 }
 
-func SetTopologyPlacementFailedCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
+func SetInsufficientTopologyCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
 	condition := metav1.Condition{
-		Type:               kueue.WorkloadTopologyPlacementFailed,
+		Type:               kueue.WorkloadInsufficientTopology,
 		Status:             metav1.ConditionTrue,
 		LastTransitionTime: metav1.NewTime(now),
 		Reason:             reason,
@@ -1153,9 +1153,9 @@ func SetTopologyPlacementFailedCondition(w *kueue.Workload, now time.Time, reaso
 	return apimeta.SetStatusCondition(&w.Status.Conditions, condition)
 }
 
-// ResetTopologyPlacementFailedCondition resets the TopologyPlacementFailed condition to false if it was true.
-func ResetTopologyPlacementFailedCondition(w *kueue.Workload, clock clock.Clock) bool {
-	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadTopologyPlacementFailed, "Admitted", clock)
+// ResetInsufficientTopologyCondition resets the InsufficientTopology condition to false if it was true.
+func ResetInsufficientTopologyCondition(w *kueue.Workload, clock clock.Clock) bool {
+	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadInsufficientTopology, "Admitted", clock)
 }
 
 // PropagateResourceRequests synchronizes w.Status.ResourceRequests to

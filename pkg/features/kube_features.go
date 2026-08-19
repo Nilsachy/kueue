@@ -548,8 +548,10 @@ const (
 	// to wait for these preemptions to complete.
 	RecomputeAssignmentUponPreemptionTargetsOverlap featuregate.Feature = "RecomputeAssignmentUponPreemptionTargetsOverlap"
 
-	// Enables setting the TopologyPlacementFailed condition when a workload
-	// cannot be scheduled because no topology domain satisfies its requirements while quota is available.
+	// owner: @Nilsachy
+	//
+	// Enables Configurable Preemption, including support for PreemptionConfig and PreemptionLimit
+	// resources, custom preemption triggers, candidate filtering rules, ordering, and preemption rate limits.
 	ConfigurablePreemption featuregate.Feature = "ConfigurablePreemption"
 )
 

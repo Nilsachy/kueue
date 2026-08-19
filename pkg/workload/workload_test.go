@@ -3719,38 +3719,38 @@ func TestTotalExecutionTime(t *testing.T) {
 	}
 }
 
-func TestTopologyPlacementFailedCondition(t *testing.T) {
+func TestInsufficientTopologyCondition(t *testing.T) {
 	now := time.Now()
 	fakeClock := testingclock.NewFakeClock(now)
 	wl := utiltestingapi.MakeWorkload("wl", "ns").Obj()
 
 	// Initial reset returns false when condition does not exist
-	if ResetTopologyPlacementFailedCondition(wl, fakeClock) {
-		t.Errorf("Expected ResetTopologyPlacementFailedCondition to return false when condition does not exist")
+	if ResetInsufficientTopologyCondition(wl, fakeClock) {
+		t.Errorf("Expected ResetInsufficientTopologyCondition to return false when condition does not exist")
 	}
 
 	// Set condition to True
-	if !SetTopologyPlacementFailedCondition(wl, now, kueue.WorkloadTopologyPlacementFailed, "no domain fits") {
-		t.Errorf("Expected SetTopologyPlacementFailedCondition to return true")
+	if !SetInsufficientTopologyCondition(wl, now, kueue.WorkloadInsufficientTopology, "no domain fits") {
+		t.Errorf("Expected SetInsufficientTopologyCondition to return true")
 	}
 
-	cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadTopologyPlacementFailed)
-	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != kueue.WorkloadTopologyPlacementFailed || cond.Message != "no domain fits" {
+	cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadInsufficientTopology)
+	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != kueue.WorkloadInsufficientTopology || cond.Message != "no domain fits" {
 		t.Errorf("Unexpected condition after set: %v", cond)
 	}
 
 	// Reset condition to False
-	if !ResetTopologyPlacementFailedCondition(wl, fakeClock) {
-		t.Errorf("Expected ResetTopologyPlacementFailedCondition to return true when condition was True")
+	if !ResetInsufficientTopologyCondition(wl, fakeClock) {
+		t.Errorf("Expected ResetInsufficientTopologyCondition to return true when condition was True")
 	}
 
-	cond = apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadTopologyPlacementFailed)
+	cond = apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadInsufficientTopology)
 	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "Admitted" {
 		t.Errorf("Unexpected condition after reset: %v", cond)
 	}
 
 	// Second reset returns false when already False
-	if ResetTopologyPlacementFailedCondition(wl, fakeClock) {
-		t.Errorf("Expected ResetTopologyPlacementFailedCondition to return false when condition is already False")
+	if ResetInsufficientTopologyCondition(wl, fakeClock) {
+		t.Errorf("Expected ResetInsufficientTopologyCondition to return false when condition is already False")
 	}
 }

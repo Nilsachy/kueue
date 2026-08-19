@@ -718,7 +718,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 				updated = true
 			}
 			if features.Enabled(features.ConfigurablePreemption) && workload.IsAdmitted(wl) {
-				if workload.ResetTopologyPlacementFailedCondition(wl, r.clock) {
+				if workload.ResetInsufficientTopologyCondition(wl, r.clock) {
 					updated = true
 				}
 			}
