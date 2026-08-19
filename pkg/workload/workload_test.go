@@ -3731,7 +3731,7 @@ func TestInsufficientTopologyCondition(t *testing.T) {
 
 	// Set condition to True
 	if !SetInsufficientTopologyCondition(wl, now, kueue.WorkloadInsufficientTopology, "no domain fits") {
-		t.Errorf("Expected SetInsufficientTopologyCondition to return true")
+		t.Errorf("Expected SetInsufficientTopologyCondition to return true when set for the first time")
 	}
 
 	cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadInsufficientTopology)
