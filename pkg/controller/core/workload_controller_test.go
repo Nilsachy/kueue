@@ -767,7 +767,7 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 		},
-		"admit and reset InsufficientTopology condition": {
+		"admission resets InsufficientTopology condition when ConfigurablePreemption is on": {
 			featureGates: map[featuregate.Feature]bool{features.ConfigurablePreemption: true},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
