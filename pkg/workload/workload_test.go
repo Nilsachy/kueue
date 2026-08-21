@@ -3731,7 +3731,7 @@ func TestInsufficientTopologyCondition(t *testing.T) {
 	}
 
 	// Initial reset returns false when condition does not exist
-	if ResetInsufficientTopologyCondition(wl, fakeClock) {
+	if ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetInsufficientTopologyCondition to return false when condition does not exist")
 	}
 
@@ -3751,14 +3751,14 @@ func TestInsufficientTopologyCondition(t *testing.T) {
 	}
 
 	// Reset condition to False
-	if !ResetInsufficientTopologyCondition(wl, fakeClock) {
+	if !ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetInsufficientTopologyCondition to return true when condition was True")
 	}
 
 	wantCond = &metav1.Condition{
 		Type:    kueue.WorkloadInsufficientTopology,
 		Status:  metav1.ConditionFalse,
-		Reason:  "Admitted",
+		Reason:  kueue.WorkloadInsufficientTopologyReasonAdmitted,
 		Message: "Previously: " + noDomainFits,
 	}
 	if diff := cmpCondition(wantCond); diff != "" {
@@ -3766,7 +3766,7 @@ func TestInsufficientTopologyCondition(t *testing.T) {
 	}
 
 	// Second reset returns false when already False
-	if ResetInsufficientTopologyCondition(wl, fakeClock) {
+	if ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetInsufficientTopologyCondition to return false when condition is already False")
 	}
 }

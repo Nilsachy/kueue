@@ -1154,8 +1154,8 @@ func SetInsufficientTopologyCondition(w *kueue.Workload, now time.Time, reason s
 }
 
 // ResetInsufficientTopologyCondition resets the InsufficientTopology condition to false if it was true.
-func ResetInsufficientTopologyCondition(w *kueue.Workload, clock clock.Clock) bool {
-	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadInsufficientTopology, "Admitted", clock)
+func ResetInsufficientTopologyCondition(w *kueue.Workload, reason string, clock clock.Clock) bool {
+	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadInsufficientTopology, reason, clock)
 }
 
 // PropagateResourceRequests synchronizes w.Status.ResourceRequests to

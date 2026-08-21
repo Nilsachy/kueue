@@ -942,6 +942,11 @@ const (
 	// It's only set if the ConfigurablePreemption feature gate is enabled.
 	WorkloadInsufficientTopology = "InsufficientTopology"
 
+	// Reasons for the WorkloadInsufficientTopology condition.
+
+	// WorkloadInsufficientTopologyReasonAdmitted indicates that the condition was reset because the workload was admitted.
+	WorkloadInsufficientTopologyReasonAdmitted = "Admitted"
+
 	// WorkloadQuotaReserved means that the Workload has reserved quota a ClusterQueue.
 	WorkloadQuotaReserved = "QuotaReserved"
 

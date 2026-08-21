@@ -792,7 +792,7 @@ func TestReconcile(t *testing.T) {
 				Condition(metav1.Condition{
 					Type:               kueue.WorkloadInsufficientTopology,
 					Status:             metav1.ConditionFalse,
-					Reason:             "Admitted",
+					Reason:             kueue.WorkloadInsufficientTopologyReasonAdmitted,
 					Message:            "Previously: no domain fits",
 					LastTransitionTime: metav1.NewTime(now),
 				}).
