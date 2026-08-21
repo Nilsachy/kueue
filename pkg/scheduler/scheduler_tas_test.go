@@ -5681,7 +5681,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			eventCmpOpts: cmp.Options{eventIgnoreMessage},
 		},
-		"insufficient topology condition set when ConfigurablePreemption feature gate is enabled": {
+		"InsufficientTopology condition set when workload cannot be scheduled because of lack of suitable domain when ConfigurablePreemption feature gate is enabled": {
 			featureGates: map[featuregate.Feature]bool{
 				features.ConfigurablePreemption: true,
 			},
