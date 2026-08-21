@@ -4776,9 +4776,6 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			// waiting workload does not let the second workload in the queue
 			// to get in, as it is awaiting for the running workloads to
 			// complete.
-			featureGates: map[featuregate.Feature]bool{
-				features.ConfigurablePreemption: true,
-			},
 			nodes:           defaultSingleNode,
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
 			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},
@@ -4861,13 +4858,6 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
-						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`,
-						LastTransitionTime: metav1.NewTime(now),
-					}).
-					Condition(metav1.Condition{
-						Type:               kueue.WorkloadInsufficientTopology,
-						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -5691,6 +5681,110 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			eventCmpOpts: cmp.Options{eventIgnoreMessage},
 		},
+		"insufficient topology condition set when ConfigurablePreemption feature gate is enabled": {
+			featureGates: map[featuregate.Feature]bool{
+				features.ConfigurablePreemption: true,
+			},
+			nodes:           defaultSingleNode,
+			topologies:      []kueue.Topology{defaultSingleLevelTopology},
+			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},
+			clusterQueues:   []kueue.ClusterQueue{defaultClusterQueueWithPreemption},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("waiting", "default").
+					Queue("tas-main").
+					Priority(2).
+					PodSets(*utiltestingapi.MakePodSet("one", 2).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "1").
+						Obj()).
+					Obj(),
+				*utiltestingapi.MakeWorkload("admitted", "default").
+					Queue("tas-main").
+					Priority(2).
+					ReserveQuotaAt(
+						utiltestingapi.MakeAdmission("tas-main").
+							PodSets(utiltestingapi.MakePodSetAssignment("one").
+								Assignment(corev1.ResourceCPU, "tas-default", "4").
+								TopologyAssignment(utiltestingapi.MakeTopologyAssignment(utiltas.Levels(&defaultSingleLevelTopology)).
+									Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"x1"}, 1).Obj()).
+									Obj()).
+								Obj()).
+							Obj(),
+						now,
+					).
+					AdmittedAt(true, now).
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "4").
+						Obj()).
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("admitted", "default").
+					Queue("tas-main").
+					Priority(2).
+					ReserveQuotaAt(
+						utiltestingapi.MakeAdmission("tas-main").
+							PodSets(utiltestingapi.MakePodSetAssignment("one").
+								Assignment(corev1.ResourceCPU, "tas-default", "4").
+								TopologyAssignment(utiltestingapi.MakeTopologyAssignment(utiltas.Levels(&defaultSingleLevelTopology)).
+									Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"x1"}, 1).Obj()).
+									Obj()).
+								Obj()).
+							Obj(),
+						now,
+					).
+					AdmittedAt(true, now).
+					PodSets(*utiltestingapi.MakePodSet("one", 1).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "4").
+						Obj()).
+					Obj(),
+				*utiltestingapi.MakeWorkload("waiting", "default").
+					Queue("tas-main").
+					Priority(2).
+					PodSets(*utiltestingapi.MakePodSet("one", 2).
+						RequiredTopologyRequest(corev1.LabelHostname).
+						Request(corev1.ResourceCPU, "1").
+						Obj()).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`,
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadInsufficientTopology,
+						Status:             metav1.ConditionTrue,
+						Reason:             kueue.WorkloadInsufficientTopology,
+						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`,
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
+						Message:            "The workload has no reservation",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "one",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("2"),
+						},
+					}).
+					Obj(),
+			},
+			wantInadmissibleLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"tas-main": {"default/waiting"},
+			},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "waiting", kueue.WorkloadQuotaReservedReasonWaitingForQuota, "Warning").
+					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`).
+					Obj(),
+			},
+		},
 	}
 	runTASScheduleTestCases(t, tasScheduleTestConfig{
 		queues: queues,
@@ -6049,7 +6143,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			// tas-flavor-1 and fails topology, instead of incorrectly switching to tas-flavor-2.
 			featureGates: map[featuregate.Feature]bool{
 				features.TASRecomputeAssignmentWithinSchedulingCycle: true,
-				features.ConfigurablePreemption:                      true,
 			},
 			nodes: []corev1.Node{
 				*testingnode.MakeNode("node-1").
@@ -6166,13 +6259,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
-						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
-						LastTransitionTime: metav1.NewTime(now),
-					}).
-					Condition(metav1.Condition{
-						Type:               kueue.WorkloadInsufficientTopology,
-						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -6623,7 +6709,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			// it correctly reserves capacity, preventing lower priority workloads from using it.
 			featureGates: map[featuregate.Feature]bool{
 				features.TASRecomputeAssignmentWithinSchedulingCycle: true,
-				features.ConfigurablePreemption:                      true,
 			},
 			nodes:           []corev1.Node{defaultNodeY1},
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
@@ -6761,13 +6846,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadInsufficientTopology,
-						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadInsufficientTopology,
-						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 3 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
-						LastTransitionTime: metav1.NewTime(now),
-					}).
-					Condition(metav1.Condition{
 						Type:               kueue.WorkloadAdmitted,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
@@ -6802,7 +6880,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			// ensures correct capacity reservation.
 			featureGates: map[featuregate.Feature]bool{
 				features.TASRecomputeAssignmentWithinSchedulingCycle: true,
-				features.ConfigurablePreemption:                      true,
 			},
 			nodes:           []corev1.Node{defaultNodeY1},
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
@@ -6893,13 +6970,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadInsufficientTopology,
-						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadInsufficientTopology,
-						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
-						LastTransitionTime: metav1.NewTime(now),
-					}).
-					Condition(metav1.Condition{
 						Type:               kueue.WorkloadAdmitted,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
@@ -6924,13 +6994,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
-						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 3 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
-						LastTransitionTime: metav1.NewTime(now),
-					}).
-					Condition(metav1.Condition{
-						Type:               kueue.WorkloadInsufficientTopology,
-						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 3 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -9339,7 +9402,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			// when no explicit targets are set.
 			featureGates: map[featuregate.Feature]bool{
 				features.TASRecomputeAssignmentWithinSchedulingCycle: false,
-				features.ConfigurablePreemption:                      true,
 			},
 			nodes:           []corev1.Node{defaultNodeY1},
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
@@ -9430,13 +9492,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
-						Type:               kueue.WorkloadInsufficientTopology,
-						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadInsufficientTopology,
-						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
-						LastTransitionTime: metav1.NewTime(now),
-					}).
-					Condition(metav1.Condition{
 						Type:               kueue.WorkloadAdmitted,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
@@ -9492,9 +9547,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 		},
 		"preempting workload without targets doesn't reserve capacity when it can always reclaim": {
-			featureGates: map[featuregate.Feature]bool{
-				features.ConfigurablePreemption: true,
-			},
 			nodes:           []corev1.Node{defaultNodeY1},
 			topologies:      []kueue.Topology{defaultSingleLevelTopology},
 			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},
@@ -9580,13 +9632,6 @@ func TestScheduleForTASCohorts(t *testing.T) {
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
-						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
-						LastTransitionTime: metav1.NewTime(now),
-					}).
-					Condition(metav1.Condition{
-						Type:               kueue.WorkloadInsufficientTopology,
-						Status:             metav1.ConditionTrue,
-						Reason:             kueue.WorkloadInsufficientTopology,
 						Message:            `couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
 						LastTransitionTime: metav1.NewTime(now),
 					}).
