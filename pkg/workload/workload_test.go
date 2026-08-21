@@ -3720,9 +3720,15 @@ func TestTotalExecutionTime(t *testing.T) {
 }
 
 func TestInsufficientTopologyCondition(t *testing.T) {
+	const noDomainFits = "no domain fits"
 	now := time.Now()
 	fakeClock := testingclock.NewFakeClock(now)
 	wl := utiltestingapi.MakeWorkload("wl", "ns").Obj()
+
+	cmpCondition := func(want *metav1.Condition) string {
+		got := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadInsufficientTopology)
+		return cmp.Diff(want, got, cmpopts.IgnoreFields(metav1.Condition{}, "LastTransitionTime"))
+	}
 
 	// Initial reset returns false when condition does not exist
 	if ResetInsufficientTopologyCondition(wl, fakeClock) {
@@ -3730,13 +3736,18 @@ func TestInsufficientTopologyCondition(t *testing.T) {
 	}
 
 	// Set condition to True
-	if !SetInsufficientTopologyCondition(wl, now, kueue.WorkloadInsufficientTopology, "no domain fits") {
+	if !SetInsufficientTopologyCondition(wl, now, kueue.WorkloadInsufficientTopology, noDomainFits) {
 		t.Errorf("Expected SetInsufficientTopologyCondition to return true when set for the first time")
 	}
 
-	cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadInsufficientTopology)
-	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != kueue.WorkloadInsufficientTopology || cond.Message != "no domain fits" {
-		t.Errorf("Unexpected condition after set: %v", cond)
+	wantCond := &metav1.Condition{
+		Type:    kueue.WorkloadInsufficientTopology,
+		Status:  metav1.ConditionTrue,
+		Reason:  kueue.WorkloadInsufficientTopology,
+		Message: noDomainFits,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after set (-want,+got):\n%s", diff)
 	}
 
 	// Reset condition to False
@@ -3744,9 +3755,14 @@ func TestInsufficientTopologyCondition(t *testing.T) {
 		t.Errorf("Expected ResetInsufficientTopologyCondition to return true when condition was True")
 	}
 
-	cond = apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadInsufficientTopology)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "Admitted" {
-		t.Errorf("Unexpected condition after reset: %v", cond)
+	wantCond = &metav1.Condition{
+		Type:    kueue.WorkloadInsufficientTopology,
+		Status:  metav1.ConditionFalse,
+		Reason:  "Admitted",
+		Message: "Previously: " + noDomainFits,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after reset (-want,+got):\n%s", diff)
 	}
 
 	// Second reset returns false when already False
