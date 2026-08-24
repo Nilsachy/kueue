@@ -439,11 +439,11 @@ func (s *Scheduler) processEntry(
 	}
 
 	if mode == flavorassigner.Preempt {
+		if features.Enabled(features.ConfigurablePreemption) && fitsCheck == schdcache.FitsCheckNoTAS {
+			e.markInsufficientTopology()
+		}
 		if len(e.preemptionTargets) == 0 {
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
-			if features.Enabled(features.ConfigurablePreemption) && fitsCheck == schdcache.FitsCheckNoTAS {
-				e.markInsufficientTopology()
-			}
 			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
 			s.reserveCapacityForUnreclaimablePreempt(log, e, cq)
 			return
