@@ -263,6 +263,18 @@ func (e *entry) markPreemptionGated(msg string) {
 	e.LastAssignment = nil
 }
 
+func (e *entry) markInsufficientTopology() {
+	e.status = insufficientTopology
+}
+
+func (e *entry) markQuotaReclaimRequired() {
+	e.status = quotaReclaimRequired
+}
+
+func (e *entry) markInsufficientQuota() {
+	e.status = insufficientQuota
+}
+
 func (e *entry) markEvicted() {
 	e.status = evicted
 }
@@ -419,12 +431,22 @@ func (s *Scheduler) processEntry(
 	// We may also recompute in case of overlapping preemption targets with another workload.
 	// Recompute when needed so CQs considered later in the cycle don't repeatedly
 	// lose to earlier CQs and starve for prolonged periods.
-	usage, fits := s.updateAssignmentIfNeeded(ctx, log, e, snapshot, cq, preemptedWorkloads)
+	usage, fitsCheck := s.updateAssignmentIfNeeded(ctx, log, e, snapshot, cq, preemptedWorkloads)
 	mode := e.assignment.RepresentativeMode()
 
 	if features.Enabled(features.TASFailedNodeReplacementFailFast) && workload.HasTopologyAssignmentWithUnhealthyNode(e.Obj) && mode != flavorassigner.Fit {
 		s.handleFailedTASReplacement(ctx, log, e)
 		return
+	}
+
+	if features.Enabled(features.ConfigurablePreemption) {
+		if fitsCheck == schdcache.FitsCheckNoQuota {
+			e.markQuotaReclaimRequired()
+		} else if cq.IsQuotaReclaimableFromBorrowers(usage) {
+			e.markInsufficientQuota()
+		} else if fitsCheck == schdcache.FitsCheckNoTAS {
+			e.markInsufficientTopology()
+		}
 	}
 
 	if mode == flavorassigner.NoFit {
@@ -474,7 +496,7 @@ func (s *Scheduler) processEntry(
 		return
 	}
 
-	if !fits {
+	if fitsCheck != schdcache.FitsCheckOk {
 		e.markSkipped("Workload no longer fits after processing another workload")
 		e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
 		if mode == flavorassigner.Preempt {
@@ -620,6 +642,12 @@ const (
 	skipped entryStatus = "skipped"
 	// indicates if the workload was preemptionGated in this cycle.
 	preemptionGated entryStatus = "preemptionGated"
+	// indicates if the workload could not be admitted because no topology domain satisfied its requirements while quota was available.
+	insufficientTopology entryStatus = "insufficientTopology"
+	// indicates if the workload could not be admitted because of insufficient quota in the cluster queue.
+	insufficientQuota entryStatus = "insufficientQuota"
+	// indicates if the workload could not be admitted because quota needs to be reclaimed while nominal quota was high enough.
+	quotaReclaimRequired entryStatus = "quotaReclaimRequired"
 	// indicates if the workload was evicted in this cycle.
 	evicted entryStatus = "evicted"
 	// indicates if the workload was assumed to have been admitted.
@@ -709,7 +737,7 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 	e *entry,
 	snapshot *schdcache.Snapshot,
 	cq *schdcache.ClusterQueueSnapshot,
-	preemptedWorkloads preemption.PreemptedWorkloads) (workload.Usage, bool) {
+	preemptedWorkloads preemption.PreemptedWorkloads) (workload.Usage, schdcache.FitsCheck) {
 	usage := e.assignmentUsage(log)
 	fitsCheck := fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets)
 
@@ -728,7 +756,7 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 		log.V(2).Info("Re-computing the assignment as it doesn't fit for TAS")
 	default:
 		// Short-circuit, nothing to recompute.
-		return usage, schdcache.FitsCheckOk == fitsCheck
+		return usage, fitsCheck
 	}
 	// Clear the last assignment so that we can start from the first flavor again and
 	// reach all flavors from the nomination.
@@ -764,7 +792,7 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 		metrics.ReportPreemptionTargetRecomputation(e.ClusterQueue, overlapRecomputeResult, s.customLabels.CQGet(e.ClusterQueue), s.roleTracker)
 	}
 
-	return usage, schdcache.FitsCheckOk == fitsCheck
+	return usage, fitsCheck
 }
 
 func fits(snapshot *schdcache.Snapshot, cq *schdcache.ClusterQueueSnapshot, usage *workload.Usage, preemptedWorkloads preemption.PreemptedWorkloads,
@@ -1168,7 +1196,7 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 	added := s.queues.RequeueWorkload(ctx, &e.Info, e.requeueReason, qcache.QuotaReservedReason(e.quotaReservedReason))
 	log.V(2).
 		Info("Workload re-queued", "workload", klog.KObj(e.Obj), "clusterQueue", klog.KRef("", string(e.ClusterQueue)), "queue", klog.KRef(e.Obj.Namespace, string(e.Obj.Spec.QueueName)), "requeueReason", e.requeueReason, "added", added, "status", e.status)
-	if e.status == notNominated || e.status == skipped || e.status == preemptionGated {
+	if e.status == notNominated || e.status == skipped || e.status == preemptionGated || e.status == insufficientTopology || e.status == quotaReclaimRequired || e.status == insufficientQuota {
 		if e.skipStatusUpdate {
 			log.V(3).Info("Skipping Workload status update", "workload", klog.KObj(e.Obj), "reason", e.inadmissibleMsg)
 			return
@@ -1182,6 +1210,27 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 			}
 			if e.status == preemptionGated {
 				updated = workload.SetBlockedOnPreemptionGatesCondition(wl, s.clock.Now(), kueue.PreemptionGated, e.inadmissibleMsg)
+			}
+			if e.status == insufficientTopology {
+				updated = workload.SetInsufficientTopologyCondition(wl, s.clock.Now(), kueue.WorkloadInsufficientTopology, e.inadmissibleMsg)
+			}
+			if e.status == quotaReclaimRequired {
+				updated = workload.SetQuotaReclaimRequiredCondition(wl, s.clock.Now(), kueue.WorkloadQuotaReclaimRequired, e.inadmissibleMsg)
+			}
+			if e.status == insufficientQuota {
+				updated = workload.SetInsufficientQuotaCondition(wl, s.clock.Now(), kueue.WorkloadInsufficientQuota, e.inadmissibleMsg)
+			}
+			if features.Enabled(features.ConfigurablePreemption) {
+				if e.status != quotaReclaimRequired {
+					if workload.ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonQuotaFreed, s.clock) {
+						updated = true
+					}
+				}
+				if e.status != insufficientQuota {
+					if workload.ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonQuotaFreed, s.clock) {
+						updated = true
+					}
+				}
 			}
 			return updated, nil
 		}, workloadpatching.WithLooseOnApply(), workloadpatching.WithRetryOnConflict()); err != nil {

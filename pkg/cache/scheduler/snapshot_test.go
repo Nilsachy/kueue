@@ -2016,3 +2016,179 @@ func TestSnapshotAddRemoveWorkloadWithLendingLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestIsQuotaReclaimableFromBorrowers(t *testing.T) {
+	fr := resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU}
+
+	cases := map[string]struct {
+		cq    *ClusterQueueSnapshot
+		usage workload.Usage
+		want  bool
+	}{
+		"CQ without parent": {
+			cq: &ClusterQueueSnapshot{
+				Name: "standalone",
+				ResourceNode: resourceNode{
+					Quotas: map[resources.FlavorResource]ResourceQuota{
+						fr: {Nominal: resources.NewAmount(10)},
+					},
+					SubtreeQuota: resources.FlavorResourceQuantities{
+						fr: resources.NewAmount(10),
+					},
+					Usage: resources.FlavorResourceQuantities{
+						fr: resources.NewAmount(0),
+					},
+				},
+			},
+			usage: workload.Usage{
+				Quota: workload.ResourceUsage{
+					Assigned: resources.FlavorResourceQuantities{
+						fr: resources.NewAmount(5),
+					},
+				},
+			},
+			want: false,
+		},
+		"CQ in cohort with enough available quota": {
+			cq: func() *ClusterQueueSnapshot {
+				cohort := &CohortSnapshot{
+					Name:   "co",
+					Cohort: hierarchy.NewCohort[*ClusterQueueSnapshot, *CohortSnapshot](),
+					ResourceNode: resourceNode{
+						SubtreeQuota: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(10),
+						},
+						Usage: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(0),
+						},
+					},
+				}
+				cq := &ClusterQueueSnapshot{
+					Name: "cq1",
+					ResourceNode: resourceNode{
+						Quotas: map[resources.FlavorResource]ResourceQuota{
+							fr: {Nominal: resources.NewAmount(10)},
+						},
+						SubtreeQuota: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(10),
+						},
+						Usage: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(0),
+						},
+					},
+				}
+				mgr := hierarchy.NewManagerForTest(
+					map[kueue.CohortReference]*CohortSnapshot{"co": cohort},
+					map[kueue.ClusterQueueReference]*ClusterQueueSnapshot{"cq1": cq},
+				)
+				mgr.UpdateClusterQueueEdge("cq1", "co")
+				return cq
+			}(),
+			usage: workload.Usage{
+				Quota: workload.ResourceUsage{
+					Assigned: resources.FlavorResourceQuantities{
+						fr: resources.NewAmount(5),
+					},
+				},
+			},
+			want: false,
+		},
+		"CQ in cohort, borrower is using quota, request fits within nominal": {
+			cq: func() *ClusterQueueSnapshot {
+				cohort := &CohortSnapshot{
+					Name:   "co",
+					Cohort: hierarchy.NewCohort[*ClusterQueueSnapshot, *CohortSnapshot](),
+					ResourceNode: resourceNode{
+						SubtreeQuota: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(10),
+						},
+						Usage: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(10), // borrower is using all cohort capacity
+						},
+					},
+				}
+				cq := &ClusterQueueSnapshot{
+					Name: "cq1",
+					ResourceNode: resourceNode{
+						Quotas: map[resources.FlavorResource]ResourceQuota{
+							fr: {Nominal: resources.NewAmount(10)},
+						},
+						SubtreeQuota: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(10),
+						},
+						Usage: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(0), // our CQ's own usage is 0
+						},
+					},
+				}
+				mgr := hierarchy.NewManagerForTest(
+					map[kueue.CohortReference]*CohortSnapshot{"co": cohort},
+					map[kueue.ClusterQueueReference]*ClusterQueueSnapshot{"cq1": cq},
+				)
+				mgr.UpdateClusterQueueEdge("cq1", "co")
+				return cq
+			}(),
+			usage: workload.Usage{
+				Quota: workload.ResourceUsage{
+					Assigned: resources.FlavorResourceQuantities{
+						fr: resources.NewAmount(5),
+					},
+				},
+			},
+			want: true,
+		},
+		"CQ in cohort, borrower is using quota, but request exceeds nominal": {
+			cq: func() *ClusterQueueSnapshot {
+				cohort := &CohortSnapshot{
+					Name:   "co",
+					Cohort: hierarchy.NewCohort[*ClusterQueueSnapshot, *CohortSnapshot](),
+					ResourceNode: resourceNode{
+						SubtreeQuota: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(10),
+						},
+						Usage: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(10),
+						},
+					},
+				}
+				cq := &ClusterQueueSnapshot{
+					Name: "cq1",
+					ResourceNode: resourceNode{
+						Quotas: map[resources.FlavorResource]ResourceQuota{
+							fr: {Nominal: resources.NewAmount(5)},
+						},
+						SubtreeQuota: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(5),
+						},
+						Usage: resources.FlavorResourceQuantities{
+							fr: resources.NewAmount(0),
+						},
+					},
+				}
+				mgr := hierarchy.NewManagerForTest(
+					map[kueue.CohortReference]*CohortSnapshot{"co": cohort},
+					map[kueue.ClusterQueueReference]*ClusterQueueSnapshot{"cq1": cq},
+				)
+				mgr.UpdateClusterQueueEdge("cq1", "co")
+				return cq
+			}(),
+			usage: workload.Usage{
+				Quota: workload.ResourceUsage{
+					Assigned: resources.FlavorResourceQuantities{
+						fr: resources.NewAmount(8),
+					},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := tc.cq.IsQuotaReclaimableFromBorrowers(tc.usage)
+			if got != tc.want {
+				t.Errorf("IsQuotaReclaimableFromBorrowers() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

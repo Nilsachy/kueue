@@ -29,6 +29,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -3715,5 +3716,201 @@ func TestTotalExecutionTime(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestInsufficientTopologyCondition(t *testing.T) {
+	const noDomainFits = "no domain fits"
+	now := time.Now()
+	fakeClock := testingclock.NewFakeClock(now)
+	wl := utiltestingapi.MakeWorkload("wl", "ns").Obj()
+
+	cmpCondition := func(want *metav1.Condition) string {
+		got := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadInsufficientTopology)
+		return cmp.Diff(want, got, cmpopts.IgnoreFields(metav1.Condition{}, "LastTransitionTime"))
+	}
+
+	// Initial reset returns false when condition does not exist
+	if ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, fakeClock) {
+		t.Errorf("Expected ResetInsufficientTopologyCondition to return false when condition does not exist")
+	}
+
+	// Set condition to True
+	if !SetInsufficientTopologyCondition(wl, now, kueue.WorkloadInsufficientTopology, noDomainFits) {
+		t.Errorf("Expected SetInsufficientTopologyCondition to return true when set for the first time")
+	}
+
+	wantCond := &metav1.Condition{
+		Type:    kueue.WorkloadInsufficientTopology,
+		Status:  metav1.ConditionTrue,
+		Reason:  kueue.WorkloadInsufficientTopology,
+		Message: noDomainFits,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after set (-want,+got):\n%s", diff)
+	}
+
+	// Reset condition to False
+	if !ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, fakeClock) {
+		t.Errorf("Expected ResetInsufficientTopologyCondition to return true when condition was True")
+	}
+
+	wantCond = &metav1.Condition{
+		Type:    kueue.WorkloadInsufficientTopology,
+		Status:  metav1.ConditionFalse,
+		Reason:  kueue.WorkloadInsufficientTopologyReasonAdmitted,
+		Message: "Previously: " + noDomainFits,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after reset (-want,+got):\n%s", diff)
+	}
+
+	// Second reset returns false when already False
+	if ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, fakeClock) {
+		t.Errorf("Expected ResetInsufficientTopologyCondition to return false when condition is already False")
+	}
+}
+
+func TestQuotaReclaimRequiredCondition(t *testing.T) {
+	const quotaNeeded = "insufficient unused quota for cpu in flavor default-flavor, 2 more needed"
+	now := time.Now()
+	fakeClock := testingclock.NewFakeClock(now)
+	wl := utiltestingapi.MakeWorkload("wl", "ns").Obj()
+
+	cmpCondition := func(want *metav1.Condition) string {
+		got := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReclaimRequired)
+		return cmp.Diff(want, got, cmpopts.IgnoreFields(metav1.Condition{}, "LastTransitionTime"))
+	}
+
+	// Initial reset returns false when condition does not exist
+	if ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonAdmitted, fakeClock) {
+		t.Errorf("Expected ResetQuotaReclaimRequiredCondition to return false when condition does not exist")
+	}
+
+	// Set condition to True
+	if !SetQuotaReclaimRequiredCondition(wl, now, kueue.WorkloadQuotaReclaimRequired, quotaNeeded) {
+		t.Errorf("Expected SetQuotaReclaimRequiredCondition to return true when set for the first time")
+	}
+
+	wantCond := &metav1.Condition{
+		Type:    kueue.WorkloadQuotaReclaimRequired,
+		Status:  metav1.ConditionTrue,
+		Reason:  kueue.WorkloadQuotaReclaimRequired,
+		Message: quotaNeeded,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after set (-want,+got):\n%s", diff)
+	}
+
+	// Reset condition to False with Admitted reason
+	if !ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonAdmitted, fakeClock) {
+		t.Errorf("Expected ResetQuotaReclaimRequiredCondition to return true when condition was True")
+	}
+
+	wantCond = &metav1.Condition{
+		Type:    kueue.WorkloadQuotaReclaimRequired,
+		Status:  metav1.ConditionFalse,
+		Reason:  kueue.WorkloadQuotaReclaimRequiredReasonAdmitted,
+		Message: "Previously: " + quotaNeeded,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after reset (-want,+got):\n%s", diff)
+	}
+
+	// Second reset returns false when already False
+	if ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonAdmitted, fakeClock) {
+		t.Errorf("Expected ResetQuotaReclaimRequiredCondition to return false when condition is already False")
+	}
+
+	// Set condition to True again
+	if !SetQuotaReclaimRequiredCondition(wl, now, kueue.WorkloadQuotaReclaimRequired, quotaNeeded) {
+		t.Errorf("Expected SetQuotaReclaimRequiredCondition to return true when set again")
+	}
+
+	// Reset condition to False with QuotaFreed reason
+	if !ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonQuotaFreed, fakeClock) {
+		t.Errorf("Expected ResetQuotaReclaimRequiredCondition to return true when condition was True")
+	}
+
+	wantCond = &metav1.Condition{
+		Type:    kueue.WorkloadQuotaReclaimRequired,
+		Status:  metav1.ConditionFalse,
+		Reason:  kueue.WorkloadQuotaReclaimRequiredReasonQuotaFreed,
+		Message: "Previously: " + quotaNeeded,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after reset with QuotaFreed reason (-want,+got):\n%s", diff)
+	}
+}
+
+func TestInsufficientQuotaCondition(t *testing.T) {
+	const quotaNeeded = "insufficient unused quota for cpu in flavor default-flavor, 2 more needed"
+	now := time.Now()
+	fakeClock := testingclock.NewFakeClock(now)
+	wl := utiltestingapi.MakeWorkload("wl", "ns").Obj()
+
+	cmpCondition := func(want *metav1.Condition) string {
+		got := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadInsufficientQuota)
+		return cmp.Diff(want, got, cmpopts.IgnoreFields(metav1.Condition{}, "LastTransitionTime"))
+	}
+
+	// Initial reset returns false when condition does not exist
+	if ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonAdmitted, fakeClock) {
+		t.Errorf("Expected ResetInsufficientQuotaCondition to return false when condition does not exist")
+	}
+
+	// Set condition to True
+	if !SetInsufficientQuotaCondition(wl, now, kueue.WorkloadInsufficientQuota, quotaNeeded) {
+		t.Errorf("Expected SetInsufficientQuotaCondition to return true when set for the first time")
+	}
+
+	wantCond := &metav1.Condition{
+		Type:    kueue.WorkloadInsufficientQuota,
+		Status:  metav1.ConditionTrue,
+		Reason:  kueue.WorkloadInsufficientQuota,
+		Message: quotaNeeded,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after set (-want,+got):\n%s", diff)
+	}
+
+	// Reset condition to False with Admitted reason
+	if !ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonAdmitted, fakeClock) {
+		t.Errorf("Expected ResetInsufficientQuotaCondition to return true when condition was True")
+	}
+
+	wantCond = &metav1.Condition{
+		Type:    kueue.WorkloadInsufficientQuota,
+		Status:  metav1.ConditionFalse,
+		Reason:  kueue.WorkloadInsufficientQuotaReasonAdmitted,
+		Message: "Previously: " + quotaNeeded,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after reset (-want,+got):\n%s", diff)
+	}
+
+	// Second reset returns false when already False
+	if ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonAdmitted, fakeClock) {
+		t.Errorf("Expected ResetInsufficientQuotaCondition to return false when condition is already False")
+	}
+
+	// Set condition to True again
+	if !SetInsufficientQuotaCondition(wl, now, kueue.WorkloadInsufficientQuota, quotaNeeded) {
+		t.Errorf("Expected SetInsufficientQuotaCondition to return true when set again")
+	}
+
+	// Reset condition to False with QuotaFreed reason
+	if !ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonQuotaFreed, fakeClock) {
+		t.Errorf("Expected ResetInsufficientQuotaCondition to return true when condition was True")
+	}
+
+	wantCond = &metav1.Condition{
+		Type:    kueue.WorkloadInsufficientQuota,
+		Status:  metav1.ConditionFalse,
+		Reason:  kueue.WorkloadInsufficientQuotaReasonQuotaFreed,
+		Message: "Previously: " + quotaNeeded,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after reset with QuotaFreed reason (-want,+got):\n%s", diff)
 	}
 }
