@@ -439,14 +439,8 @@ func (s *Scheduler) processEntry(
 		return
 	}
 
-	if features.Enabled(features.ConfigurablePreemption) {
-		if fitsCheck == schdcache.FitsCheckNoQuota {
-			e.markQuotaReclaimRequired()
-		} else if cq.IsQuotaReclaimableFromBorrowers(usage) {
-			e.markInsufficientQuota()
-		} else if fitsCheck == schdcache.FitsCheckNoTAS {
-			e.markInsufficientTopology()
-		}
+	if features.Enabled(features.ConfigurablePreemption) && fitsCheck == schdcache.FitsCheckNoTAS {
+		e.markInsufficientTopology()
 	}
 
 	if mode == flavorassigner.NoFit {
@@ -457,9 +451,6 @@ func (s *Scheduler) processEntry(
 	}
 
 	if mode == flavorassigner.Preempt {
-		if features.Enabled(features.ConfigurablePreemption) && fitsCheck == schdcache.FitsCheckNoTAS {
-			e.markInsufficientTopology()
-		}
 		if len(e.preemptionTargets) == 0 {
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
 			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
