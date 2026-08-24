@@ -551,7 +551,7 @@ const (
 	// owner: @Nilsachy
 	//
 	// Enables Configurable Preemption, including support for PreemptionConfig resources,
-	// custom preemption triggers, candidate filtering rules, ordering, and preemption rate limits.
+	// custom preemption triggers, candidate filtering rules, and ordering.
 	ConfigurablePreemption featuregate.Feature = "ConfigurablePreemption"
 )
 
