@@ -721,6 +721,12 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (r
 				if workload.ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, r.clock) {
 					updated = true
 				}
+				if workload.ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonAdmitted, r.clock) {
+					updated = true
+				}
+				if workload.ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonAdmitted, r.clock) {
+					updated = true
+				}
 			}
 			return updated, nil
 		})

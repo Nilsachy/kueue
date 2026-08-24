@@ -6781,6 +6781,302 @@ func TestSchedule(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "vuln-wl", kueue.WorkloadQuotaReservedReasonExceedsMaxQuota, corev1.EventTypeWarning).Obj(),
 			},
 		},
+		"InsufficientQuota condition set when workload cannot be scheduled because other workload in same CQ is using quota and ConfigurablePreemption is enabled": {
+			featureGates: map[featuregate.Feature]bool{
+				features.ConfigurablePreemption: true,
+			},
+			additionalClusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("reclaim-cq").
+					Preemption(kueue.ClusterQueuePreemption{
+						WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
+					}).
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "10").Obj()).
+					Obj(),
+			},
+			additionalLocalQueues: []kueue.LocalQueue{
+				*utiltestingapi.MakeLocalQueue("reclaim-lq", "default").ClusterQueue("reclaim-cq").Obj(),
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("admitted-wl", "default").
+					Queue("reclaim-lq").
+					Priority(2).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("reclaim-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "8").
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					Request(corev1.ResourceCPU, "8").
+					Obj(),
+				*utiltestingapi.MakeWorkload("waiting-wl", "default").
+					Queue("reclaim-lq").
+					Priority(2).
+					Request(corev1.ResourceCPU, "4").
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("admitted-wl", "default").
+					Queue("reclaim-lq").
+					Priority(2).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("reclaim-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "8").
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					Request(corev1.ResourceCPU, "8").
+					Obj(),
+				*utiltestingapi.MakeWorkload("waiting-wl", "default").
+					Queue("reclaim-lq").
+					Priority(2).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 2 more needed",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadInsufficientQuota,
+						Status:             metav1.ConditionTrue,
+						Reason:             kueue.WorkloadInsufficientQuota,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 2 more needed",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
+						Message:            "The workload has no reservation",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "main",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("4"),
+						},
+					}).
+					Request(corev1.ResourceCPU, "4").
+					Obj(),
+			},
+			wantInadmissibleLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"reclaim-cq": {"default/waiting-wl"},
+			},
+			wantAssignments: map[workload.Reference]kueue.Admission{
+				"default/admitted-wl": {
+					ClusterQueue: "reclaim-cq",
+					PodSetAssignments: []kueue.PodSetAssignment{
+						utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "8").
+							Obj(),
+					},
+				},
+			},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "waiting-wl", kueue.WorkloadQuotaReservedReasonWaitingForQuota, corev1.EventTypeWarning).
+					Message("couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 2 more needed").
+					Obj(),
+			},
+		},
+		"QuotaReclaimRequired condition set when workload cannot be scheduled because borrower from another CQ is using quota and ConfigurablePreemption is enabled": {
+			featureGates: map[featuregate.Feature]bool{
+				features.ConfigurablePreemption: true,
+			},
+			additionalClusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("cq-lender").
+					Cohort("cohort-reclaim").
+					Preemption(kueue.ClusterQueuePreemption{
+						ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
+						WithinClusterQueue:  kueue.PreemptionPolicyLowerPriority,
+					}).
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "10").Obj()).
+					Obj(),
+				*utiltestingapi.MakeClusterQueue("cq-borrower").
+					Cohort("cohort-reclaim").
+					Preemption(kueue.ClusterQueuePreemption{
+						ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
+						WithinClusterQueue:  kueue.PreemptionPolicyLowerPriority,
+					}).
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "0", "10").Obj()).
+					Obj(),
+			},
+			additionalLocalQueues: []kueue.LocalQueue{
+				*utiltestingapi.MakeLocalQueue("lq-lender", "default").ClusterQueue("cq-lender").Obj(),
+				*utiltestingapi.MakeLocalQueue("lq-borrower", "default").ClusterQueue("cq-borrower").Obj(),
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("borrower-wl", "default").
+					Queue("lq-borrower").
+					Priority(2).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("cq-borrower").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "10").
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					Request(corev1.ResourceCPU, "10").
+					Obj(),
+				*utiltestingapi.MakeWorkload("waiting-wl", "default").
+					Queue("lq-lender").
+					Priority(2).
+					Request(corev1.ResourceCPU, "5").
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("borrower-wl", "default").
+					Queue("lq-borrower").
+					Priority(2).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("cq-borrower").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "10").
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					Request(corev1.ResourceCPU, "10").
+					Obj(),
+				*utiltestingapi.MakeWorkload("waiting-wl", "default").
+					Queue("lq-lender").
+					Priority(2).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 5 more needed",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReclaimRequired,
+						Status:             metav1.ConditionTrue,
+						Reason:             kueue.WorkloadQuotaReclaimRequired,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 5 more needed",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
+						Message:            "The workload has no reservation",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "main",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("5"),
+						},
+					}).
+					Request(corev1.ResourceCPU, "5").
+					Obj(),
+			},
+			wantInadmissibleLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"cq-lender": {"default/waiting-wl"},
+			},
+			wantAssignments: map[workload.Reference]kueue.Admission{
+				"default/borrower-wl": {
+					ClusterQueue: "cq-borrower",
+					PodSetAssignments: []kueue.PodSetAssignment{
+						utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "10").
+							Obj(),
+					},
+				},
+			},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "waiting-wl", kueue.WorkloadQuotaReservedReasonWaitingForQuota, corev1.EventTypeWarning).
+					Message("couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 5 more needed").
+					Obj(),
+			},
+		},
+		"QuotaReclaimRequired condition not set when ConfigurablePreemption is disabled": {
+			additionalClusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("reclaim-cq").
+					Preemption(kueue.ClusterQueuePreemption{
+						WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
+					}).
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "10").Obj()).
+					Obj(),
+			},
+			additionalLocalQueues: []kueue.LocalQueue{
+				*utiltestingapi.MakeLocalQueue("reclaim-lq", "default").ClusterQueue("reclaim-cq").Obj(),
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("admitted-wl", "default").
+					Queue("reclaim-lq").
+					Priority(2).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("reclaim-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "8").
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					Request(corev1.ResourceCPU, "8").
+					Obj(),
+				*utiltestingapi.MakeWorkload("waiting-wl", "default").
+					Queue("reclaim-lq").
+					Priority(2).
+					Request(corev1.ResourceCPU, "4").
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("admitted-wl", "default").
+					Queue("reclaim-lq").
+					Priority(2).
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("reclaim-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "8").
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					Request(corev1.ResourceCPU, "8").
+					Obj(),
+				*utiltestingapi.MakeWorkload("waiting-wl", "default").
+					Queue("reclaim-lq").
+					Priority(2).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 2 more needed",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
+						Message:            "The workload has no reservation",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "main",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("4"),
+						},
+					}).
+					Request(corev1.ResourceCPU, "4").
+					Obj(),
+			},
+			wantInadmissibleLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"reclaim-cq": {"default/waiting-wl"},
+			},
+			wantAssignments: map[workload.Reference]kueue.Admission{
+				"default/admitted-wl": {
+					ClusterQueue: "reclaim-cq",
+					PodSetAssignments: []kueue.PodSetAssignment{
+						utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "8").
+							Obj(),
+					},
+				},
+			},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "waiting-wl", kueue.WorkloadQuotaReservedReasonWaitingForQuota, corev1.EventTypeWarning).
+					Message("couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 2 more needed").
+					Obj(),
+			},
+		},
 	}
 	runScheduleTestCases(t, scheduleTestConfig{
 		queues:          queues,

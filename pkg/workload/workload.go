@@ -1158,6 +1158,40 @@ func ResetInsufficientTopologyCondition(w *kueue.Workload, reason string, clock 
 	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadInsufficientTopology, reason, clock)
 }
 
+func SetQuotaReclaimRequiredCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
+	condition := metav1.Condition{
+		Type:               kueue.WorkloadQuotaReclaimRequired,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.NewTime(now),
+		Reason:             reason,
+		Message:            api.TruncateConditionMessage(message),
+		ObservedGeneration: w.Generation,
+	}
+	return apimeta.SetStatusCondition(&w.Status.Conditions, condition)
+}
+
+// ResetQuotaReclaimRequiredCondition resets the QuotaReclaimRequired condition to false if it was true.
+func ResetQuotaReclaimRequiredCondition(w *kueue.Workload, reason string, clock clock.Clock) bool {
+	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadQuotaReclaimRequired, reason, clock)
+}
+
+func SetInsufficientQuotaCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
+	condition := metav1.Condition{
+		Type:               kueue.WorkloadInsufficientQuota,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.NewTime(now),
+		Reason:             reason,
+		Message:            api.TruncateConditionMessage(message),
+		ObservedGeneration: w.Generation,
+	}
+	return apimeta.SetStatusCondition(&w.Status.Conditions, condition)
+}
+
+// ResetInsufficientQuotaCondition resets the InsufficientQuota condition to false if it was true.
+func ResetInsufficientQuotaCondition(w *kueue.Workload, reason string, clock clock.Clock) bool {
+	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadInsufficientQuota, reason, clock)
+}
+
 // PropagateResourceRequests synchronizes w.Status.ResourceRequests to
 // with info.TotalRequests if the feature gate is enabled and returns true if w was updated
 func PropagateResourceRequests(w *kueue.Workload, info *Info, formatter *resources.ResourceFormatter) bool {
