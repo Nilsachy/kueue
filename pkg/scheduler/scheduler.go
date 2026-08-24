@@ -440,9 +440,9 @@ func (s *Scheduler) processEntry(
 	}
 
 	if features.Enabled(features.ConfigurablePreemption) {
-		if fitsCheck == schdcache.FitsCheckNoQuota {
+		if cq.IsQuotaReclaimableFromBorrowers(usage) {
 			e.markQuotaReclaimRequired()
-		} else if cq.IsQuotaReclaimableFromBorrowers(usage) {
+		} else if fitsCheck == schdcache.FitsCheckNoQuota {
 			e.markInsufficientQuota()
 		} else if fitsCheck == schdcache.FitsCheckNoTAS {
 			e.markInsufficientTopology()
