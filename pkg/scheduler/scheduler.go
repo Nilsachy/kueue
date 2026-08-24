@@ -431,6 +431,10 @@ func (s *Scheduler) processEntry(
 		return
 	}
 
+	if features.Enabled(features.ConfigurablePreemption) && fitsCheck == schdcache.FitsCheckNoTAS {
+		e.markInsufficientTopology()
+	}
+
 	if mode == flavorassigner.NoFit {
 		e.requeueReason = qcache.RequeueReasonNoFit
 		log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
@@ -439,9 +443,6 @@ func (s *Scheduler) processEntry(
 	}
 
 	if mode == flavorassigner.Preempt {
-		if features.Enabled(features.ConfigurablePreemption) && fitsCheck == schdcache.FitsCheckNoTAS {
-			e.markInsufficientTopology()
-		}
 		if len(e.preemptionTargets) == 0 {
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
 			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
