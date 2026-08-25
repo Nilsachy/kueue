@@ -441,8 +441,10 @@ func (s *Scheduler) processEntry(
 
 	if features.Enabled(features.ConfigurablePreemption) {
 		if cq.IsQuotaReclaimableFromBorrowers(usage) {
+			// If the CQ has quota reclaimable from borrowers.
 			e.markQuotaReclaimRequired()
 		} else if fitsCheck == schdcache.FitsCheckNoQuota {
+			// If the CQ does not have enough unused quota. Only reached if NOT reclaimable from borrowers
 			e.markInsufficientQuota()
 		} else if fitsCheck == schdcache.FitsCheckNoTAS {
 			e.markInsufficientTopology()
