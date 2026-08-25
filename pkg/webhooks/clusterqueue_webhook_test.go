@@ -323,6 +323,26 @@ func TestValidateClusterQueue(t *testing.T) {
 			},
 		},
 		{
+			name: "valid preemptionConfigName with nil preemption",
+			clusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
+				PreemptionConfigName("my-preemption-config").
+				Obj(),
+		},
+		{
+			name: "preemption and preemptionConfigName are mutually exclusive",
+			clusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
+				Preemption(kueue.ClusterQueuePreemption{
+					ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
+				}).
+				PreemptionConfigName("my-preemption-config").
+				Obj(),
+			wantErr: field.ErrorList{
+				field.Invalid(specPath.Child("preemptionConfigName"), kueue.PreemptionConfigReference("my-preemption-config"), "preemption and preemptionConfigName are mutually exclusive"),
+			},
+			wantDetail:   "preemption and preemptionConfigName are mutually exclusive",
+			wantBadValue: "my-preemption-config",
+		},
+		{
 			name: "flavorFungibility preference set but whenCanPreempt != TryNextFlavor",
 			clusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
 				FlavorFungibility(kueue.FlavorFungibility{
@@ -512,6 +532,7 @@ func TestValidateClusterQueue(t *testing.T) {
 }
 
 func TestValidateClusterQueueUpdate(t *testing.T) {
+	specPath := field.NewPath("spec")
 	admissionCheckFlavorPath := admissionChecksPath.Index(0).Child("onFlavors").Index(0)
 	testcases := []struct {
 		name            string
@@ -531,6 +552,43 @@ func TestValidateClusterQueueUpdate(t *testing.T) {
 			oldClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").QueueingStrategy("BestEffortFIFO").Obj(),
 			newClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").QueueingStrategy("BestEffortFIFO").Obj(),
 			wantErr:         nil,
+		},
+		{
+			name: "preemptionConfigName can be updated",
+			oldClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
+				PreemptionConfigName("config-a").
+				Obj(),
+			newClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
+				PreemptionConfigName("config-b").
+				Obj(),
+			wantErr: nil,
+		},
+		{
+			name: "setting both preemption and preemptionConfigName on update is invalid",
+			oldClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
+				PreemptionConfigName("config-a").
+				Obj(),
+			newClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
+				PreemptionConfigName("config-a").
+				Preemption(kueue.ClusterQueuePreemption{
+					ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
+				}).
+				Obj(),
+			wantErr: field.ErrorList{
+				field.Invalid(specPath.Child("preemptionConfigName"), kueue.PreemptionConfigReference("config-a"), "preemption and preemptionConfigName are mutually exclusive"),
+			},
+		},
+		{
+			name: "switching from preemption to preemptionConfigName on update is valid",
+			oldClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
+				Preemption(kueue.ClusterQueuePreemption{
+					ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
+				}).
+				Obj(),
+			newClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
+				PreemptionConfigName("config-a").
+				Obj(),
+			wantErr: nil,
 		},
 		{
 			name: "legacy cluster queue with invalid onFlavors allows unrelated updates when the feature gate is disabled",
