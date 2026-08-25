@@ -1104,7 +1104,8 @@ spec:
                 x-kubernetes-map-type: atomic
               preemption:
                 default: {}
-                description: preemption defines the preemption policies.
+                description: preemption defines the preemption policies. Must be null
+                  if PreemptionConfigName is specified.
                 properties:
                   borrowWithinCohort:
                     default: {}
@@ -1183,6 +1184,16 @@ spec:
                 - message: reclaimWithinCohort=Never and borrowWithinCohort.Policy!=Never
                   rule: '!(self.reclaimWithinCohort == ''Never'' && has(self.borrowWithinCohort)
                     &&  self.borrowWithinCohort.policy != ''Never'')'
+              preemptionConfigName:
+                description: |-
+                  preemptionConfigName is a reference to the PreemptionConfig to be used.
+                  If specified, Preemption must be null. Settings in PreemptionConfig
+                  overwrite any preemption defaults that may be in the system.
+                  Indicated config defines which workloads will be considered for preemption
+                  if workload from this cluster queue cannot be scheduled due to resource or topology constraints.
+                maxLength: 253
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                type: string
               queueingStrategy:
                 default: BestEffortFIFO
                 description: |-
@@ -1356,6 +1367,8 @@ spec:
             - message: borrowingLimit must be nil when cohort is empty
               rule: '!has(self.cohortName) && has(self.resourceGroups) ? self.resourceGroups.all(rg,
                 rg.flavors.all(f, f.resources.all(r, !has(r.borrowingLimit)))) : true'
+            - message: preemption and preemptionConfigName are mutually exclusive
+              rule: '!(has(self.preemption) && has(self.preemptionConfigName))'
           status:
             description: status is the status of the ClusterQueue.
             properties:

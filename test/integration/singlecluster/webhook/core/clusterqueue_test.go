@@ -549,6 +549,19 @@ var _ = ginkgo.Describe("ClusterQueue Webhook", func() {
 					},
 				},
 				gomega.Succeed()),
+			ginkgo.Entry("Should forbid to create clusterQueue when both preemption and preemptionConfigName are set",
+				&kueue.ClusterQueue{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "cluster-queue",
+					},
+					Spec: kueue.ClusterQueueSpec{
+						Preemption: &kueue.ClusterQueuePreemption{
+							ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
+						},
+						PreemptionConfigName: new(kueue.PreemptionConfigReference("my-config")),
+					},
+				},
+				utiltesting.BeInvalidError()),
 			ginkgo.Entry("Should allow zero FairSharing weight",
 				&kueue.ClusterQueue{
 					ObjectMeta: metav1.ObjectMeta{
