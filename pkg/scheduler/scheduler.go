@@ -444,9 +444,10 @@ func (s *Scheduler) processEntry(
 			// If the CQ has quota reclaimable from borrowers.
 			e.markQuotaReclaimRequired()
 		} else if fitsCheck == schdcache.FitsCheckNoQuota {
-			// If the CQ does not have enough unused quota. Only reached if NOT reclaimable from borrowers
+			// If the CQ does not have enough unused quota. Only reached if NOT reclaimable from borrowers.
 			e.markInsufficientQuota()
 		} else if fitsCheck == schdcache.FitsCheckNoTAS {
+			// If quota is available, but the assigned TAS topology domain(s) do not have enough remaining capacity.
 			e.markInsufficientTopology()
 		}
 	}
