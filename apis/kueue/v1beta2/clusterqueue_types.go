@@ -128,13 +128,13 @@ type ClusterQueueSpec struct {
 	// +kubebuilder:default={}
 	FlavorFungibility *FlavorFungibility `json:"flavorFungibility,omitempty"`
 
-	// preemption defines the preemption policies. Must be null if PreemptionConfigName is specified.
+	// preemption defines the preemption policies. Must be null if preemptionConfigName is specified.
 	// +kubebuilder:default={}
 	// +optional
 	Preemption *ClusterQueuePreemption `json:"preemption,omitempty"`
 
 	// preemptionConfigName is a reference to the PreemptionConfig to be used.
-	// If specified, Preemption must be null. Settings in PreemptionConfig
+	// If specified, preemption must be null. Settings in PreemptionConfig
 	// overwrite any preemption defaults that may be in the system.
 	// Indicated config defines which workloads will be considered for preemption
 	// if workload from this cluster queue cannot be scheduled due to resource or topology constraints.
