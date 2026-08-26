@@ -432,7 +432,7 @@ func (s *Scheduler) processEntry(
 			// If the CQ or Cohort does not have enough unused quota.
 			e.insufficientQuota = true
 			if cq.IsQuotaReclaimableFromBorrowers(usage) {
-				// If the CQ has quota reclaimable from borrowers.
+				// If reclaiming the CQ's nominal quota from cohort borrowers would be sufficient to admit the workload.
 				e.quotaReclaimRequired = true
 			}
 		}
