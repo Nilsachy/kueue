@@ -948,7 +948,7 @@ const (
 	WorkloadInsufficientTopologyReasonAdmitted = "Admitted"
 
 	// WorkloadInsufficientQuota means that the Workload attempted to be admitted,
-	// but there was not enough unused quota in the ClusterQueue to accommodate the Workload.
+	// but there was not enough unused quota in the ClusterQueue or its Cohort to accommodate the Workload.
 	// It's only set if the ConfigurablePreemption feature gate is enabled.
 	WorkloadInsufficientQuota = "InsufficientQuota"
 
