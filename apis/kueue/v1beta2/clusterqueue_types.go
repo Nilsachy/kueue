@@ -129,7 +129,6 @@ type ClusterQueueSpec struct {
 	FlavorFungibility *FlavorFungibility `json:"flavorFungibility,omitempty"`
 
 	// preemption defines the preemption policies. Must be null if preemptionConfigName is specified.
-	// +kubebuilder:default={}
 	// +optional
 	Preemption *ClusterQueuePreemption `json:"preemption,omitempty"`
 
