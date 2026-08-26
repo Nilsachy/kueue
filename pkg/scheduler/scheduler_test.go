@@ -6955,6 +6955,13 @@ func TestSchedule(t *testing.T) {
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
+						Type:               kueue.WorkloadInsufficientQuota,
+						Status:             metav1.ConditionTrue,
+						Reason:             kueue.WorkloadInsufficientQuota,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 5 more needed",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
 						Type:               kueue.WorkloadAdmitted,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
