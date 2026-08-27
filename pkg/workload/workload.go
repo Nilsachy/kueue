@@ -1141,6 +1141,7 @@ func BlockedOnPreemptionGatesCondition(w *kueue.Workload) *metav1.Condition {
 	return nil
 }
 
+// SetInsufficientTopologyCondition sets the InsufficientTopology condition to true.
 func SetInsufficientTopologyCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
 	condition := metav1.Condition{
 		Type:               kueue.WorkloadInsufficientTopology,
@@ -1158,6 +1159,7 @@ func ResetInsufficientTopologyCondition(w *kueue.Workload, reason string, clock 
 	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadInsufficientTopology, reason, clock)
 }
 
+// SetQuotaReclaimRequiredCondition sets the QuotaReclaimRequired condition to true.
 func SetQuotaReclaimRequiredCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
 	condition := metav1.Condition{
 		Type:               kueue.WorkloadQuotaReclaimRequired,
@@ -1175,6 +1177,7 @@ func ResetQuotaReclaimRequiredCondition(w *kueue.Workload, reason string, clock 
 	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadQuotaReclaimRequired, reason, clock)
 }
 
+// SetInsufficientQuotaCondition sets the InsufficientQuota condition to true.
 func SetInsufficientQuotaCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
 	condition := metav1.Condition{
 		Type:               kueue.WorkloadInsufficientQuota,
