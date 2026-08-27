@@ -939,6 +939,7 @@ const (
 
 	// WorkloadInsufficientTopology means that the Workload attempted to be admitted,
 	// quota was available, but no topology domain satisfied its requirements.
+	// Unlike quota-related conditions, this condition does not have a "QuotaFreed" reason as it is only reset on admission.
 	// It's only set if the ConfigurablePreemption feature gate is enabled.
 	WorkloadInsufficientTopology = "InsufficientTopology"
 
@@ -963,6 +964,7 @@ const (
 	// WorkloadQuotaReclaimRequired means that the Workload attempted to be admitted,
 	// nominal total quota of the ClusterQueue is high enough, but quota needs to be reclaimed
 	// from other workloads before this workload can be scheduled.
+	// When this condition is set, WorkloadInsufficientQuota will also be set.
 	// It's only set if the ConfigurablePreemption feature gate is enabled.
 	WorkloadQuotaReclaimRequired = "QuotaReclaimRequired"
 
