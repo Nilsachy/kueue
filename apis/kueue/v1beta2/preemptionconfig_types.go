@@ -16,6 +16,10 @@ limitations under the License.
 
 package v1beta2
 
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
 // RelativeConstraint defines how a specified numeric property (e.g., a label value) of the preemptor compares to the candidate.
 // Possible values are:
 // - "Lower": permits preemption if candidate < preemptor
@@ -66,3 +70,78 @@ type NumericLabelConstraint struct {
 	// +optional
 	MaxValue *int32 `json:"maxValue,omitempty"`
 }
+
+type PreemptionConfig struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              PreemptionConfigSpec `json:"spec,omitempty"`
+}
+
+type PreemptionConfigSpec struct {
+	// Rules to select preemption candidates.
+	Rules []PreemptionRule
+	// Ordering of the preemption candidates.
+	// The order will be always deterministic, as UID
+	// of the workloads is used to break the ties
+	// If not set workloads will be just ordered by UID.
+	Ordering []OrderingField
+}
+
+type PreemptionRuleTrigger string
+
+const (
+	InsufficientQuota    PreemptionRuleTrigger = "InsufficientQuota"
+	QuotaReclaimRequired PreemptionRuleTrigger = "QuotaReclaimRequired"
+	InsufficientTopology PreemptionRuleTrigger = "InsufficientTopology"
+)
+
+type PreemptionRule struct {
+	Name string
+
+	// Label Selector indicating which workloads can trigger preemptions
+	// using this rule.
+	MatchingPreemptorWorkloads metav1.LabelSelector
+
+	Trigger PreemptionRuleTrigger
+
+	// How long the trigger has to occur to start preempting workloads specified by candidates. 0s indicates that preemptions can be started immediately. Default is 0s.
+	MinTriggerRequiredDuration metav1.Duration
+
+	// Selection rules for workloads that are candidates for preemption.
+	// Candidates resulting from multiple selectors are summed into one set. No selectors result in empty candidate set, thereby disallowing any preemptions with this rule.
+	Candidates []PreemptionCandidateSelector
+}
+
+type PreemptionRelationConstraint string
+
+const (
+	SameLocalQueue   PreemptionRelationConstraint = "SameLocalQueue"
+	SameClusterQueue PreemptionRelationConstraint = "SameClusterQueue"
+	SameCohort       PreemptionRelationConstraint = "SameCohort"
+	SameCohortTree   PreemptionRelationConstraint = "SameCohortTree"
+	AnyClusterQueue  PreemptionRelationConstraint = "AnyClusterQueue"
+)
+
+type PreemptionCandidateSelector struct {
+	// Required.
+	RelationRequirement PreemptionRelationConstraint
+
+	// Accepts all if not set
+	// Filter candidate workloads using custom numeric labels from the workload
+	// resource.
+	// Multiple numeric labels are joined using AND-rule (all have to be satisfied).
+	NumericLabels []NumericLabelConstraint
+
+	// The comparison is made against the preempting workload.
+	// Lower means that the candidate
+	// has lower priority than the preemptor and so on. No check is made
+	// if the field is nil.
+	RelativeWorkloadPriority *RelativeConstraint
+}
+
+type OrderingField string
+
+const (
+	Priority           OrderingField = "Priority"
+	AdmissionTimestamp OrderingField = "AdmissionTimestamp"
+)
