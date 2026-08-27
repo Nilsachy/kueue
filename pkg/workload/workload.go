@@ -1192,6 +1192,22 @@ func ResetInsufficientQuotaCondition(w *kueue.Workload, reason string, clock clo
 	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadInsufficientQuota, reason, clock)
 }
 
+// ResetConfigurablePreemptionConditions resets the InsufficientTopology, QuotaReclaimRequired,
+// and InsufficientQuota conditions to false if they were true.
+func ResetConfigurablePreemptionConditions(w *kueue.Workload, reason string, clock clock.Clock) bool {
+	var changed bool
+	if ResetInsufficientTopologyCondition(w, reason, clock) {
+		changed = true
+	}
+	if ResetQuotaReclaimRequiredCondition(w, reason, clock) {
+		changed = true
+	}
+	if ResetInsufficientQuotaCondition(w, reason, clock) {
+		changed = true
+	}
+	return changed
+}
+
 // PropagateResourceRequests synchronizes w.Status.ResourceRequests to
 // with info.TotalRequests if the feature gate is enabled and returns true if w was updated
 func PropagateResourceRequests(w *kueue.Workload, info *Info, formatter *resources.ResourceFormatter) bool {

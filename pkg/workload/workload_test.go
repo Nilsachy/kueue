@@ -3914,3 +3914,40 @@ func TestInsufficientQuotaCondition(t *testing.T) {
 		t.Errorf("Unexpected condition after reset with QuotaFreed reason (-want,+got):\n%s", diff)
 	}
 }
+
+func TestResetConfigurablePreemptionConditions(t *testing.T) {
+	now := time.Now()
+	fakeClock := testingclock.NewFakeClock(now)
+
+	// No conditions present: should return false
+	wl := utiltestingapi.MakeWorkload("wl", "ns").Obj()
+	if ResetConfigurablePreemptionConditions(wl, "Admitted", fakeClock) {
+		t.Errorf("Expected ResetConfigurablePreemptionConditions to return false when no conditions exist")
+	}
+
+	// All 3 conditions set: should reset all and return true
+	SetInsufficientTopologyCondition(wl, now, kueue.WorkloadInsufficientTopology, "no domain fits")
+	SetQuotaReclaimRequiredCondition(wl, now, kueue.WorkloadQuotaReclaimRequired, "reclaim needed")
+	SetInsufficientQuotaCondition(wl, now, kueue.WorkloadInsufficientQuota, "quota needed")
+
+	if !ResetConfigurablePreemptionConditions(wl, "Admitted", fakeClock) {
+		t.Errorf("Expected ResetConfigurablePreemptionConditions to return true when conditions were True")
+	}
+
+	for _, condType := range []string{
+		kueue.WorkloadInsufficientTopology,
+		kueue.WorkloadQuotaReclaimRequired,
+		kueue.WorkloadInsufficientQuota,
+	} {
+		cond := apimeta.FindStatusCondition(wl.Status.Conditions, condType)
+		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "Admitted" {
+			t.Errorf("Expected condition %s to be False with reason Admitted, got: %v", condType, cond)
+		}
+	}
+
+	// Calling again when already false: should return false
+	if ResetConfigurablePreemptionConditions(wl, "Admitted", fakeClock) {
+		t.Errorf("Expected ResetConfigurablePreemptionConditions to return false when conditions are already False")
+	}
+}
+
