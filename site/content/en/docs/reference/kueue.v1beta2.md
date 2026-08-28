@@ -1015,7 +1015,8 @@ before borrowing or preempting in the flavor being evaluated.</p>
 <a href="#kueue-x-k8s-io-v1beta2-ClusterQueuePreemption"><code>ClusterQueuePreemption</code></a>
 </td>
 <td>
-   <p>preemption defines the preemption policies. Must be null if PreemptionConfigName is specified.</p>
+   <p>preemption defines the preemption policies.
+This field is mutually exclusive with preemptionConfigName.</p>
 </td>
 </tr>
 <tr><td><code>preemptionConfigName</code><br/>
@@ -1023,10 +1024,10 @@ before borrowing or preempting in the flavor being evaluated.</p>
 </td>
 <td>
    <p>preemptionConfigName is a reference to the PreemptionConfig to be used.
-If specified, Preemption must be null. Settings in PreemptionConfig
-overwrite any preemption defaults that may be in the system.
-Indicated config defines which workloads will be considered for preemption
-if workload from this cluster queue cannot be scheduled due to resource or topology constraints.</p>
+Settings in PreemptionConfig overwrite any preemption defaults that may be in the system.
+The indicated config defines which workloads will be considered for preemption
+if a workload from this cluster queue cannot be scheduled due to resource or topology constraints.
+This field is mutually exclusive with preemption.</p>
 </td>
 </tr>
 <tr><td><code>admissionChecksStrategy</code><br/>
@@ -2731,20 +2732,6 @@ result in failure during workload admission.</p>
 </tbody>
 </table>
 
-## `PreemptionConfigReference`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigReference}
-    
-(Alias of `string`)
-
-**Appears in:**
-
-- [ClusterQueueSpec](#kueue-x-k8s-io-v1beta2-ClusterQueueSpec)
-
-
-<p>PreemptionConfigReference is the name of the PreemptionConfig.
-It must be a DNS (RFC 1123) and has the maximum length of 253 characters.</p>
-
-
-
 ## `PreemptionCandidateSelector`     {#kueue-x-k8s-io-v1beta2-PreemptionCandidateSelector}
     
 
@@ -2789,6 +2776,21 @@ if the field is nil.</p>
 </tr>
 </tbody>
 </table>
+
+## `PreemptionConfigReference`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigReference}
+    
+(Alias of `string`)
+
+**Appears in:**
+
+- [ClusterQueueSpec](#kueue-x-k8s-io-v1beta2-ClusterQueueSpec)
+
+
+<p>PreemptionConfigReference is the name of the PreemptionConfig.
+It must be a DNS (RFC 1123) and has the maximum length of 253 characters.</p>
+
+
+
 
 ## `PreemptionConfigSpec`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigSpec}
     
