@@ -6996,7 +6996,7 @@ func TestSchedule(t *testing.T) {
 					Obj(),
 			},
 		},
-		"QuotaReclaimRequired condition not set when workload cannot be scheduled because borrower from another CQ is using quota but ConfigurablePreemption is disabled": {
+		"QuotaReclaimRequired and InsufficientQuota conditions not set when workload cannot be scheduled because borrower from another CQ is using quota but ConfigurablePreemption is disabled": {
 			additionalClusterQueues: []kueue.ClusterQueue{
 				*utiltestingapi.MakeClusterQueue("cq-lender").
 					Cohort("cohort-reclaim").
