@@ -65,6 +65,9 @@ func (w *ClusterQueueWebhook) Default(ctx context.Context, cq *kueue.ClusterQueu
 	if !controllerutil.ContainsFinalizer(cq, kueue.ResourceInUseFinalizerName) {
 		controllerutil.AddFinalizer(cq, kueue.ResourceInUseFinalizerName)
 	}
+	if cq.Spec.Preemption == nil && cq.Spec.PreemptionConfigName == nil {
+		cq.Spec.Preemption = &kueue.ClusterQueuePreemption{}
+	}
 	return nil
 }
 

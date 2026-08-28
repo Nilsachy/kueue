@@ -67,13 +67,14 @@ type ClusterQueueSpecApplyConfiguration struct {
 	// flavorFungibility defines whether a workload should try the next flavor
 	// before borrowing or preempting in the flavor being evaluated.
 	FlavorFungibility *FlavorFungibilityApplyConfiguration `json:"flavorFungibility,omitempty"`
-	// preemption defines the preemption policies. Must be null if preemptionConfigName is specified.
+	// preemption defines the preemption policies.
+	// This field is mutually exclusive with preemptionConfigName.
 	Preemption *ClusterQueuePreemptionApplyConfiguration `json:"preemption,omitempty"`
 	// preemptionConfigName is a reference to the PreemptionConfig to be used.
-	// If specified, preemption must be null. Settings in PreemptionConfig
-	// overwrite any preemption defaults that may be in the system.
-	// Indicated config defines which workloads will be considered for preemption
-	// if workload from this cluster queue cannot be scheduled due to resource or topology constraints.
+	// Settings in PreemptionConfig overwrite any preemption defaults that may be in the system.
+	// The indicated config defines which workloads will be considered for preemption
+	// if a workload from this cluster queue cannot be scheduled due to resource or topology constraints.
+	// This field is mutually exclusive with preemption.
 	PreemptionConfigName *kueuev1beta2.PreemptionConfigReference `json:"preemptionConfigName,omitempty"`
 	// admissionChecksStrategy defines a list of strategies to determine which ResourceFlavors require AdmissionChecks.
 	AdmissionChecksStrategy *AdmissionChecksStrategyApplyConfiguration `json:"admissionChecksStrategy,omitempty"`
