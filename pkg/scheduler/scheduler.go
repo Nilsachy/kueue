@@ -435,8 +435,7 @@ func (s *Scheduler) processEntry(
 				// If reclaiming the CQ's nominal quota from cohort borrowers would be sufficient to admit the workload.
 				e.quotaReclaimRequired = true
 			}
-		}
-		if fitsCheck == schdcache.FitsCheckNoTAS {
+		} else if fitsCheck == schdcache.FitsCheckNoTAS {
 			// If quota is available, but the assigned TAS topology domain(s) do not have enough remaining capacity.
 			e.insufficientTopology = true
 		}
@@ -1186,7 +1185,7 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 	added := s.queues.RequeueWorkload(ctx, &e.Info, e.requeueReason, qcache.QuotaReservedReason(e.quotaReservedReason))
 	log.V(2).
 		Info("Workload re-queued", "workload", klog.KObj(e.Obj), "clusterQueue", klog.KRef("", string(e.ClusterQueue)), "queue", klog.KRef(e.Obj.Namespace, string(e.Obj.Spec.QueueName)), "requeueReason", e.requeueReason, "added", added, "status", e.status)
-	if e.status != notNominated && e.status != skipped && e.status != preemptionGated && !e.insufficientQuota && !e.quotaReclaimRequired && !e.insufficientTopology {
+	if e.status == notNominated || e.status == skipped || e.status == preemptionGated || e.insufficientQuota || e.quotaReclaimRequired || e.insufficientTopology {
 		return
 	}
 	if e.skipStatusUpdate {

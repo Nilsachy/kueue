@@ -3731,7 +3731,7 @@ func TestInsufficientTopologyCondition(t *testing.T) {
 	}
 
 	// Initial reset returns false when condition does not exist
-	if ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, fakeClock) {
+	if ResetInsufficientTopologyCondition(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetInsufficientTopologyCondition to return false when condition does not exist")
 	}
 
@@ -3751,14 +3751,14 @@ func TestInsufficientTopologyCondition(t *testing.T) {
 	}
 
 	// Reset condition to False
-	if !ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, fakeClock) {
+	if !ResetInsufficientTopologyCondition(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetInsufficientTopologyCondition to return true when condition was True")
 	}
 
 	wantCond = &metav1.Condition{
 		Type:    kueue.WorkloadInsufficientTopology,
 		Status:  metav1.ConditionFalse,
-		Reason:  kueue.WorkloadInsufficientTopologyReasonAdmitted,
+		Reason:  kueue.WorkloadConfigurablePreemptionReasonAdmitted,
 		Message: "Previously: " + noDomainFits,
 	}
 	if diff := cmpCondition(wantCond); diff != "" {
@@ -3766,7 +3766,7 @@ func TestInsufficientTopologyCondition(t *testing.T) {
 	}
 
 	// Second reset returns false when already False
-	if ResetInsufficientTopologyCondition(wl, kueue.WorkloadInsufficientTopologyReasonAdmitted, fakeClock) {
+	if ResetInsufficientTopologyCondition(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetInsufficientTopologyCondition to return false when condition is already False")
 	}
 }
@@ -3783,7 +3783,7 @@ func TestQuotaReclaimRequiredCondition(t *testing.T) {
 	}
 
 	// Initial reset returns false when condition does not exist
-	if ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonAdmitted, fakeClock) {
+	if ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetQuotaReclaimRequiredCondition to return false when condition does not exist")
 	}
 
@@ -3803,14 +3803,14 @@ func TestQuotaReclaimRequiredCondition(t *testing.T) {
 	}
 
 	// Reset condition to False with Admitted reason
-	if !ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonAdmitted, fakeClock) {
+	if !ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetQuotaReclaimRequiredCondition to return true when condition was True")
 	}
 
 	wantCond = &metav1.Condition{
 		Type:    kueue.WorkloadQuotaReclaimRequired,
 		Status:  metav1.ConditionFalse,
-		Reason:  kueue.WorkloadQuotaReclaimRequiredReasonAdmitted,
+		Reason:  kueue.WorkloadConfigurablePreemptionReasonAdmitted,
 		Message: "Previously: " + quotaNeeded,
 	}
 	if diff := cmpCondition(wantCond); diff != "" {
@@ -3818,7 +3818,7 @@ func TestQuotaReclaimRequiredCondition(t *testing.T) {
 	}
 
 	// Second reset returns false when already False
-	if ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonAdmitted, fakeClock) {
+	if ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetQuotaReclaimRequiredCondition to return false when condition is already False")
 	}
 
@@ -3855,7 +3855,7 @@ func TestInsufficientQuotaCondition(t *testing.T) {
 	}
 
 	// Initial reset returns false when condition does not exist
-	if ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonAdmitted, fakeClock) {
+	if ResetInsufficientQuotaCondition(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetInsufficientQuotaCondition to return false when condition does not exist")
 	}
 
@@ -3875,14 +3875,14 @@ func TestInsufficientQuotaCondition(t *testing.T) {
 	}
 
 	// Reset condition to False with Admitted reason
-	if !ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonAdmitted, fakeClock) {
+	if !ResetInsufficientQuotaCondition(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetInsufficientQuotaCondition to return true when condition was True")
 	}
 
 	wantCond = &metav1.Condition{
 		Type:    kueue.WorkloadInsufficientQuota,
 		Status:  metav1.ConditionFalse,
-		Reason:  kueue.WorkloadInsufficientQuotaReasonAdmitted,
+		Reason:  kueue.WorkloadConfigurablePreemptionReasonAdmitted,
 		Message: "Previously: " + quotaNeeded,
 	}
 	if diff := cmpCondition(wantCond); diff != "" {
@@ -3890,7 +3890,7 @@ func TestInsufficientQuotaCondition(t *testing.T) {
 	}
 
 	// Second reset returns false when already False
-	if ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonAdmitted, fakeClock) {
+	if ResetInsufficientQuotaCondition(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetInsufficientQuotaCondition to return false when condition is already False")
 	}
 
@@ -3921,7 +3921,7 @@ func TestResetConfigurablePreemptionConditions(t *testing.T) {
 
 	// No conditions present: should return false
 	wl := utiltestingapi.MakeWorkload("wl", "ns").Obj()
-	if ResetConfigurablePreemptionConditions(wl, "Admitted", fakeClock) {
+	if ResetConfigurablePreemptionConditions(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetConfigurablePreemptionConditions to return false when no conditions exist")
 	}
 
@@ -3930,7 +3930,7 @@ func TestResetConfigurablePreemptionConditions(t *testing.T) {
 	SetQuotaReclaimRequiredCondition(wl, now, kueue.WorkloadQuotaReclaimRequired, "reclaim needed")
 	SetInsufficientQuotaCondition(wl, now, kueue.WorkloadInsufficientQuota, "quota needed")
 
-	if !ResetConfigurablePreemptionConditions(wl, "Admitted", fakeClock) {
+	if !ResetConfigurablePreemptionConditions(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetConfigurablePreemptionConditions to return true when conditions were True")
 	}
 
@@ -3940,13 +3940,13 @@ func TestResetConfigurablePreemptionConditions(t *testing.T) {
 		kueue.WorkloadInsufficientQuota,
 	} {
 		cond := apimeta.FindStatusCondition(wl.Status.Conditions, condType)
-		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "Admitted" {
+		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != kueue.WorkloadConfigurablePreemptionReasonAdmitted {
 			t.Errorf("Expected condition %s to be False with reason Admitted, got: %v", condType, cond)
 		}
 	}
 
 	// Calling again when already false: should return false
-	if ResetConfigurablePreemptionConditions(wl, "Admitted", fakeClock) {
+	if ResetConfigurablePreemptionConditions(wl, kueue.WorkloadConfigurablePreemptionReasonAdmitted, fakeClock) {
 		t.Errorf("Expected ResetConfigurablePreemptionConditions to return false when conditions are already False")
 	}
 }

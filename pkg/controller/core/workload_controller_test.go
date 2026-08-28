@@ -792,7 +792,7 @@ func TestReconcile(t *testing.T) {
 				Condition(metav1.Condition{
 					Type:               kueue.WorkloadInsufficientTopology,
 					Status:             metav1.ConditionFalse,
-					Reason:             kueue.WorkloadInsufficientTopologyReasonAdmitted,
+					Reason:             kueue.WorkloadConfigurablePreemptionReasonAdmitted,
 					Message:            "Previously: no domain fits",
 					LastTransitionTime: metav1.NewTime(now),
 				}).
@@ -838,7 +838,7 @@ func TestReconcile(t *testing.T) {
 				Condition(metav1.Condition{
 					Type:               kueue.WorkloadQuotaReclaimRequired,
 					Status:             metav1.ConditionFalse,
-					Reason:             kueue.WorkloadQuotaReclaimRequiredReasonAdmitted,
+					Reason:             kueue.WorkloadConfigurablePreemptionReasonAdmitted,
 					Message:            "Previously: insufficient unused quota for cpu in flavor default, 2 more needed",
 					LastTransitionTime: metav1.NewTime(now),
 				}).
@@ -884,7 +884,7 @@ func TestReconcile(t *testing.T) {
 				Condition(metav1.Condition{
 					Type:               kueue.WorkloadInsufficientQuota,
 					Status:             metav1.ConditionFalse,
-					Reason:             kueue.WorkloadInsufficientQuotaReasonAdmitted,
+					Reason:             kueue.WorkloadConfigurablePreemptionReasonAdmitted,
 					Message:            "Previously: insufficient unused quota for cpu in flavor default, 2 more needed",
 					LastTransitionTime: metav1.NewTime(now),
 				}).
