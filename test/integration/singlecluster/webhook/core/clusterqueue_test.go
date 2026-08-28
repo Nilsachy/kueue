@@ -127,6 +127,28 @@ var _ = ginkgo.Describe("ClusterQueue Webhook", func() {
 					},
 				},
 			),
+			ginkgo.Entry("With preemptionConfigName",
+				kueue.ClusterQueue{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "foo",
+					},
+					Spec: kueue.ClusterQueueSpec{
+						PreemptionConfigName: new(kueue.PreemptionConfigReference("my-config")),
+					},
+				},
+				kueue.ClusterQueue{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "foo",
+						Finalizers: []string{kueue.ResourceInUseFinalizerName},
+					},
+					Spec: kueue.ClusterQueueSpec{
+						QueueingStrategy:     kueue.BestEffortFIFO,
+						StopPolicy:           new(kueue.None),
+						FlavorFungibility:    defaultFlavorFungibility,
+						PreemptionConfigName: new(kueue.PreemptionConfigReference("my-config")),
+					},
+				},
+			),
 			ginkgo.Entry("Default fair sharing",
 				kueue.ClusterQueue{
 					ObjectMeta: metav1.ObjectMeta{
@@ -549,6 +571,19 @@ var _ = ginkgo.Describe("ClusterQueue Webhook", func() {
 					},
 				},
 				gomega.Succeed()),
+			ginkgo.Entry("Should forbid to create clusterQueue when both preemption and preemptionConfigName are set",
+				&kueue.ClusterQueue{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "cluster-queue",
+					},
+					Spec: kueue.ClusterQueueSpec{
+						Preemption: &kueue.ClusterQueuePreemption{
+							ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
+						},
+						PreemptionConfigName: new(kueue.PreemptionConfigReference("my-config")),
+					},
+				},
+				utiltesting.BeInvalidError()),
 			ginkgo.Entry("Should allow zero FairSharing weight",
 				&kueue.ClusterQueue{
 					ObjectMeta: metav1.ObjectMeta{
