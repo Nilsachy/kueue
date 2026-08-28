@@ -948,7 +948,7 @@ const (
 	// WorkloadInsufficientTopologyReasonAdmitted indicates that the condition was reset because the workload was admitted.
 	WorkloadInsufficientTopologyReasonAdmitted = "Admitted"
 
-	// WorkloadInsufficientQuota means that the Workload attempted to be admitted,
+	// WorkloadInsufficientQuota means that there was an attempt to admit the workload,
 	// but there was not enough unused quota in the ClusterQueue or its Cohort to accommodate the Workload.
 	// It's only set if the ConfigurablePreemption feature gate is enabled.
 	WorkloadInsufficientQuota = "InsufficientQuota"
@@ -958,13 +958,12 @@ const (
 	// WorkloadInsufficientQuotaReasonAdmitted indicates that the condition was reset because the workload was admitted.
 	WorkloadInsufficientQuotaReasonAdmitted = "Admitted"
 
-	// WorkloadInsufficientQuotaReasonQuotaFreed indicates that the condition was reset because quota was freed.
+	// WorkloadInsufficientQuotaReasonQuotaFreed indicates that the condition was reset because enough quota was freed.
 	WorkloadInsufficientQuotaReasonQuotaFreed = "QuotaFreed"
 
-	// WorkloadQuotaReclaimRequired means that the Workload attempted to be admitted,
-	// nominal total quota of the ClusterQueue is high enough, but quota needs to be reclaimed
-	// from other workloads before this workload can be scheduled.
-	// When this condition is set, WorkloadInsufficientQuota will also be set.
+	// WorkloadQuotaReclaimRequired means that there was an attempt to admit the workload
+	// and workload should be admittable according to nominal quota of the ClusterQueue,
+	// but it cannot as quota was borrowed. Thereby, quota will have to be reclaimed before this workload is scheduled.
 	// It's only set if the ConfigurablePreemption feature gate is enabled.
 	WorkloadQuotaReclaimRequired = "QuotaReclaimRequired"
 
@@ -973,7 +972,7 @@ const (
 	// WorkloadQuotaReclaimRequiredReasonAdmitted indicates that the condition was reset because the workload was admitted.
 	WorkloadQuotaReclaimRequiredReasonAdmitted = "Admitted"
 
-	// WorkloadQuotaReclaimRequiredReasonQuotaFreed indicates that the condition was reset because quota was freed.
+	// WorkloadQuotaReclaimRequiredReasonQuotaFreed indicates that the condition was reset because enough quota was freed.
 	WorkloadQuotaReclaimRequiredReasonQuotaFreed = "QuotaFreed"
 
 	// WorkloadQuotaReserved means that the Workload has reserved quota a ClusterQueue.
