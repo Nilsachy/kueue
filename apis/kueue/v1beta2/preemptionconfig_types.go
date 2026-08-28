@@ -16,6 +16,10 @@ limitations under the License.
 
 package v1beta2
 
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
 // RelativeConstraint defines how a specified numeric property (e.g., a label value) of the preemptor compares to the candidate.
 // Possible values are:
 // - "Lower": permits preemption if candidate < preemptor
@@ -44,6 +48,8 @@ const (
 // other large topology workloads.
 // Please note that you should remember to append the designated label to the list of labels
 // copied to the workload via the Kueue main configuration.
+// If neither Relation, MinValue, nor MaxValue are specified, the constraint checks only that
+// candidate workloads possess the designated label key with a valid integer.
 type NumericLabelConstraint struct {
 	// Key is the label key that stores the integer value.
 	Key string `json:"key"`
@@ -66,3 +72,120 @@ type NumericLabelConstraint struct {
 	// +optional
 	MaxValue *int32 `json:"maxValue,omitempty"`
 }
+
+// +genclient
+// +genclient:nonNamespaced
+// +kubebuilder:object:root=true
+// +kubebuilder:storageversion
+// +kubebuilder:resource:scope=Cluster,shortName={preempcfg}
+type PreemptionConfig struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              PreemptionConfigSpec `json:"spec,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+// PreemptionConfigList contains a list of PreemptionConfig
+type PreemptionConfigList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []PreemptionConfig `json:"items"`
+}
+
+type PreemptionConfigSpec struct {
+	// Rules to select preemption candidates.
+	Rules []PreemptionRule `json:"rules,omitempty"`
+	// Ordering of the preemption candidates.
+	// The order will be always deterministic, as UID
+	// of the workloads is used to break the ties
+	// If not set workloads will be just ordered by UID.
+	Ordering []OrderingField `json:"ordering,omitempty"`
+}
+
+type PreemptionRuleTrigger string
+
+const (
+	InsufficientQuota    PreemptionRuleTrigger = "InsufficientQuota"
+	QuotaReclaimRequired PreemptionRuleTrigger = "QuotaReclaimRequired"
+	InsufficientTopology PreemptionRuleTrigger = "InsufficientTopology"
+)
+
+type PreemptionRule struct {
+	Name string `json:"name,omitempty"`
+
+	// Label Selector indicating which workloads can trigger preemptions
+	// using this rule.
+	MatchingPreemptorWorkloads metav1.LabelSelector `json:"matchingPreemptorWorkloads,omitempty"`
+
+	Trigger PreemptionRuleTrigger `json:"trigger,omitempty"`
+
+	// How long the trigger has to occur to start preempting workloads specified by candidates. 0s indicates that preemptions can be started immediately. Default is 0s.
+	MinTriggerRequiredDuration metav1.Duration `json:"minTriggerRequiredDuration,omitempty"`
+
+	// Selection rules for workloads that are candidates for preemption.
+	// Candidates resulting from multiple selectors are summed into one set. No selectors result in empty candidate set, thereby disallowing any preemptions with this rule.
+	Candidates []PreemptionCandidateSelector `json:"candidates,omitempty"`
+}
+
+// PreemptionRelationConstraint specifies the relational boundary between
+// the preempting workload's queue and candidate workloads' queues.
+// Possible values are:
+// - "SameLocalQueue": restricts preemption candidates to workloads submitted to the exact same LocalQueue (matching name and namespace).
+// - "SameClusterQueue": restricts preemption candidates to workloads submitted to the same ClusterQueue as the preemptor.
+// - "SameCohort": restricts preemption candidates to workloads in ClusterQueues that share the exact same immediate direct Cohort, as well as workloads in the preemptor's own ClusterQueue (even if standalone).
+// - "SameCohortTree": restricts preemption candidates to workloads in ClusterQueues that belong to the same Cohort Tree (sharing the same root ancestor Cohort), as well as workloads in the preemptor's own ClusterQueue (even if standalone).
+// - "AnyClusterQueue": places no relationship restrictions on preemption candidates.
+//
+// +kubebuilder:validation:Enum=SameLocalQueue;SameClusterQueue;SameCohort;SameCohortTree;AnyClusterQueue
+type PreemptionRelationConstraint string
+
+const (
+	// SameLocalQueue restricts preemption candidates to workloads submitted
+	// to the exact same LocalQueue (matching name and namespace).
+	SameLocalQueue PreemptionRelationConstraint = "SameLocalQueue"
+
+	// SameClusterQueue restricts preemption candidates to workloads submitted
+	// to the same ClusterQueue as the preemptor.
+	SameClusterQueue PreemptionRelationConstraint = "SameClusterQueue"
+
+	// SameCohort restricts preemption candidates to workloads in ClusterQueues
+	// that share the exact same immediate direct Cohort, as well as workloads in the
+	// preemptor's own ClusterQueue (even if standalone and lacking a parent cohort).
+	SameCohort PreemptionRelationConstraint = "SameCohort"
+
+	// SameCohortTree restricts preemption candidates to workloads in ClusterQueues
+	// that belong to the same Cohort Tree (sharing the same root ancestor Cohort),
+	// as well as workloads in the preemptor's own ClusterQueue (even if standalone and lacking a parent cohort).
+	SameCohortTree PreemptionRelationConstraint = "SameCohortTree"
+
+	// AnyClusterQueue places no relationship restrictions on preemption candidates.
+	AnyClusterQueue PreemptionRelationConstraint = "AnyClusterQueue"
+)
+
+// PreemptionCandidateSelector defines the selection criteria for workloads that are candidates for preemption.
+type PreemptionCandidateSelector struct {
+	// RelationRequirement specifies the queue or cohort relation boundary to the preemptor workload.
+	//
+	// +kubebuilder:validation:Required
+	RelationRequirement PreemptionRelationConstraint `json:"relationRequirement"`
+
+	// NumericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
+	// Multiple numeric label constraints are joined using logical AND (all must be satisfied).
+	// If not set does not add any additional candidate filtering.
+	// +optional
+	NumericLabels []NumericLabelConstraint `json:"numericLabels,omitempty"`
+
+	// The comparison is made against the preempting workload.
+	// Lower means that the candidate
+	// has lower priority than the preemptor and so on. No check is made
+	// if the field is nil.
+	RelativeWorkloadPriority *RelativeConstraint `json:"relativeWorkloadPriority,omitempty"`
+}
+
+type OrderingField string
+
+const (
+	Priority           OrderingField = "Priority"
+	AdmissionTimestamp OrderingField = "AdmissionTimestamp"
+)
