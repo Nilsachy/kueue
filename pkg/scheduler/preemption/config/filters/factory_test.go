@@ -25,19 +25,20 @@ import (
 	"k8s.io/utils/ptr"
 
 	kueuev1beta2 "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
 func TestNewCandidateFilters(t *testing.T) {
 	// Minimal snapshot required by constructor for resolving preemptor's cohort ancestors:
 	// rootA -> subA1 -> cq1
-	snapshot := newSnapshotBuilder().
+	snapshot := schdcache.NewSnapshotBuilder().
 		Cohort("rootA", "").
 		Cohort("subA1", "rootA").
 		ClusterQueue("cq1", "subA1").
 		Build()
 
-	preemptor := makeWorkloadInfo("preemptor", "ns1", "lq1", "cq1")
+	preemptor := schdcache.MakeWorkloadInfo("preemptor", "ns1", "lq1", "cq1")
 	preemptor.Obj.Labels = map[string]string{"tpu-size": "8"}
 
 	cases := map[string]struct {

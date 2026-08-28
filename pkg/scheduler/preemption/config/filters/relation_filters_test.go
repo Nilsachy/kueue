@@ -36,7 +36,7 @@ func TestClusterQueueRelationFilters(t *testing.T) {
 	// Standalone CQs (no cohort):
 	// - cqStandalone1
 	// - cqStandalone2
-	snapshot := newSnapshotBuilder().
+	snapshot := schdcache.NewSnapshotBuilder().
 		Cohort("rootA", "").
 		Cohort("subA1", "rootA").
 		Cohort("subSubA", "subA1").
@@ -264,19 +264,19 @@ func TestSameLocalQueueFilter(t *testing.T) {
 		wantMatch bool
 	}{
 		"matching namespace and queue name": {
-			candidate: makeWorkloadInfo("c-exact", "ns1", "lq1", "cq1SubA1"),
+			candidate: schdcache.MakeWorkloadInfo("c-exact", "ns1", "lq1", "cq1SubA1"),
 			wantMatch: true,
 		},
 		"different local queue name rejected": {
-			candidate: makeWorkloadInfo("c-diff-lq", "ns1", "lq2", "cq1SubA1"),
+			candidate: schdcache.MakeWorkloadInfo("c-diff-lq", "ns1", "lq2", "cq1SubA1"),
 			wantMatch: false,
 		},
 		"different namespace rejected": {
-			candidate: makeWorkloadInfo("c-diff-ns", "ns2", "lq1", "cq1SubA1"),
+			candidate: schdcache.MakeWorkloadInfo("c-diff-ns", "ns2", "lq1", "cq1SubA1"),
 			wantMatch: false,
 		},
 		"different namespace and queue name rejected": {
-			candidate: makeWorkloadInfo("c-diff-both", "ns2", "lq2", "cq1SubA1"),
+			candidate: schdcache.MakeWorkloadInfo("c-diff-both", "ns2", "lq2", "cq1SubA1"),
 			wantMatch: false,
 		},
 	}

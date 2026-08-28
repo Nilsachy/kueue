@@ -2031,38 +2031,29 @@ func TestIsQuotaReclaimableFromBorrowers(t *testing.T) {
 	}
 
 	makeCQWithCohort := func(cqNominal, cohortQuota, cohortUsage int64) *ClusterQueueSnapshot {
-		cohort := &CohortSnapshot{
-			Name:   "co",
-			Cohort: hierarchy.NewCohort[*ClusterQueueSnapshot](),
-			ResourceNode: resourceNode{
-				SubtreeQuota: resources.FlavorResourceQuantities{
-					fr: resources.NewAmount(cohortQuota),
-				},
-				Usage: resources.FlavorResourceQuantities{
-					fr: resources.NewAmount(cohortUsage),
-				},
-			},
-		}
-		cq := &ClusterQueueSnapshot{
-			Name: "cq1",
-			ResourceNode: resourceNode{
-				Quotas: map[resources.FlavorResource]ResourceQuota{
-					fr: {Nominal: resources.NewAmount(cqNominal)},
-				},
-				SubtreeQuota: resources.FlavorResourceQuantities{
-					fr: resources.NewAmount(cqNominal),
-				},
-				Usage: resources.FlavorResourceQuantities{
-					fr: resources.NewAmount(0),
-				},
-			},
-		}
-		mgr := hierarchy.NewManagerForTest(
-			map[kueue.CohortReference]*CohortSnapshot{"co": cohort},
-			map[kueue.ClusterQueueReference]*ClusterQueueSnapshot{"cq1": cq},
-		)
-		mgr.UpdateClusterQueueEdge("cq1", "co")
-		return cq
+		return NewSnapshotBuilder().
+			CohortWithQuotaAndUsage("co", "",
+				resources.FlavorResourceQuantities{fr: resources.NewAmount(cohortQuota)},
+				resources.FlavorResourceQuantities{fr: resources.NewAmount(cohortUsage)},
+			).
+			ClusterQueueWithQuotas("cq1", "co",
+				map[resources.FlavorResource]ResourceQuota{fr: {Nominal: resources.NewAmount(cqNominal)}},
+				resources.FlavorResourceQuantities{fr: resources.NewAmount(cqNominal)},
+				resources.FlavorResourceQuantities{fr: resources.NewAmount(0)},
+			).
+			Build().
+			ClusterQueue("cq1")
+	}
+
+	makeStandaloneCQ := func(cqNominal int64) *ClusterQueueSnapshot {
+		return NewSnapshotBuilder().
+			ClusterQueueWithQuotas("standalone", "",
+				map[resources.FlavorResource]ResourceQuota{fr: {Nominal: resources.NewAmount(cqNominal)}},
+				resources.FlavorResourceQuantities{fr: resources.NewAmount(cqNominal)},
+				resources.FlavorResourceQuantities{fr: resources.NewAmount(0)},
+			).
+			Build().
+			ClusterQueue("standalone")
 	}
 
 	wlUsage := makeUsage(5)
@@ -2073,20 +2064,7 @@ func TestIsQuotaReclaimableFromBorrowers(t *testing.T) {
 		want  bool
 	}{
 		"CQ without parent": {
-			cq: &ClusterQueueSnapshot{
-				Name: "standalone",
-				ResourceNode: resourceNode{
-					Quotas: map[resources.FlavorResource]ResourceQuota{
-						fr: {Nominal: resources.NewAmount(10)},
-					},
-					SubtreeQuota: resources.FlavorResourceQuantities{
-						fr: resources.NewAmount(10),
-					},
-					Usage: resources.FlavorResourceQuantities{
-						fr: resources.NewAmount(0),
-					},
-				},
-			},
+			cq:    makeStandaloneCQ(10),
 			usage: wlUsage,
 			want:  false,
 		},
