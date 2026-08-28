@@ -121,9 +121,6 @@ func validateClusterQueueSpec(cq *kueue.ClusterQueue) field.ErrorList {
 	allErrs = append(allErrs, validateResourceGroups(cq.Spec.ResourceGroups, config, path.Child("resourceGroups"), false)...)
 	allErrs = append(allErrs,
 		validation.ValidateLabelSelector(cq.Spec.NamespaceSelector, validation.LabelSelectorValidationOptions{}, path.Child("namespaceSelector"))...)
-	if cq.Spec.Preemption != nil && cq.Spec.PreemptionConfigName != nil {
-		allErrs = append(allErrs, field.Invalid(path.Child("preemptionConfigName"), *cq.Spec.PreemptionConfigName, "preemption and preemptionConfigName are mutually exclusive"))
-	}
 	if cq.Spec.Preemption != nil {
 		allErrs = append(allErrs, validatePreemption(cq.Spec.Preemption, path.Child("preemption"))...)
 	}

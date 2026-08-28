@@ -329,20 +329,6 @@ func TestValidateClusterQueue(t *testing.T) {
 				Obj(),
 		},
 		{
-			name: "preemption and preemptionConfigName are mutually exclusive",
-			clusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
-				Preemption(kueue.ClusterQueuePreemption{
-					ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
-				}).
-				PreemptionConfigName("my-preemption-config").
-				Obj(),
-			wantErr: field.ErrorList{
-				field.Invalid(specPath.Child("preemptionConfigName"), kueue.PreemptionConfigReference("my-preemption-config"), "preemption and preemptionConfigName are mutually exclusive"),
-			},
-			wantDetail:   "preemption and preemptionConfigName are mutually exclusive",
-			wantBadValue: "my-preemption-config",
-		},
-		{
 			name: "flavorFungibility preference set but whenCanPreempt != TryNextFlavor",
 			clusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
 				FlavorFungibility(kueue.FlavorFungibility{
@@ -532,7 +518,6 @@ func TestValidateClusterQueue(t *testing.T) {
 }
 
 func TestValidateClusterQueueUpdate(t *testing.T) {
-	specPath := field.NewPath("spec")
 	admissionCheckFlavorPath := admissionChecksPath.Index(0).Child("onFlavors").Index(0)
 	testcases := []struct {
 		name            string
@@ -562,21 +547,6 @@ func TestValidateClusterQueueUpdate(t *testing.T) {
 				PreemptionConfigName("config-b").
 				Obj(),
 			wantErr: nil,
-		},
-		{
-			name: "setting both preemption and preemptionConfigName on update is invalid",
-			oldClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
-				PreemptionConfigName("config-a").
-				Obj(),
-			newClusterQueue: utiltestingapi.MakeClusterQueue("cluster-queue").
-				PreemptionConfigName("config-a").
-				Preemption(kueue.ClusterQueuePreemption{
-					ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
-				}).
-				Obj(),
-			wantErr: field.ErrorList{
-				field.Invalid(specPath.Child("preemptionConfigName"), kueue.PreemptionConfigReference("config-a"), "preemption and preemptionConfigName are mutually exclusive"),
-			},
 		},
 		{
 			name: "switching from preemption to preemptionConfigName on update is valid",
