@@ -5785,7 +5785,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Obj(),
 			},
 		},
-		"QuotaReclaimRequired condition is reset when quota is freed but topology is insufficient under ConfigurablePreemption": {
+		"QuotaReclaimRequired and InsufficientQuota conditions are reset when quota is freed but topology is insufficient under ConfigurablePreemption": {
 			featureGates: map[featuregate.Feature]bool{
 				features.ConfigurablePreemption: true,
 			},
@@ -5806,6 +5806,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						Status:             metav1.ConditionTrue,
 						Reason:             kueue.WorkloadQuotaReclaimRequired,
 						Message:            "previous quota reclaim message",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadInsufficientQuota,
+						Status:             metav1.ConditionTrue,
+						Reason:             kueue.WorkloadInsufficientQuota,
+						Message:            "previous insufficient quota message",
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Obj(),
@@ -5877,6 +5884,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadQuotaReclaimRequiredReasonQuotaFreed,
 						Message:            "Previously: previous quota reclaim message",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadInsufficientQuota,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadInsufficientQuotaReasonQuotaFreed,
+						Message:            "Previously: previous insufficient quota message",
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
