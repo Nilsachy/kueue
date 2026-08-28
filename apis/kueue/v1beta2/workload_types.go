@@ -964,7 +964,7 @@ const (
 	// WorkloadQuotaReclaimRequiredReasonQuotaFreed indicates that the condition was reset because enough quota was freed.
 	WorkloadQuotaReclaimRequiredReasonQuotaFreed = "QuotaFreed"
 
-	// Common reasons for the Configurab;ePreemption conditions.
+	// Common reasons for the ConfigurablePreemption conditions.
 
 	// WorkloadConfigurablePreemptionReasonAdmitted indicates that the condition was reset because the workload was admitted.
 	WorkloadConfigurablePreemptionReasonAdmitted = "Admitted"
