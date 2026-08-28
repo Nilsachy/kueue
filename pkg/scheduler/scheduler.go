@@ -1212,6 +1212,9 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 }
 
 func (s *Scheduler) syncConfigurablePreemptionConditions(wl *kueue.Workload, e *entry) (updated bool) {
+	// InsufficientTopology is only set when topology placement fails and is not reset here (it is only reset upon admission).
+	// This is because the scheduler checks topology only after quota is satisfied, and to avoid frequent condition flips
+	// when topology is consumed or freed by other workloads while this workload is waiting on quota.
 	if e.insufficientTopology && workload.SetInsufficientTopologyCondition(wl, s.clock.Now(), kueue.WorkloadInsufficientTopology, e.inadmissibleMsg) {
 		updated = true
 	}
