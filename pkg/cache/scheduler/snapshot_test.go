@@ -2020,6 +2020,16 @@ func TestSnapshotAddRemoveWorkloadWithLendingLimit(t *testing.T) {
 func TestIsQuotaReclaimableFromBorrowers(t *testing.T) {
 	fr := resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU}
 
+	makeUsage := func(amt int64) workload.Usage {
+		return workload.Usage{
+			Quota: workload.ResourceUsage{
+				Assigned: resources.FlavorResourceQuantities{
+					fr: resources.NewAmount(amt),
+				},
+			},
+		}
+	}
+
 	makeCQWithCohort := func(cqNominal, cohortQuota, cohortUsage int64) *ClusterQueueSnapshot {
 		cohort := &CohortSnapshot{
 			Name:   "co",
@@ -2055,6 +2065,8 @@ func TestIsQuotaReclaimableFromBorrowers(t *testing.T) {
 		return cq
 	}
 
+	wlUsage := makeUsage(5)
+
 	cases := map[string]struct {
 		cq    *ClusterQueueSnapshot
 		usage workload.Usage
@@ -2075,47 +2087,33 @@ func TestIsQuotaReclaimableFromBorrowers(t *testing.T) {
 					},
 				},
 			},
-			usage: workload.Usage{
-				Quota: workload.ResourceUsage{
-					Assigned: resources.FlavorResourceQuantities{
-						fr: resources.NewAmount(5),
-					},
-				},
-			},
-			want: false,
+			usage: wlUsage,
+			want:  false,
 		},
 		"CQ in cohort with enough available quota": {
-			cq: makeCQWithCohort(10, 10, 0),
-			usage: workload.Usage{
-				Quota: workload.ResourceUsage{
-					Assigned: resources.FlavorResourceQuantities{
-						fr: resources.NewAmount(5),
-					},
-				},
-			},
-			want: false,
+			cq:    makeCQWithCohort(10, 10, 0),
+			usage: wlUsage,
+			want:  false,
 		},
 		"CQ in cohort, borrower is using quota, request fits within nominal": {
-			cq: makeCQWithCohort(10, 10, 10),
-			usage: workload.Usage{
-				Quota: workload.ResourceUsage{
-					Assigned: resources.FlavorResourceQuantities{
-						fr: resources.NewAmount(5),
-					},
-				},
-			},
-			want: true,
+			cq:    makeCQWithCohort(10, 10, 10),
+			usage: wlUsage,
+			want:  true,
 		},
 		"CQ in cohort, borrower is using quota, but request exceeds nominal": {
-			cq: makeCQWithCohort(5, 10, 10),
-			usage: workload.Usage{
-				Quota: workload.ResourceUsage{
-					Assigned: resources.FlavorResourceQuantities{
-						fr: resources.NewAmount(8),
-					},
-				},
-			},
-			want: false,
+			cq:    makeCQWithCohort(5, 10, 10),
+			usage: makeUsage(8),
+			want:  false,
+		},
+		"CQ in cohort with zero nominal quota, cohort has quota": {
+			cq:    makeCQWithCohort(0, 10, 0),
+			usage: wlUsage,
+			want:  false,
+		},
+		"CQ in cohort with zero nominal quota, cohort quota used by borrowers": {
+			cq:    makeCQWithCohort(0, 10, 10),
+			usage: wlUsage,
+			want:  false,
 		},
 	}
 
