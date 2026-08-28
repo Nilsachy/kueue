@@ -2098,7 +2098,9 @@ For example, this can be used to filter candidates based on topology domains, su
 and relation=&quot;Lower&quot;, allowing it to preempt smaller workloads rather than disrupting
 other large topology workloads.
 Please note that you should remember to append the designated label to the list of labels
-copied to the workload via the Kueue main configuration.</p>
+copied to the workload via the Kueue main configuration.
+If neither Relation, MinValue, nor MaxValue are specified, the constraint checks only that
+candidate workloads possess the designated label key with a valid integer.</p>
 
 
 <table class="table">
@@ -2726,6 +2728,8 @@ result in failure during workload admission.</p>
 - [PreemptionRule](#kueue-x-k8s-io-v1beta2-PreemptionRule)
 
 
+<p>PreemptionCandidateSelector defines the selection criteria for workloads that are candidates for preemption.</p>
+
 
 <table class="table">
 <thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
@@ -2736,17 +2740,16 @@ result in failure during workload admission.</p>
 <a href="#kueue-x-k8s-io-v1beta2-PreemptionRelationConstraint"><code>PreemptionRelationConstraint</code></a>
 </td>
 <td>
-   <p>Required.</p>
+   <p>RelationRequirement specifies the queue or cohort relation boundary to the preemptor workload.</p>
 </td>
 </tr>
-<tr><td><code>numericLabels</code> <B>[Required]</B><br/>
+<tr><td><code>numericLabels</code><br/>
 <a href="#kueue-x-k8s-io-v1beta2-NumericLabelConstraint"><code>[]NumericLabelConstraint</code></a>
 </td>
 <td>
-   <p>Accepts all if not set
-Filter candidate workloads using custom numeric labels from the workload
-resource.
-Multiple numeric labels are joined using AND-rule (all have to be satisfied).</p>
+   <p>NumericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
+Multiple numeric label constraints are joined using logical AND (all must be satisfied).
+If not set does not add any additional candidate filtering.</p>
 </td>
 </tr>
 <tr><td><code>relativeWorkloadPriority</code> <B>[Required]</B><br/>
@@ -2890,6 +2893,17 @@ If not set workloads will be just ordered by UID.</p>
 
 - [PreemptionCandidateSelector](#kueue-x-k8s-io-v1beta2-PreemptionCandidateSelector)
 
+
+<p>PreemptionRelationConstraint specifies the relational boundary between
+the preempting workload's queue and candidate workloads' queues.
+Possible values are:</p>
+<ul>
+<li>&quot;SameLocalQueue&quot;: restricts preemption candidates to workloads submitted to the exact same LocalQueue (matching name and namespace).</li>
+<li>&quot;SameClusterQueue&quot;: restricts preemption candidates to workloads submitted to the same ClusterQueue as the preemptor.</li>
+<li>&quot;SameCohort&quot;: restricts preemption candidates to workloads in ClusterQueues that share the exact same immediate direct Cohort, as well as workloads in the preemptor's own ClusterQueue (even if standalone).</li>
+<li>&quot;SameCohortTree&quot;: restricts preemption candidates to workloads in ClusterQueues that belong to the same Cohort Tree (sharing the same root ancestor Cohort), as well as workloads in the preemptor's own ClusterQueue (even if standalone).</li>
+<li>&quot;AnyClusterQueue&quot;: places no relationship restrictions on preemption candidates.</li>
+</ul>
 
 
 

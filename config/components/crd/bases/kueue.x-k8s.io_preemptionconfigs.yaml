@@ -57,13 +57,14 @@ spec:
                         Selection rules for workloads that are candidates for preemption.
                         Candidates resulting from multiple selectors are summed into one set. No selectors result in empty candidate set, thereby disallowing any preemptions with this rule.
                       items:
+                        description: PreemptionCandidateSelector defines the selection
+                          criteria for workloads that are candidates for preemption.
                         properties:
                           numericLabels:
                             description: |-
+                              NumericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
+                              Multiple numeric label constraints are joined using logical AND (all must be satisfied).
                               Accepts all if not set
-                              Filter candidate workloads using custom numeric labels from the workload
-                              resource.
-                              Multiple numeric labels are joined using AND-rule (all have to be satisfied).
                             items:
                               description: |-
                                 NumericLabelConstraint describes the configurations for filtering a numerical label.
@@ -73,6 +74,8 @@ spec:
                                 other large topology workloads.
                                 Please note that you should remember to append the designated label to the list of labels
                                 copied to the workload via the Kueue main configuration.
+                                If neither Relation, MinValue, nor MaxValue are specified, the constraint checks only that
+                                candidate workloads possess the designated label key with a valid integer.
                               properties:
                                 defaultValue:
                                   description: |-
@@ -113,7 +116,14 @@ spec:
                               type: object
                             type: array
                           relationRequirement:
-                            description: Required.
+                            description: RelationRequirement specifies the queue or
+                              cohort relation boundary to the preemptor workload.
+                            enum:
+                            - SameLocalQueue
+                            - SameClusterQueue
+                            - SameCohort
+                            - SameCohortTree
+                            - AnyClusterQueue
                             type: string
                           relativeWorkloadPriority:
                             description: |-
@@ -127,6 +137,8 @@ spec:
                             - LowerOrEqual
                             - GreaterOrEqual
                             type: string
+                        required:
+                        - relationRequirement
                         type: object
                       type: array
                     matchingPreemptorWorkloads:

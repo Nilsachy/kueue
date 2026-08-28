@@ -24,13 +24,14 @@ import (
 
 // PreemptionCandidateSelectorApplyConfiguration represents a declarative configuration of the PreemptionCandidateSelector type for use
 // with apply.
+//
+// PreemptionCandidateSelector defines the selection criteria for workloads that are candidates for preemption.
 type PreemptionCandidateSelectorApplyConfiguration struct {
-	// Required.
+	// RelationRequirement specifies the queue or cohort relation boundary to the preemptor workload.
 	RelationRequirement *kueuev1beta2.PreemptionRelationConstraint `json:"relationRequirement,omitempty"`
-	// Accepts all if not set
-	// Filter candidate workloads using custom numeric labels from the workload
-	// resource.
-	// Multiple numeric labels are joined using AND-rule (all have to be satisfied).
+	// NumericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
+	// Multiple numeric label constraints are joined using logical AND (all must be satisfied).
+	// If not set does not add any additional candidate filtering.
 	NumericLabels []NumericLabelConstraintApplyConfiguration `json:"numericLabels,omitempty"`
 	// The comparison is made against the preempting workload.
 	// Lower means that the candidate
