@@ -6786,7 +6786,7 @@ func TestSchedule(t *testing.T) {
 				features.ConfigurablePreemption: true,
 			},
 			additionalClusterQueues: []kueue.ClusterQueue{
-				*utiltestingapi.MakeClusterQueue("reclaim-cq").
+				*utiltestingapi.MakeClusterQueue("single-cq").
 					Preemption(kueue.ClusterQueuePreemption{
 						WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
 					}).
@@ -6795,13 +6795,13 @@ func TestSchedule(t *testing.T) {
 					Obj(),
 			},
 			additionalLocalQueues: []kueue.LocalQueue{
-				*utiltestingapi.MakeLocalQueue("reclaim-lq", "default").ClusterQueue("reclaim-cq").Obj(),
+				*utiltestingapi.MakeLocalQueue("single-lq", "default").ClusterQueue("single-cq").Obj(),
 			},
 			workloads: []kueue.Workload{
 				*utiltestingapi.MakeWorkload("admitted-wl", "default").
-					Queue("reclaim-lq").
+					Queue("single-lq").
 					Priority(2).
-					ReserveQuotaAt(utiltestingapi.MakeAdmission("reclaim-cq").
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("single-cq").
 						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
 							Assignment(corev1.ResourceCPU, "default", "8").
 							Obj()).
@@ -6810,16 +6810,16 @@ func TestSchedule(t *testing.T) {
 					Request(corev1.ResourceCPU, "8").
 					Obj(),
 				*utiltestingapi.MakeWorkload("waiting-wl", "default").
-					Queue("reclaim-lq").
+					Queue("single-lq").
 					Priority(2).
 					Request(corev1.ResourceCPU, "4").
 					Obj(),
 			},
 			wantWorkloads: []kueue.Workload{
 				*utiltestingapi.MakeWorkload("admitted-wl", "default").
-					Queue("reclaim-lq").
+					Queue("single-lq").
 					Priority(2).
-					ReserveQuotaAt(utiltestingapi.MakeAdmission("reclaim-cq").
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("single-cq").
 						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
 							Assignment(corev1.ResourceCPU, "default", "8").
 							Obj()).
@@ -6828,7 +6828,7 @@ func TestSchedule(t *testing.T) {
 					Request(corev1.ResourceCPU, "8").
 					Obj(),
 				*utiltestingapi.MakeWorkload("waiting-wl", "default").
-					Queue("reclaim-lq").
+					Queue("single-lq").
 					Priority(2).
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadQuotaReserved,
@@ -6861,11 +6861,11 @@ func TestSchedule(t *testing.T) {
 					Obj(),
 			},
 			wantInadmissibleLeft: map[kueue.ClusterQueueReference][]workload.Reference{
-				"reclaim-cq": {"default/waiting-wl"},
+				"single-cq": {"default/waiting-wl"},
 			},
 			wantAssignments: map[workload.Reference]kueue.Admission{
 				"default/admitted-wl": {
-					ClusterQueue: "reclaim-cq",
+					ClusterQueue: "single-cq",
 					PodSetAssignments: []kueue.PodSetAssignment{
 						utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
 							Assignment(corev1.ResourceCPU, "default", "8").
