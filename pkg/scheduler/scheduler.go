@@ -1186,30 +1186,29 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 	log.V(2).
 		Info("Workload re-queued", "workload", klog.KObj(e.Obj), "clusterQueue", klog.KRef("", string(e.ClusterQueue)), "queue", klog.KRef(e.Obj.Namespace, string(e.Obj.Spec.QueueName)), "requeueReason", e.requeueReason, "added", added, "status", e.status)
 	if e.status == notNominated || e.status == skipped || e.status == preemptionGated || e.insufficientQuota || e.quotaReclaimRequired || e.insufficientTopology {
-		return
-	}
-	if e.skipStatusUpdate {
-		log.V(3).Info("Skipping Workload status update", "workload", klog.KObj(e.Obj), "reason", e.inadmissibleMsg)
-		return
-	}
-	wl := e.Obj.DeepCopy()
-	condReason := workload.UnadmittedWorkloadReasonWithFallback(e.quotaReservedReason, "Pending")
-	if err := workloadpatching.PatchAdmissionStatus(ctx, s.client, wl, s.clock, func(wl *kueue.Workload) (bool, error) {
-		updated := workload.UnsetQuotaReservationWithCondition(wl, condReason, e.inadmissibleMsg, s.clock.Now())
-		if workload.PropagateResourceRequests(wl, &e.Info, s.resourceFormatter) {
-			updated = true
+		if e.skipStatusUpdate {
+			log.V(3).Info("Skipping Workload status update", "workload", klog.KObj(e.Obj), "reason", e.inadmissibleMsg)
+			return
 		}
-		if e.status == preemptionGated && workload.SetBlockedOnPreemptionGatesCondition(wl, s.clock.Now(), kueue.PreemptionGated, e.inadmissibleMsg) {
-			updated = true
+		wl := e.Obj.DeepCopy()
+		condReason := workload.UnadmittedWorkloadReasonWithFallback(e.quotaReservedReason, "Pending")
+		if err := workloadpatching.PatchAdmissionStatus(ctx, s.client, wl, s.clock, func(wl *kueue.Workload) (bool, error) {
+			updated := workload.UnsetQuotaReservationWithCondition(wl, condReason, e.inadmissibleMsg, s.clock.Now())
+			if workload.PropagateResourceRequests(wl, &e.Info, s.resourceFormatter) {
+				updated = true
+			}
+			if e.status == preemptionGated && workload.SetBlockedOnPreemptionGatesCondition(wl, s.clock.Now(), kueue.PreemptionGated, e.inadmissibleMsg) {
+				updated = true
+			}
+			if features.Enabled(features.ConfigurablePreemption) && s.syncConfigurablePreemptionConditions(wl, &e) {
+				updated = true
+			}
+			return updated, nil
+		}, workloadpatching.WithLooseOnApply(), workloadpatching.WithRetryOnConflict()); err != nil {
+			log.Error(err, "Could not update Workload status")
 		}
-		if features.Enabled(features.ConfigurablePreemption) && s.syncConfigurablePreemptionConditions(wl, &e) {
-			updated = true
-		}
-		return updated, nil
-	}, workloadpatching.WithLooseOnApply(), workloadpatching.WithRetryOnConflict()); err != nil {
-		log.Error(err, "Could not update Workload status")
+		s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, condReason, condReason, api.TruncateEventMessage(e.inadmissibleMsg))
 	}
-	s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, condReason, condReason, api.TruncateEventMessage(e.inadmissibleMsg))
 }
 
 func (s *Scheduler) syncConfigurablePreemptionConditions(wl *kueue.Workload, e *entry) (updated bool) {
