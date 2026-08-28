@@ -168,9 +168,14 @@ func (c *ClusterQueueSnapshot) IsQuotaReclaimableFromBorrowers(usage workload.Us
 	}
 	reclaimNeeded := false
 	for fr, q := range usage.Quota.Assigned {
+		// If Usage + q > Nominal, the workload exceeds this ClusterQueue's nominal quota,
+		// meaning it would need to borrow rather than reclaiming its own quota.
 		if c.BorrowingWith(fr, q) {
 			return false
 		}
+		// If the workload fits within nominal quota (!BorrowingWith), but currently available
+		// capacity is less than q, part of this ClusterQueue's nominal quota is currently
+		// lent to borrowing workloads in the cohort and must be reclaimed.
 		if c.Available(fr).Cmp(q) < 0 {
 			reclaimNeeded = true
 		}
