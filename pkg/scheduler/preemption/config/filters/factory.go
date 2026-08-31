@@ -37,10 +37,16 @@ func NewCandidateFilters(
 
 	cqRelationFilters, wlRelationFilters := buildRelationFilters(log, selector.RelationRequirement, preemptor, snapshot)
 	wlNumericFilters := buildNumericLabelFilters(log, selector.NumericLabels, preemptor)
+	wlPriorityFilters := buildPriorityFilters(log, selector.RelativeWorkloadPriority, preemptor)
+
+	var wlFilters []WorkloadFilter
+	wlFilters = append(wlFilters, wlRelationFilters...)
+	wlFilters = append(wlFilters, wlNumericFilters...)
+	wlFilters = append(wlFilters, wlPriorityFilters...)
 
 	return CandidateFilters{
 		CQFilters: cqRelationFilters,
-		WLFilters: append(wlRelationFilters, wlNumericFilters...),
+		WLFilters: wlFilters,
 	}
 }
 
@@ -89,3 +95,15 @@ func buildNumericLabelFilters(
 	}
 	return filters
 }
+
+func buildPriorityFilters(
+	log logr.Logger,
+	relativePriority *kueuev1beta2.RelativeConstraint,
+	preemptor *workload.Info,
+) []WorkloadFilter {
+	if relativePriority == nil {
+		return nil
+	}
+	return []WorkloadFilter{NewRelativeWorkloadPriorityFilter(log, *relativePriority, preemptor)}
+}
+

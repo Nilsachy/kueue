@@ -179,6 +179,61 @@ func TestNewCandidateFilters(t *testing.T) {
 				},
 			},
 		},
+		"SameClusterQueue with RelativeWorkloadPriority compiles both CQ and WL priority filters": {
+			selector: &kueuev1beta2.PreemptionCandidateSelector{
+				RelationRequirement:      kueuev1beta2.SameClusterQueue,
+				RelativeWorkloadPriority: ptr.To(kueuev1beta2.Lower),
+			},
+			preemptor: preemptor,
+			wantFilters: CandidateFilters{
+				CQFilters: []ClusterQueueFilter{
+					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+				},
+				WLFilters: []WorkloadFilter{
+					&relativeWorkloadPriorityFilter{
+						relation:          kueuev1beta2.Lower,
+						preemptorPriority: 0, // default priority when not explicitly set on preemptor
+					},
+				},
+			},
+		},
+		"Combined SameLocalQueue, NumericLabels, and RelativeWorkloadPriority compiles all filters": {
+			selector: &kueuev1beta2.PreemptionCandidateSelector{
+				RelationRequirement: kueuev1beta2.SameLocalQueue,
+				NumericLabels: []kueuev1beta2.NumericLabelConstraint{
+					{
+						Key:          "tpu-size",
+						DefaultValue: ptr.To[int32](1),
+						Relation:     ptr.To(kueuev1beta2.LowerOrEqual),
+					},
+				},
+				RelativeWorkloadPriority: ptr.To(kueuev1beta2.LowerOrEqual),
+			},
+			preemptor: preemptor,
+			wantFilters: CandidateFilters{
+				CQFilters: []ClusterQueueFilter{
+					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+				},
+				WLFilters: []WorkloadFilter{
+					&sameLocalQueueFilter{
+						namespace: "ns1",
+						queueName: "lq1",
+					},
+					&numericLabelFilter{
+						constraint: kueuev1beta2.NumericLabelConstraint{
+							Key:          "tpu-size",
+							DefaultValue: ptr.To[int32](1),
+							Relation:     ptr.To(kueuev1beta2.LowerOrEqual),
+						},
+						preemptorVal: ptr.To[int32](8),
+					},
+					&relativeWorkloadPriorityFilter{
+						relation:          kueuev1beta2.LowerOrEqual,
+						preemptorPriority: 0,
+					},
+				},
+			},
+		},
 	}
 
 	cmpOptions := []cmp.Option{
@@ -189,8 +244,10 @@ func TestNewCandidateFilters(t *testing.T) {
 			sameLocalQueueFilter{},
 			rejectAllCQFilter{},
 			numericLabelFilter{},
+			relativeWorkloadPriorityFilter{},
 		),
 		cmpopts.IgnoreFields(numericLabelFilter{}, "log"),
+		cmpopts.IgnoreFields(relativeWorkloadPriorityFilter{}, "log"),
 		cmpopts.EquateEmpty(),
 	}
 

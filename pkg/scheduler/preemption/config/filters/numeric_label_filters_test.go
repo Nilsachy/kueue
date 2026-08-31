@@ -116,28 +116,28 @@ func TestNumericLabelFilterMatches(t *testing.T) {
 			candidate: workload.NewInfo(utiltesting.MakeWorkload("c", "").Labels(map[string]string{"size": "4"}).Obj()),
 			wantMatch: false,
 		},
-		"GreaterOrEquals: candidate strictly greater matches": {
+		"GreaterOrEqual: candidate strictly greater matches": {
 			constraint: kueuev1beta2.NumericLabelConstraint{
 				Key:      "size",
-				Relation: ptr.To(kueuev1beta2.GreaterOrEquals),
+				Relation: ptr.To(kueuev1beta2.GreaterOrEqual),
 			},
 			preemptor: workload.NewInfo(utiltesting.MakeWorkload("p", "").Labels(map[string]string{"size": "8"}).Obj()),
 			candidate: workload.NewInfo(utiltesting.MakeWorkload("c", "").Labels(map[string]string{"size": "16"}).Obj()),
 			wantMatch: true,
 		},
-		"GreaterOrEquals: candidate equal matches": {
+		"GreaterOrEqual: candidate equal matches": {
 			constraint: kueuev1beta2.NumericLabelConstraint{
 				Key:      "size",
-				Relation: ptr.To(kueuev1beta2.GreaterOrEquals),
+				Relation: ptr.To(kueuev1beta2.GreaterOrEqual),
 			},
 			preemptor: workload.NewInfo(utiltesting.MakeWorkload("p", "").Labels(map[string]string{"size": "8"}).Obj()),
 			candidate: workload.NewInfo(utiltesting.MakeWorkload("c", "").Labels(map[string]string{"size": "8"}).Obj()),
 			wantMatch: true,
 		},
-		"GreaterOrEquals: candidate strictly smaller rejected": {
+		"GreaterOrEqual: candidate strictly smaller rejected": {
 			constraint: kueuev1beta2.NumericLabelConstraint{
 				Key:      "size",
-				Relation: ptr.To(kueuev1beta2.GreaterOrEquals),
+				Relation: ptr.To(kueuev1beta2.GreaterOrEqual),
 			},
 			preemptor: workload.NewInfo(utiltesting.MakeWorkload("p", "").Labels(map[string]string{"size": "8"}).Obj()),
 			candidate: workload.NewInfo(utiltesting.MakeWorkload("c", "").Labels(map[string]string{"size": "4"}).Obj()),
