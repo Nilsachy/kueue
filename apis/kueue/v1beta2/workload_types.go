@@ -964,6 +964,9 @@ const (
 	// WorkloadQuotaReclaimRequiredReasonQuotaFreed indicates that the condition was reset because enough quota was freed.
 	WorkloadQuotaReclaimRequiredReasonQuotaFreed = "QuotaFreed"
 
+	// WorkloadQuotaReclaimRequiredReasonNotEnoughReclaimableQuota indicates that the condition was reset because reclaiming nominal quota from cohort borrowers is no longer sufficient to admit the workload.
+	WorkloadQuotaReclaimRequiredReasonNotEnoughReclaimableQuota = "NotEnoughReclaimableQuota"
+
 	// Common reasons for the ConfigurablePreemption conditions.
 
 	// WorkloadConfigurablePreemptionReasonAdmitted indicates that the condition was reset because the workload was admitted.

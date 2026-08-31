@@ -3841,6 +3841,26 @@ func TestQuotaReclaimRequiredCondition(t *testing.T) {
 	if diff := cmpCondition(wantCond); diff != "" {
 		t.Errorf("Unexpected condition after reset with QuotaFreed reason (-want,+got):\n%s", diff)
 	}
+
+	// Set condition to True again
+	if !SetQuotaReclaimRequiredCondition(wl, now, kueue.WorkloadQuotaReclaimRequired, quotaNeeded) {
+		t.Errorf("Expected SetQuotaReclaimRequiredCondition to return true when set again")
+	}
+
+	// Reset condition to False with NotEnoughReclaimableQuota reason
+	if !ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonNotEnoughReclaimableQuota, fakeClock) {
+		t.Errorf("Expected ResetQuotaReclaimRequiredCondition to return true when condition was True")
+	}
+
+	wantCond = &metav1.Condition{
+		Type:    kueue.WorkloadQuotaReclaimRequired,
+		Status:  metav1.ConditionFalse,
+		Reason:  kueue.WorkloadQuotaReclaimRequiredReasonNotEnoughReclaimableQuota,
+		Message: "Previously: " + quotaNeeded,
+	}
+	if diff := cmpCondition(wantCond); diff != "" {
+		t.Errorf("Unexpected condition after reset with NotEnoughReclaimableQuota reason (-want,+got):\n%s", diff)
+	}
 }
 
 func TestInsufficientQuotaCondition(t *testing.T) {

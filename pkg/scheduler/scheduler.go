@@ -1222,8 +1222,14 @@ func (s *Scheduler) syncConfigurablePreemptionConditions(wl *kueue.Workload, e *
 		if workload.SetQuotaReclaimRequiredCondition(wl, s.clock.Now(), kueue.WorkloadQuotaReclaimRequired, e.inadmissibleMsg) {
 			updated = true
 		}
-	} else if workload.ResetQuotaReclaimRequiredCondition(wl, kueue.WorkloadQuotaReclaimRequiredReasonQuotaFreed, s.clock) {
-		updated = true
+	} else {
+		reason := kueue.WorkloadQuotaReclaimRequiredReasonQuotaFreed
+		if e.insufficientQuota {
+			reason = kueue.WorkloadQuotaReclaimRequiredReasonNotEnoughReclaimableQuota
+		}
+		if workload.ResetQuotaReclaimRequiredCondition(wl, reason, s.clock) {
+			updated = true
+		}
 	}
 	if e.insufficientQuota {
 		if workload.SetInsufficientQuotaCondition(wl, s.clock.Now(), kueue.WorkloadInsufficientQuota, e.inadmissibleMsg) {
