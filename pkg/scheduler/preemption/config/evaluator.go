@@ -31,25 +31,25 @@ import (
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/classical"
-	"sigs.k8s.io/kueue/pkg/scheduler/preemption/config/selectors"
+	"sigs.k8s.io/kueue/pkg/scheduler/preemption/config/filters"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
-type SelectorFactory func(rules []v1beta2.PreemptionRule) selectors.CandidateSelector
+type CandidateFilters func(log logr.Logger, selector *v1beta2.PreemptionCandidateSelector, preemptor *workload.Info, snapshot *schdcache.Snapshot) filters.CandidateFilters
 
 type preemptionEvaluator struct {
-	log             logr.Logger
-	clock           clock.Clock
-	config          v1beta2.PreemptionConfig
-	selectorFactory SelectorFactory
+	log              logr.Logger
+	clock            clock.Clock
+	config           v1beta2.PreemptionConfig
+	candidateFilters CandidateFilters
 }
 
-func NewPreemptionEvaluator(log logr.Logger, clock clock.Clock, config v1beta2.PreemptionConfig, selectorFactory SelectorFactory) *preemptionEvaluator {
+func NewPreemptionEvaluator(log logr.Logger, clock clock.Clock, config v1beta2.PreemptionConfig, candidateFilters CandidateFilters) *preemptionEvaluator {
 	return &preemptionEvaluator{
-		log:             log,
-		clock:           clock,
-		config:          config,
-		selectorFactory: selectorFactory,
+		log:              log,
+		clock:            clock,
+		config:           config,
+		candidateFilters: candidateFilters,
 	}
 }
 
@@ -73,40 +73,60 @@ func (p *preemptionEvaluator) Iter(snapshot *schdcache.Snapshot, preemptor *work
 }
 
 func (p *preemptionEvaluator) findCandidates(snapshot *schdcache.Snapshot, preemptor *workload.Info, flavorsNeedPreemption sets.Set[resources.FlavorResource]) ([]*workload.Info, error) {
-	activeRules := []v1beta2.PreemptionRule{}
+	candidateFilters := []filters.CandidateFilters{}
 	for _, rule := range p.config.Spec.Rules {
 		isActive, err := p.isActiveTrigger(rule, preemptor)
 		if err != nil {
 			return nil, err
 		}
 
-		if isActive {
-			activeRules = append(activeRules, rule)
+		if !isActive {
+			continue
+		}
+
+		for _, selector := range rule.Candidates {
+			candidateFilters = append(candidateFilters, p.candidateFilters(p.log, &selector, preemptor, snapshot))
 		}
 	}
 
-	if len(activeRules) == 0 {
+	if len(candidateFilters) == 0 {
 		return nil, nil
 	}
 
-	selector := p.selectorFactory(activeRules)
-	candidates := []*workload.Info{}
-
-	// It might not be needed to iterate over all ClusterQueues,
-	// it depends on the selector's config. Can be improved later.
+	candidateSet := sets.New[*workload.Info]()
 	for _, targetCq := range snapshot.ClusterQueues() {
-		targetCandidates := []*workload.Info{}
-		for _, wlInfo := range targetCq.Workloads {
-			if classical.WorkloadUsesResources(wlInfo, flavorsNeedPreemption) {
-				targetCandidates = append(targetCandidates, wlInfo)
+		for _, filter := range candidateFilters {
+			if !matchesClusterQueue(&filter, targetCq) {
+				continue
+			}
+
+			for _, wlInfo := range targetCq.Workloads {
+				if matchesWorkload(&filter, wlInfo) && classical.WorkloadUsesResources(wlInfo, flavorsNeedPreemption) {
+					candidateSet.Insert(wlInfo)
+				}
 			}
 		}
-
-		targetCandidates = selector.Filter(p.log, preemptor, targetCandidates)
-		candidates = append(candidates, targetCandidates...)
 	}
 
-	return candidates, nil
+	return candidateSet.UnsortedList(), nil
+}
+
+func matchesClusterQueue(filter *filters.CandidateFilters, cq *schdcache.ClusterQueueSnapshot) bool {
+	for _, cqFilter := range filter.CQFilters {
+		if !cqFilter.Matches(cq) {
+			return false
+		}
+	}
+	return true
+}
+
+func matchesWorkload(filter *filters.CandidateFilters, wl *workload.Info) bool {
+	for _, wlFilter := range filter.WLFilters {
+		if !wlFilter.Matches(wl) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *preemptionEvaluator) isActiveTrigger(rule v1beta2.PreemptionRule, wlInfo *workload.Info) (bool, error) {
