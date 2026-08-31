@@ -1141,6 +1141,7 @@ func BlockedOnPreemptionGatesCondition(w *kueue.Workload) *metav1.Condition {
 	return nil
 }
 
+// SetInsufficientTopologyCondition sets the InsufficientTopology condition to true.
 func SetInsufficientTopologyCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
 	condition := metav1.Condition{
 		Type:               kueue.WorkloadInsufficientTopology,
@@ -1156,6 +1157,58 @@ func SetInsufficientTopologyCondition(w *kueue.Workload, now time.Time, reason s
 // ResetInsufficientTopologyCondition resets the InsufficientTopology condition to false if it was true.
 func ResetInsufficientTopologyCondition(w *kueue.Workload, reason string, clock clock.Clock) bool {
 	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadInsufficientTopology, reason, clock)
+}
+
+// SetQuotaReclaimRequiredCondition sets the QuotaReclaimRequired condition to true.
+func SetQuotaReclaimRequiredCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
+	condition := metav1.Condition{
+		Type:               kueue.WorkloadQuotaReclaimRequired,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.NewTime(now),
+		Reason:             reason,
+		Message:            api.TruncateConditionMessage(message),
+		ObservedGeneration: w.Generation,
+	}
+	return apimeta.SetStatusCondition(&w.Status.Conditions, condition)
+}
+
+// ResetQuotaReclaimRequiredCondition resets the QuotaReclaimRequired condition to false if it was true.
+func ResetQuotaReclaimRequiredCondition(w *kueue.Workload, reason string, clock clock.Clock) bool {
+	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadQuotaReclaimRequired, reason, clock)
+}
+
+// SetInsufficientQuotaCondition sets the InsufficientQuota condition to true.
+func SetInsufficientQuotaCondition(w *kueue.Workload, now time.Time, reason string, message string) bool {
+	condition := metav1.Condition{
+		Type:               kueue.WorkloadInsufficientQuota,
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.NewTime(now),
+		Reason:             reason,
+		Message:            api.TruncateConditionMessage(message),
+		ObservedGeneration: w.Generation,
+	}
+	return apimeta.SetStatusCondition(&w.Status.Conditions, condition)
+}
+
+// ResetInsufficientQuotaCondition resets the InsufficientQuota condition to false if it was true.
+func ResetInsufficientQuotaCondition(w *kueue.Workload, reason string, clock clock.Clock) bool {
+	return resetActiveCondition(&w.Status.Conditions, w.Generation, kueue.WorkloadInsufficientQuota, reason, clock)
+}
+
+// ResetConfigurablePreemptionConditions resets the InsufficientTopology, QuotaReclaimRequired,
+// and InsufficientQuota conditions to false if they were true.
+func ResetConfigurablePreemptionConditions(w *kueue.Workload, reason string, clock clock.Clock) bool {
+	var changed bool
+	if ResetInsufficientTopologyCondition(w, reason, clock) {
+		changed = true
+	}
+	if ResetQuotaReclaimRequiredCondition(w, reason, clock) {
+		changed = true
+	}
+	if ResetInsufficientQuotaCondition(w, reason, clock) {
+		changed = true
+	}
+	return changed
 }
 
 // PropagateResourceRequests synchronizes w.Status.ResourceRequests to

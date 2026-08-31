@@ -939,13 +939,38 @@ const (
 
 	// WorkloadInsufficientTopology means that the Workload attempted to be admitted,
 	// quota was available, but no topology domain satisfied its requirements.
+	// Unlike quota-related conditions, this condition does not have a "QuotaFreed" reason as it is only reset on admission.
 	// It's only set if the ConfigurablePreemption feature gate is enabled.
 	WorkloadInsufficientTopology = "InsufficientTopology"
 
-	// Reasons for the WorkloadInsufficientTopology condition.
+	// WorkloadInsufficientQuota means that there was an attempt to admit the workload,
+	// but there was not enough unused quota in the ClusterQueue or its Cohort to accommodate the Workload.
+	// It's only set if the ConfigurablePreemption feature gate is enabled.
+	WorkloadInsufficientQuota = "InsufficientQuota"
 
-	// WorkloadInsufficientTopologyReasonAdmitted indicates that the condition was reset because the workload was admitted.
-	WorkloadInsufficientTopologyReasonAdmitted = "Admitted"
+	// Reasons for the WorkloadInsufficientQuota condition.
+
+	// WorkloadInsufficientQuotaReasonQuotaFreed indicates that the condition was reset because enough quota was freed.
+	WorkloadInsufficientQuotaReasonQuotaFreed = "QuotaFreed"
+
+	// WorkloadQuotaReclaimRequired means that there was an attempt to admit the workload
+	// and workload should be admittable according to nominal quota of the ClusterQueue,
+	// but it cannot as quota was borrowed. Thereby, quota will have to be reclaimed before this workload is scheduled.
+	// It's only set if the ConfigurablePreemption feature gate is enabled.
+	WorkloadQuotaReclaimRequired = "QuotaReclaimRequired"
+
+	// Reasons for the WorkloadQuotaReclaimRequired condition.
+
+	// WorkloadQuotaReclaimRequiredReasonQuotaFreed indicates that the condition was reset because enough quota was freed.
+	WorkloadQuotaReclaimRequiredReasonQuotaFreed = "QuotaFreed"
+
+	// WorkloadQuotaReclaimRequiredReasonNotEnoughReclaimableQuota indicates that the condition was reset because reclaiming nominal quota from cohort borrowers is no longer sufficient to admit the workload.
+	WorkloadQuotaReclaimRequiredReasonNotEnoughReclaimableQuota = "NotEnoughReclaimableQuota"
+
+	// Common reasons for the ConfigurablePreemption conditions.
+
+	// WorkloadConfigurablePreemptionReasonAdmitted indicates that the condition was reset because the workload was admitted.
+	WorkloadConfigurablePreemptionReasonAdmitted = "Admitted"
 
 	// WorkloadQuotaReserved means that the Workload has reserved quota a ClusterQueue.
 	WorkloadQuotaReserved = "QuotaReserved"

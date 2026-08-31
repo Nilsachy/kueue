@@ -263,10 +263,6 @@ func (e *entry) markPreemptionGated(msg string) {
 	e.LastAssignment = nil
 }
 
-func (e *entry) markInsufficientTopology() {
-	e.status = insufficientTopology
-}
-
 func (e *entry) markEvicted() {
 	e.status = evicted
 }
@@ -431,8 +427,18 @@ func (s *Scheduler) processEntry(
 		return
 	}
 
-	if features.Enabled(features.ConfigurablePreemption) && fitsCheck == schdcache.FitsCheckNoTAS {
-		e.markInsufficientTopology()
+	if features.Enabled(features.ConfigurablePreemption) {
+		if fitsCheck == schdcache.FitsCheckNoQuota {
+			// If the CQ or Cohort does not have enough unused quota.
+			e.insufficientQuota = true
+			if cq.IsQuotaReclaimableFromBorrowers(usage) {
+				// If reclaiming the CQ's nominal quota from cohort borrowers would be sufficient to admit the workload.
+				e.quotaReclaimRequired = true
+			}
+		} else if fitsCheck == schdcache.FitsCheckNoTAS {
+			// If quota is available, but the assigned TAS topology domain(s) do not have enough remaining capacity.
+			e.insufficientTopology = true
+		}
 	}
 
 	if mode == flavorassigner.NoFit {
@@ -628,8 +634,6 @@ const (
 	skipped entryStatus = "skipped"
 	// indicates if the workload was preemptionGated in this cycle.
 	preemptionGated entryStatus = "preemptionGated"
-	// indicates if the workload could not be admitted because no topology domain satisfied its requirements while quota was available.
-	insufficientTopology entryStatus = "insufficientTopology"
 	// indicates if the workload was evicted in this cycle.
 	evicted entryStatus = "evicted"
 	// indicates if the workload was assumed to have been admitted.
@@ -651,6 +655,9 @@ type entry struct {
 	clusterQueueSnapshot *schdcache.ClusterQueueSnapshot
 	quotaReservedReason  string
 	skipStatusUpdate     bool
+	insufficientTopology bool
+	insufficientQuota    bool
+	quotaReclaimRequired bool
 }
 
 func (e *entry) assignmentUsage(log logr.Logger) workload.Usage {
@@ -1178,7 +1185,7 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 	added := s.queues.RequeueWorkload(ctx, &e.Info, e.requeueReason, qcache.QuotaReservedReason(e.quotaReservedReason))
 	log.V(2).
 		Info("Workload re-queued", "workload", klog.KObj(e.Obj), "clusterQueue", klog.KRef("", string(e.ClusterQueue)), "queue", klog.KRef(e.Obj.Namespace, string(e.Obj.Spec.QueueName)), "requeueReason", e.requeueReason, "added", added, "status", e.status)
-	if e.status == notNominated || e.status == skipped || e.status == preemptionGated || e.status == insufficientTopology {
+	if e.status == notNominated || e.status == skipped || e.status == preemptionGated || e.insufficientQuota || e.quotaReclaimRequired || e.insufficientTopology {
 		if e.skipStatusUpdate {
 			log.V(3).Info("Skipping Workload status update", "workload", klog.KObj(e.Obj), "reason", e.inadmissibleMsg)
 			return
@@ -1190,11 +1197,11 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 			if workload.PropagateResourceRequests(wl, &e.Info, s.resourceFormatter) {
 				updated = true
 			}
-			if e.status == preemptionGated {
-				updated = workload.SetBlockedOnPreemptionGatesCondition(wl, s.clock.Now(), kueue.PreemptionGated, e.inadmissibleMsg)
+			if e.status == preemptionGated && workload.SetBlockedOnPreemptionGatesCondition(wl, s.clock.Now(), kueue.PreemptionGated, e.inadmissibleMsg) {
+				updated = true
 			}
-			if e.status == insufficientTopology {
-				updated = workload.SetInsufficientTopologyCondition(wl, s.clock.Now(), kueue.WorkloadInsufficientTopology, e.inadmissibleMsg)
+			if features.Enabled(features.ConfigurablePreemption) && s.syncConfigurablePreemptionConditions(wl, &e) {
+				updated = true
 			}
 			return updated, nil
 		}, workloadpatching.WithLooseOnApply(), workloadpatching.WithRetryOnConflict()); err != nil {
@@ -1202,6 +1209,36 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 		}
 		s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, condReason, condReason, api.TruncateEventMessage(e.inadmissibleMsg))
 	}
+}
+
+func (s *Scheduler) syncConfigurablePreemptionConditions(wl *kueue.Workload, e *entry) (updated bool) {
+	// InsufficientTopology is only set when topology placement fails and is not reset here (it is only reset upon admission).
+	// This is because the scheduler checks topology only after quota is satisfied, and to avoid frequent condition flips
+	// when topology is consumed or freed by other workloads while this workload is waiting on quota.
+	if e.insufficientTopology && workload.SetInsufficientTopologyCondition(wl, s.clock.Now(), kueue.WorkloadInsufficientTopology, e.inadmissibleMsg) {
+		updated = true
+	}
+	if e.quotaReclaimRequired {
+		if workload.SetQuotaReclaimRequiredCondition(wl, s.clock.Now(), kueue.WorkloadQuotaReclaimRequired, e.inadmissibleMsg) {
+			updated = true
+		}
+	} else {
+		reason := kueue.WorkloadQuotaReclaimRequiredReasonQuotaFreed
+		if e.insufficientQuota {
+			reason = kueue.WorkloadQuotaReclaimRequiredReasonNotEnoughReclaimableQuota
+		}
+		if workload.ResetQuotaReclaimRequiredCondition(wl, reason, s.clock) {
+			updated = true
+		}
+	}
+	if e.insufficientQuota {
+		if workload.SetInsufficientQuotaCondition(wl, s.clock.Now(), kueue.WorkloadInsufficientQuota, e.inadmissibleMsg) {
+			updated = true
+		}
+	} else if workload.ResetInsufficientQuotaCondition(wl, kueue.WorkloadInsufficientQuotaReasonQuotaFreed, s.clock) {
+		updated = true
+	}
+	return updated
 }
 
 // recordWorkloadAdmissionMetrics records metrics and events for workload admission process
