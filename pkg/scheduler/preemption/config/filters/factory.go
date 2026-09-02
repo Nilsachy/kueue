@@ -17,27 +17,45 @@ limitations under the License.
 package filters
 
 import (
-	"github.com/go-logr/logr"
+	"context"
 
-	kueuev1beta2 "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
-// NewCandidateFilters compiles PreemptionCandidateSelector rules into CandidateFilters.
+// NewCandidateFilters compiles PreemptionCandidateSelector rules into CandidateFilters & RejectAll boolean (if preemptor doesn't pass).
+// It returns (CandidateFilters{}, true) if the preemptor fails to match PreemptingWorkloadPrioritySelector and all the candidates should be rejected.
 func NewCandidateFilters(
+	ctx context.Context,
 	log logr.Logger,
-	selector *kueuev1beta2.PreemptionCandidateSelector,
+	selector *kueue.PreemptionCandidateSelector,
 	preemptor *workload.Info,
 	snapshot *schdcache.Snapshot,
-) CandidateFilters {
+	reader client.Reader,
+) (CandidateFilters, bool) {
 	if selector == nil {
-		return CandidateFilters{}
+		return CandidateFilters{}, false
 	}
 
-	cqRelationFilters, wlRelationFilters := buildRelationFilters(log, selector.RelationRequirement, preemptor, snapshot)
+	if !CheckPreemptingWorkloadPriority(ctx, log, selector.PreemptingWorkloadPrioritySelector, preemptor, reader) {
+		return CandidateFilters{}, true
+	}
+
+	wlPriorityFilters, ok := buildPriorityFilters(ctx, log, selector, preemptor, reader)
+	if !ok {
+		return CandidateFilters{}, true
+	}
+
+	cqRelationFilters, wlRelationFilters, ok := buildRelationFilters(log, selector.RelationRequirement, preemptor, snapshot)
+	if !ok {
+		return CandidateFilters{}, true
+	}
 	wlNumericFilters := buildNumericLabelFilters(log, selector.NumericLabels, preemptor)
-	wlPriorityFilters := buildPriorityFilters(log, selector.RelativeWorkloadPriority, preemptor)
 
 	var wlFilters []WorkloadFilter
 	wlFilters = append(wlFilters, wlRelationFilters...)
@@ -47,43 +65,43 @@ func NewCandidateFilters(
 	return CandidateFilters{
 		CQFilters: cqRelationFilters,
 		WLFilters: wlFilters,
-	}
+	}, false
 }
 
 func buildRelationFilters(
 	log logr.Logger,
-	relation kueuev1beta2.PreemptionRelationConstraint,
+	relation kueue.PreemptionRelationConstraint,
 	preemptor *workload.Info,
 	snapshot *schdcache.Snapshot,
-) ([]ClusterQueueFilter, []WorkloadFilter) {
+) ([]ClusterQueueFilter, []WorkloadFilter, bool) {
 	switch relation {
-	case kueuev1beta2.SameLocalQueue:
+	case kueue.SameLocalQueue:
 		// CQ Level: Prune all other ClusterQueues
 		// WL Level: Narrow down workloads to those matching exactly same LocalQueue
 		return []ClusterQueueFilter{NewSameClusterQueueFilter(preemptor.ClusterQueue)},
-			[]WorkloadFilter{NewSameLocalQueueFilter(preemptor.Obj.Namespace, preemptor.Obj.Spec.QueueName)}
+			[]WorkloadFilter{NewSameLocalQueueFilter(preemptor.Obj.Namespace, preemptor.Obj.Spec.QueueName)}, true
 
-	case kueuev1beta2.SameClusterQueue:
-		return []ClusterQueueFilter{NewSameClusterQueueFilter(preemptor.ClusterQueue)}, nil
+	case kueue.SameClusterQueue:
+		return []ClusterQueueFilter{NewSameClusterQueueFilter(preemptor.ClusterQueue)}, nil, true
 
-	case kueuev1beta2.SameCohort:
-		return []ClusterQueueFilter{NewSameCohortFilter(preemptor.ClusterQueue, snapshot)}, nil
+	case kueue.SameCohort:
+		return []ClusterQueueFilter{NewSameCohortFilter(preemptor.ClusterQueue, snapshot)}, nil, true
 
-	case kueuev1beta2.SameCohortTree:
-		return []ClusterQueueFilter{NewSameCohortTreeFilter(preemptor.ClusterQueue, snapshot)}, nil
+	case kueue.SameCohortTree:
+		return []ClusterQueueFilter{NewSameCohortTreeFilter(preemptor.ClusterQueue, snapshot)}, nil, true
 
-	case kueuev1beta2.AnyClusterQueue:
-		return nil, nil
+	case kueue.AnyClusterQueue:
+		return nil, nil, true
 
 	default:
 		log.V(3).Info("Unsupported or unhandled relation constraint evaluated; 0 candidates permitted", "relation", relation)
-		return []ClusterQueueFilter{NewRejectAllCQFilter()}, nil
+		return nil, nil, false
 	}
 }
 
 func buildNumericLabelFilters(
 	log logr.Logger,
-	labels []kueuev1beta2.NumericLabelConstraint,
+	labels []kueue.NumericLabelConstraint,
 	preemptor *workload.Info,
 ) []WorkloadFilter {
 	if len(labels) == 0 {
@@ -97,13 +115,28 @@ func buildNumericLabelFilters(
 }
 
 func buildPriorityFilters(
+	ctx context.Context,
 	log logr.Logger,
-	relativePriority *kueuev1beta2.RelativeConstraint,
+	selector *kueue.PreemptionCandidateSelector,
 	preemptor *workload.Info,
-) []WorkloadFilter {
-	if relativePriority == nil {
-		return nil
+	reader client.Reader,
+) ([]WorkloadFilter, bool) {
+	if selector == nil {
+		return nil, true
 	}
-	return []WorkloadFilter{NewRelativeWorkloadPriorityFilter(log, *relativePriority, preemptor)}
+	var filters []WorkloadFilter
+	if selector.CandidateWorkloadPrioritySelector != nil {
+		ls, err := metav1.LabelSelectorAsSelector(selector.CandidateWorkloadPrioritySelector)
+		if err != nil {
+			log.Error(err, "Invalid CandidateWorkloadPrioritySelector", "selector", selector.CandidateWorkloadPrioritySelector)
+			return nil, false
+		}
+		if !ls.Empty() {
+			filters = append(filters, NewCandidateWorkloadPriorityFilter(ctx, log, ls, reader))
+		}
+	}
+	if selector.RelativeWorkloadPriority != nil {
+		filters = append(filters, NewRelativeWorkloadPriorityFilter(log, *selector.RelativeWorkloadPriority, preemptor))
+	}
+	return filters, true
 }
-

@@ -176,6 +176,20 @@ type PreemptionCandidateSelector struct {
 	// +optional
 	NumericLabels []NumericLabelConstraint `json:"numericLabels,omitempty"`
 
+	// PreemptingWorkloadPrioritySelector specifies a label selector matching labels
+	// on the preemptor workload's PriorityClass or WorkloadPriorityClass.
+	// Workloads whose priority class matches the selector can trigger preemption of candidates defined by this selector.
+	// If not specified or empty, all preemptor priority classes are accepted.
+	// +optional
+	PreemptingWorkloadPrioritySelector *metav1.LabelSelector `json:"preemptingWorkloadPrioritySelector,omitempty"`
+
+	// CandidateWorkloadPrioritySelector specifies a label selector matching labels
+	// on the candidate workload's PriorityClass or WorkloadPriorityClass.
+	// Workloads whose priority class matches the selector are permitted as preemption candidates.
+	// If not specified or empty, all candidate priority classes are accepted.
+	// +optional
+	CandidateWorkloadPrioritySelector *metav1.LabelSelector `json:"candidateWorkloadPrioritySelector,omitempty"`
+
 	// RelativeWorkloadPriority defines how the preemptor's priority compares to the candidate's priority.
 	// For example "Lower" means that only workloads with lower priority will be allowed as preemption candidates.
 	// The comparison is made using effective priority (accounting for priority boost if enabled).

@@ -19,23 +19,23 @@ package filters
 import (
 	"github.com/go-logr/logr"
 
-	kueuev1beta2 "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 )
 
 // matchesRelation evaluates relation constraints between candidate and preemptor values.
 // It returns true if rel is nil, and false if an unsupported relation constraint is encountered.
-func matchesRelation(log logr.Logger, rel *kueuev1beta2.RelativeConstraint, candidateVal, preemptorVal int64) bool {
+func matchesRelation(log logr.Logger, rel *kueue.RelativeConstraint, candidateVal, preemptorVal int64) bool {
 	if rel == nil {
 		return true // Default behavior when missing
 	}
 	switch *rel {
-	case kueuev1beta2.Lower:
+	case kueue.Lower:
 		return candidateVal < preemptorVal
-	case kueuev1beta2.LowerOrEqual:
+	case kueue.LowerOrEqual:
 		return candidateVal <= preemptorVal
-	case kueuev1beta2.Greater:
+	case kueue.Greater:
 		return candidateVal > preemptorVal
-	case kueuev1beta2.GreaterOrEqual:
+	case kueue.GreaterOrEqual:
 		return candidateVal >= preemptorVal
 	default:
 		log.V(3).Info("Unsupported or unhandled relation constraint evaluated", "relation", *rel)

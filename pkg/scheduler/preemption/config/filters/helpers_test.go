@@ -17,11 +17,9 @@ limitations under the License.
 package filters
 
 import (
-	kueuev1beta2 "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/hierarchy"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
-	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
-	"sigs.k8s.io/kueue/pkg/workload"
 )
 
 type snapshotBuilder struct {
@@ -30,7 +28,7 @@ type snapshotBuilder struct {
 
 func newSnapshotBuilder() *snapshotBuilder {
 	return &snapshotBuilder{
-		mgr: hierarchy.NewManager(func(name kueuev1beta2.CohortReference) *schdcache.CohortSnapshot {
+		mgr: hierarchy.NewManager(func(name kueue.CohortReference) *schdcache.CohortSnapshot {
 			return &schdcache.CohortSnapshot{
 				Name:   name,
 				Cohort: hierarchy.NewCohort[*schdcache.ClusterQueueSnapshot, *schdcache.CohortSnapshot](),
@@ -39,7 +37,7 @@ func newSnapshotBuilder() *snapshotBuilder {
 	}
 }
 
-func (b *snapshotBuilder) Cohort(name, parent kueuev1beta2.CohortReference) *snapshotBuilder {
+func (b *snapshotBuilder) Cohort(name, parent kueue.CohortReference) *snapshotBuilder {
 	b.mgr.AddCohort(name)
 	if parent != "" {
 		b.mgr.UpdateCohortEdge(name, parent)
@@ -47,7 +45,7 @@ func (b *snapshotBuilder) Cohort(name, parent kueuev1beta2.CohortReference) *sna
 	return b
 }
 
-func (b *snapshotBuilder) ClusterQueue(name kueuev1beta2.ClusterQueueReference, parent kueuev1beta2.CohortReference) *snapshotBuilder {
+func (b *snapshotBuilder) ClusterQueue(name kueue.ClusterQueueReference, parent kueue.CohortReference) *snapshotBuilder {
 	b.mgr.AddClusterQueue(&schdcache.ClusterQueueSnapshot{Name: name})
 	if parent != "" {
 		b.mgr.UpdateClusterQueueEdge(name, parent)
@@ -56,12 +54,7 @@ func (b *snapshotBuilder) ClusterQueue(name kueuev1beta2.ClusterQueueReference, 
 }
 
 func (b *snapshotBuilder) Build() *schdcache.Snapshot {
-	return &schdcache.Snapshot{Manager: b.mgr}
-}
-
-func makeWorkloadInfo(name, namespace string, localQueue kueuev1beta2.LocalQueueName, clusterQueue kueuev1beta2.ClusterQueueReference) *workload.Info {
-	wl := utiltestingapi.MakeWorkload(name, namespace).Queue(localQueue).Obj()
-	info := workload.NewInfo(wl)
-	info.ClusterQueue = clusterQueue
-	return info
+	return &schdcache.Snapshot{
+		Manager: b.mgr,
+	}
 }

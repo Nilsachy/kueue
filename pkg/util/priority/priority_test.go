@@ -431,3 +431,104 @@ func TestEffectivePriority(t *testing.T) {
 		})
 	}
 }
+
+func TestGetPriorityClassLabels(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := schedulingv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("Failed adding scheduling scheme: %v", err)
+	}
+	if err := kueue.AddToScheme(scheme); err != nil {
+		t.Fatalf("Failed adding kueue scheme: %v", err)
+	}
+
+	wpcList := &kueue.WorkloadPriorityClassList{
+		Items: []kueue.WorkloadPriorityClass{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "wpc-batch",
+					Labels: map[string]string{"tier": "batch", "preemptible": "true"},
+				},
+				Value: 50,
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "wpc-empty-labels",
+				},
+				Value: 10,
+			},
+		},
+	}
+
+	pcList := &schedulingv1.PriorityClassList{
+		Items: []schedulingv1.PriorityClass{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "pc-high",
+					Labels: map[string]string{"tier": "high", "prod": "true"},
+				},
+				Value: 1000,
+			},
+		},
+	}
+
+	client := fake.NewClientBuilder().WithScheme(scheme).WithLists(wpcList, pcList).Build()
+	ctx, _ := utiltesting.ContextWithLog(t)
+
+	tests := map[string]struct {
+		ref        *kueue.PriorityClassRef
+		wantLabels map[string]string
+		wantErr    bool
+	}{
+		"nil ref": {
+			ref:        nil,
+			wantLabels: nil,
+			wantErr:    false,
+		},
+		"existing WorkloadPriorityClass with labels": {
+			ref:        kueue.NewWorkloadPriorityClassRef("wpc-batch"),
+			wantLabels: map[string]string{"tier": "batch", "preemptible": "true"},
+			wantErr:    false,
+		},
+		"existing WorkloadPriorityClass with empty labels": {
+			ref:        kueue.NewWorkloadPriorityClassRef("wpc-empty-labels"),
+			wantLabels: nil,
+			wantErr:    false,
+		},
+		"non-existent WorkloadPriorityClass": {
+			ref:        kueue.NewWorkloadPriorityClassRef("wpc-missing"),
+			wantLabels: nil,
+			wantErr:    true,
+		},
+		"existing PriorityClass with labels": {
+			ref:        kueue.NewPodPriorityClassRef("pc-high"),
+			wantLabels: map[string]string{"tier": "high", "prod": "true"},
+			wantErr:    false,
+		},
+		"non-existent PriorityClass": {
+			ref:        kueue.NewPodPriorityClassRef("pc-missing"),
+			wantLabels: nil,
+			wantErr:    true,
+		},
+		"unsupported group and kind": {
+			ref: &kueue.PriorityClassRef{
+				Group: "custom.example.com",
+				Kind:  "CustomPriorityClass",
+				Name:  "custom-pc",
+			},
+			wantLabels: nil,
+			wantErr:    true,
+		},
+	}
+
+	for desc, tt := range tests {
+		t.Run(desc, func(t *testing.T) {
+			gotLabels, err := GetPriorityClassLabels(ctx, client, tt.ref)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("GetPriorityClassLabels() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.wantLabels, gotLabels); diff != "" {
+				t.Errorf("GetPriorityClassLabels() labels (-want,+got):\n%s", diff)
+			}
+		})
+	}
+}

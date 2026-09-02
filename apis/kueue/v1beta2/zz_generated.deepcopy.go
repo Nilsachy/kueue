@@ -1423,6 +1423,16 @@ func (in *PreemptionCandidateSelector) DeepCopyInto(out *PreemptionCandidateSele
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.PreemptingWorkloadPrioritySelector != nil {
+		in, out := &in.PreemptingWorkloadPrioritySelector, &out.PreemptingWorkloadPrioritySelector
+		*out = new(v1.LabelSelector)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.CandidateWorkloadPrioritySelector != nil {
+		in, out := &in.CandidateWorkloadPrioritySelector, &out.CandidateWorkloadPrioritySelector
+		*out = new(v1.LabelSelector)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.RelativeWorkloadPriority != nil {
 		in, out := &in.RelativeWorkloadPriority, &out.RelativeWorkloadPriority
 		*out = new(RelativeConstraint)

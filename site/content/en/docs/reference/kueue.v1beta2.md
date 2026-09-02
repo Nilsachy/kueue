@@ -2764,6 +2764,26 @@ Multiple numeric label constraints are joined using logical AND (all must be sat
 If not set does not add any additional candidate filtering.</p>
 </td>
 </tr>
+<tr><td><code>preemptingWorkloadPrioritySelector</code><br/>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta"><code>k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector</code></a>
+</td>
+<td>
+   <p>PreemptingWorkloadPrioritySelector specifies a label selector matching labels
+on the preemptor workload's PriorityClass or WorkloadPriorityClass.
+Workloads whose priority class matches the selector can trigger preemption of candidates defined by this selector.
+If not specified or empty, all preemptor priority classes are accepted.</p>
+</td>
+</tr>
+<tr><td><code>candidateWorkloadPrioritySelector</code><br/>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta"><code>k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector</code></a>
+</td>
+<td>
+   <p>CandidateWorkloadPrioritySelector specifies a label selector matching labels
+on the candidate workload's PriorityClass or WorkloadPriorityClass.
+Workloads whose priority class matches the selector are permitted as preemption candidates.
+If not specified or empty, all candidate priority classes are accepted.</p>
+</td>
+</tr>
 <tr><td><code>relativeWorkloadPriority</code><br/>
 <a href="#kueue-x-k8s-io-v1beta2-RelativeConstraint"><code>RelativeConstraint</code></a>
 </td>

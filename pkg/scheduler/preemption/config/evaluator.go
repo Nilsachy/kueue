@@ -18,6 +18,7 @@ package config
 
 import (
 	"cmp"
+	"context"
 	"iter"
 	"slices"
 
@@ -27,7 +28,9 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
-	"sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/classical"
@@ -35,21 +38,27 @@ import (
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
-type CandidateFilters func(log logr.Logger, selector *v1beta2.PreemptionCandidateSelector, preemptor *workload.Info, snapshot *schdcache.Snapshot) filters.CandidateFilters
-
 type preemptionEvaluator struct {
-	log              logr.Logger
-	clock            clock.Clock
-	config           v1beta2.PreemptionConfig
-	candidateFilters CandidateFilters
+	ctx    context.Context
+	log    logr.Logger
+	clock  clock.Clock
+	config kueue.PreemptionConfig
+	reader client.Reader
 }
 
-func NewPreemptionEvaluator(log logr.Logger, clock clock.Clock, config v1beta2.PreemptionConfig, candidateFilters CandidateFilters) *preemptionEvaluator {
+func NewPreemptionEvaluator(
+	ctx context.Context,
+	log logr.Logger,
+	clock clock.Clock,
+	config kueue.PreemptionConfig,
+	reader client.Reader,
+) *preemptionEvaluator {
 	return &preemptionEvaluator{
-		log:              log,
-		clock:            clock,
-		config:           config,
-		candidateFilters: candidateFilters,
+		ctx:    ctx,
+		log:    log,
+		clock:  clock,
+		config: config,
+		reader: reader,
 	}
 }
 
@@ -85,7 +94,11 @@ func (p *preemptionEvaluator) findCandidates(snapshot *schdcache.Snapshot, preem
 		}
 
 		for _, selector := range rule.Candidates {
-			candidateFilters = append(candidateFilters, p.candidateFilters(p.log, &selector, preemptor, snapshot))
+			filter, rejectAll := filters.NewCandidateFilters(p.ctx, p.log, &selector, preemptor, snapshot, p.reader)
+			if rejectAll {
+				continue
+			}
+			candidateFilters = append(candidateFilters, filter)
 		}
 	}
 
@@ -129,7 +142,7 @@ func matchesWorkload(filter *filters.CandidateFilters, wl *workload.Info) bool {
 	return true
 }
 
-func (p *preemptionEvaluator) isActiveTrigger(rule v1beta2.PreemptionRule, wlInfo *workload.Info) (bool, error) {
+func (p *preemptionEvaluator) isActiveTrigger(rule kueue.PreemptionRule, wlInfo *workload.Info) (bool, error) {
 	condition := meta.FindStatusCondition(wlInfo.Obj.Status.Conditions, string(rule.Trigger))
 	if condition == nil || condition.Status == metav1.ConditionFalse {
 		return false, nil

@@ -1589,6 +1589,21 @@ func (p *WorkloadPriorityClassWrapper) PriorityValue(v int32) *WorkloadPriorityC
 	return p
 }
 
+// Labels updates labels of WorkloadPriorityClass.
+func (p *WorkloadPriorityClassWrapper) Labels(l map[string]string) *WorkloadPriorityClassWrapper {
+	p.ObjectMeta.Labels = l
+	return p
+}
+
+// Label adds or updates a label on WorkloadPriorityClass.
+func (p *WorkloadPriorityClassWrapper) Label(k, v string) *WorkloadPriorityClassWrapper {
+	if p.ObjectMeta.Labels == nil {
+		p.ObjectMeta.Labels = make(map[string]string)
+	}
+	p.ObjectMeta.Labels[k] = v
+	return p
+}
+
 // Obj returns the inner WorkloadPriorityClass.
 func (p *WorkloadPriorityClassWrapper) Obj() *kueue.WorkloadPriorityClass {
 	return &p.WorkloadPriorityClass

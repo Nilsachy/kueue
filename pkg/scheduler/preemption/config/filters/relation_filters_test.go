@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
+	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
@@ -217,33 +218,6 @@ func TestClusterQueueRelationFilters(t *testing.T) {
 			candidateCQ: cq1SubA1,
 			wantMatch:   false,
 		},
-
-		// 4. RejectAllCQFilter Tests
-		"RejectAllCQFilter: rejects candidate in cohort": {
-			filter:      NewRejectAllCQFilter(),
-			candidateCQ: cq1SubA1,
-			wantMatch:   false,
-		},
-		"RejectAllCQFilter: rejects candidate in disjoint cohort": {
-			filter:      NewRejectAllCQFilter(),
-			candidateCQ: cq4SubB,
-			wantMatch:   false,
-		},
-		"RejectAllCQFilter: rejects candidate in deep sub-cohort": {
-			filter:      NewRejectAllCQFilter(),
-			candidateCQ: cqDeepSubSubA,
-			wantMatch:   false,
-		},
-		"RejectAllCQFilter: rejects direct root candidate": {
-			filter:      NewRejectAllCQFilter(),
-			candidateCQ: cqDirectRootA,
-			wantMatch:   false,
-		},
-		"RejectAllCQFilter: rejects standalone candidate": {
-			filter:      NewRejectAllCQFilter(),
-			candidateCQ: cqStandalone1,
-			wantMatch:   false,
-		},
 	}
 
 	for name, tc := range cases {
@@ -264,19 +238,19 @@ func TestSameLocalQueueFilter(t *testing.T) {
 		wantMatch bool
 	}{
 		"matching namespace and queue name": {
-			candidate: makeWorkloadInfo("c-exact", "ns1", "lq1", "cq1SubA1"),
+			candidate: workload.NewInfo(utiltestingapi.MakeWorkload("c-exact", "ns1").Queue("lq1").Obj()),
 			wantMatch: true,
 		},
 		"different local queue name rejected": {
-			candidate: makeWorkloadInfo("c-diff-lq", "ns1", "lq2", "cq1SubA1"),
+			candidate: workload.NewInfo(utiltestingapi.MakeWorkload("c-diff-lq", "ns1").Queue("lq2").Obj()),
 			wantMatch: false,
 		},
 		"different namespace rejected": {
-			candidate: makeWorkloadInfo("c-diff-ns", "ns2", "lq1", "cq1SubA1"),
+			candidate: workload.NewInfo(utiltestingapi.MakeWorkload("c-diff-ns", "ns2").Queue("lq1").Obj()),
 			wantMatch: false,
 		},
 		"different namespace and queue name rejected": {
-			candidate: makeWorkloadInfo("c-diff-both", "ns2", "lq2", "cq1SubA1"),
+			candidate: workload.NewInfo(utiltestingapi.MakeWorkload("c-diff-both", "ns2").Queue("lq2").Obj()),
 			wantMatch: false,
 		},
 	}

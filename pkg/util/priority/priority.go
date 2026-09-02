@@ -23,6 +23,7 @@ import (
 	"github.com/go-logr/logr"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -156,4 +157,33 @@ func DefaultWorkloadPriorityClassExist(ctx context.Context, c client.Client) (bo
 		return false, err
 	}
 	return true, nil
+}
+
+// GetPriorityClassLabels returns the labels of the referenced PriorityClass or WorkloadPriorityClass.
+// If the object does not exist, it returns an IsNotFound error.
+// The lookup queries the provided client.Reader (which in the Kueue scheduler is backed by
+// in-memory controller-runtime informer caches, avoiding network roundtrips to the API server).
+func GetPriorityClassLabels(ctx context.Context, reader client.Reader, ref *kueue.PriorityClassRef) (map[string]string, error) {
+	if ref == nil {
+		return nil, nil
+	}
+
+	switch ref.Group {
+	case kueue.WorkloadPriorityClassGroup:
+		var wpc kueue.WorkloadPriorityClass
+		if err := reader.Get(ctx, types.NamespacedName{Name: ref.Name}, &wpc); err != nil {
+			return nil, err
+		}
+		return wpc.Labels, nil
+
+	case kueue.PodPriorityClassGroup:
+		var pc schedulingv1.PriorityClass
+		if err := reader.Get(ctx, types.NamespacedName{Name: ref.Name}, &pc); err != nil {
+			return nil, err
+		}
+		return pc.Labels, nil
+
+	default:
+		return nil, apierrors.NewNotFound(schema.GroupResource{Group: string(ref.Group), Resource: "priorityclasses"}, ref.Name)
+	}
 }

@@ -23,13 +23,13 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clocktesting "k8s.io/utils/clock/testing"
 	"k8s.io/utils/ptr"
 
-	"sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/features"
@@ -73,20 +73,22 @@ func TestConfigurablePreemptions(t *testing.T) {
 	}
 
 	insufficientQuotaCond := metav1.Condition{
-		Type:               string(v1beta2.InsufficientQuota),
+		Type:               string(kueue.InsufficientQuota),
 		Status:             metav1.ConditionTrue,
 		LastTransitionTime: metav1.NewTime(now),
 	}
 
 	unitWl := *utiltestingapi.MakeWorkload("unit", "").Request(corev1.ResourceCPU, "1")
 	cases := map[string]struct {
-		clusterQueues []*kueue.ClusterQueue
-		cohorts       []*kueue.Cohort
-		config        kueue.PreemptionConfig
-		admitted      []kueue.Workload
-		incoming      *kueue.Workload
-		targetCQ      kueue.ClusterQueueReference
-		wantPreempted sets.Set[string]
+		clusterQueues           []*kueue.ClusterQueue
+		cohorts                 []*kueue.Cohort
+		config                  kueue.PreemptionConfig
+		workloadPriorityClasses []kueue.WorkloadPriorityClass
+		priorityClasses         []schedulingv1.PriorityClass
+		admitted                []kueue.Workload
+		incoming                *kueue.Workload
+		targetCQ                kueue.ClusterQueueReference
+		wantPreempted           sets.Set[string]
 	}{
 		"no candidates for CQ without config": {
 			clusterQueues: []*kueue.ClusterQueue{
@@ -135,7 +137,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 			},
 			incoming: unitWl.Clone().Name("a_incoming").Request(corev1.ResourceCPU, "1").
 				Condition(metav1.Condition{
-					Type:               string(v1beta2.InsufficientTopology),
+					Type:               string(kueue.InsufficientTopology),
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(now),
 				}).
@@ -231,11 +233,258 @@ func TestConfigurablePreemptions(t *testing.T) {
 			targetCQ:      "a",
 			wantPreempted: sets.New[string](),
 		},
+		"PreemptingWorkloadPrioritySelector: matching preemptor priority class allows preemption": {
+			clusterQueues: baseCQs,
+			config: kueue.PreemptionConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: defaultConfigName,
+				},
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionRule{
+						{
+							Name:    "priority-gated-rule",
+							Trigger: kueue.InsufficientQuota,
+							Candidates: []kueue.PreemptionCandidateSelector{
+								{
+									RelationRequirement: kueue.SameClusterQueue,
+									PreemptingWorkloadPrioritySelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"tier": "prod"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			workloadPriorityClasses: []kueue.WorkloadPriorityClass{
+				*utiltestingapi.MakeWorkloadPriorityClass("wpc-prod").Label("tier", "prod").Obj(),
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming: unitWl.Clone().Name("a_incoming").
+				PriorityClassRef(kueue.NewWorkloadPriorityClassRef("wpc-prod")).
+				Condition(insufficientQuotaCond).Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New("/a1"),
+		},
+		"PreemptingWorkloadPrioritySelector: non-matching preemptor priority class blocks preemption": {
+			clusterQueues: baseCQs,
+			config: kueue.PreemptionConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: defaultConfigName,
+				},
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionRule{
+						{
+							Name:    "priority-gated-rule",
+							Trigger: kueue.InsufficientQuota,
+							Candidates: []kueue.PreemptionCandidateSelector{
+								{
+									RelationRequirement: kueue.SameClusterQueue,
+									PreemptingWorkloadPrioritySelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"tier": "prod"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			workloadPriorityClasses: []kueue.WorkloadPriorityClass{
+				*utiltestingapi.MakeWorkloadPriorityClass("wpc-batch").Label("tier", "batch").Obj(),
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming: unitWl.Clone().Name("a_incoming").
+				PriorityClassRef(kueue.NewWorkloadPriorityClassRef("wpc-batch")).
+				Condition(insufficientQuotaCond).Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New[string](),
+		},
+		"CandidateWorkloadPrioritySelector: only candidates with matching priority class are preempted": {
+			clusterQueues: baseCQs,
+			config: kueue.PreemptionConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: defaultConfigName,
+				},
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionRule{
+						{
+							Name:    "candidate-priority-rule",
+							Trigger: kueue.InsufficientQuota,
+							Candidates: []kueue.PreemptionCandidateSelector{
+								{
+									RelationRequirement: kueue.SameClusterQueue,
+									CandidateWorkloadPrioritySelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"preemptible": "true"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			workloadPriorityClasses: []kueue.WorkloadPriorityClass{
+				*utiltestingapi.MakeWorkloadPriorityClass("wpc-preemptible").Label("preemptible", "true").Obj(),
+				*utiltestingapi.MakeWorkloadPriorityClass("wpc-guaranteed").Label("preemptible", "false").Obj(),
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").
+					PriorityClassRef(kueue.NewWorkloadPriorityClassRef("wpc-guaranteed")).
+					SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").
+					PriorityClassRef(kueue.NewWorkloadPriorityClassRef("wpc-preemptible")).
+					SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming:      unitWl.Clone().Name("a_incoming").Condition(insufficientQuotaCond).Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New("/a2"),
+		},
+		"RelativeWorkloadPriority and Priority selectors combined": {
+			clusterQueues: baseCQs,
+			config: kueue.PreemptionConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: defaultConfigName,
+				},
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionRule{
+						{
+							Name:    "combined-rule",
+							Trigger: kueue.InsufficientQuota,
+							Candidates: []kueue.PreemptionCandidateSelector{
+								{
+									RelationRequirement: kueue.SameClusterQueue,
+									PreemptingWorkloadPrioritySelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"tier": "critical"},
+									},
+									CandidateWorkloadPrioritySelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"tier": "batch"},
+									},
+									RelativeWorkloadPriority: ptr.To(kueue.Lower),
+								},
+							},
+						},
+					},
+				},
+			},
+			workloadPriorityClasses: []kueue.WorkloadPriorityClass{
+				*utiltestingapi.MakeWorkloadPriorityClass("wpc-critical").Label("tier", "critical").Obj(),
+				*utiltestingapi.MakeWorkloadPriorityClass("wpc-batch").Label("tier", "batch").Obj(),
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").
+					PriorityClassRef(kueue.NewWorkloadPriorityClassRef("wpc-batch")).
+					Priority(20).
+					SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").
+					PriorityClassRef(kueue.NewWorkloadPriorityClassRef("wpc-batch")).
+					Priority(120).
+					SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming: unitWl.Clone().Name("a_incoming").
+				PriorityClassRef(kueue.NewWorkloadPriorityClassRef("wpc-critical")).
+				Priority(100).
+				Condition(insufficientQuotaCond).Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New("/a1"),
+		},
+		"CandidateWorkloadPrioritySelector: matching Kubernetes standard PriorityClass allows preemption": {
+			clusterQueues: baseCQs,
+			config: kueue.PreemptionConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: defaultConfigName,
+				},
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionRule{
+						{
+							Name:    "core-pc-rule",
+							Trigger: kueue.InsufficientQuota,
+							Candidates: []kueue.PreemptionCandidateSelector{
+								{
+									RelationRequirement: kueue.SameClusterQueue,
+									CandidateWorkloadPrioritySelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"tier": "batch"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			priorityClasses: []schedulingv1.PriorityClass{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "k8s-batch",
+						Labels: map[string]string{"tier": "batch"},
+					},
+					Value: 50,
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "k8s-prod",
+						Labels: map[string]string{"tier": "prod"},
+					},
+					Value: 1000,
+				},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").
+					PriorityClassRef(kueue.NewPodPriorityClassRef("k8s-prod")).
+					SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").
+					PriorityClassRef(kueue.NewPodPriorityClassRef("k8s-batch")).
+					SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming:      unitWl.Clone().Name("a_incoming").Condition(insufficientQuotaCond).Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New("/a2"),
+		},
+		"RelativeWorkloadPriority with priority boost annotation modifies preemption ordering": {
+			clusterQueues: baseCQs,
+			config: kueue.PreemptionConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: defaultConfigName,
+				},
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionRule{
+						{
+							Name:    "boost-priority-rule",
+							Trigger: kueue.InsufficientQuota,
+							Candidates: []kueue.PreemptionCandidateSelector{
+								{
+									RelationRequirement:      kueue.SameClusterQueue,
+									RelativeWorkloadPriority: ptr.To(kueue.Lower),
+								},
+							},
+						},
+					},
+				},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").
+					Priority(100).
+					Annotation("kueue.x-k8s.io/priority-boost", "-60").
+					SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").
+					Priority(60).
+					SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming: unitWl.Clone().Name("a_incoming").
+				Priority(50).
+				Condition(insufficientQuotaCond).Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New("/a1"),
+		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			features.SetFeatureGateDuringTest(t, features.ConfigurablePreemption, true)
+			features.SetFeatureGateDuringTest(t, features.PriorityBoost, true)
 			ctx, log := utiltesting.ContextWithLog(t)
 			// Set name as UID so that candidates sorting is predictable.
 			for i := range tc.admitted {
@@ -244,7 +493,10 @@ func TestConfigurablePreemptions(t *testing.T) {
 			cl := utiltesting.NewClientBuilder().
 				WithLists(&kueue.WorkloadList{Items: tc.admitted}).
 				WithLists(&kueue.PreemptionConfigList{Items: []kueue.PreemptionConfig{tc.config}}).
+				WithLists(&kueue.WorkloadPriorityClassList{Items: tc.workloadPriorityClasses}).
+				WithLists(&schedulingv1.PriorityClassList{Items: tc.priorityClasses}).
 				Build()
+
 			cqCache := schdcache.New(cl)
 			cqCache.AddOrUpdateResourceFlavor(log, utiltestingapi.MakeResourceFlavor("default").Obj())
 			for _, cq := range tc.clusterQueues {
