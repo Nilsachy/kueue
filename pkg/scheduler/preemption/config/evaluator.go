@@ -22,6 +22,8 @@ import (
 	"maps"
 	"slices"
 
+	"time"
+
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,11 +42,12 @@ import (
 )
 
 type preemptionEvaluator struct {
-	ctx    context.Context
-	log    logr.Logger
-	clock  clock.Clock
-	config kueue.PreemptionConfig
-	reader client.Reader
+	ctx             context.Context
+	log             logr.Logger
+	clock           clock.Clock
+	config          kueue.PreemptionConfig
+	reader          client.Reader
+	inCycleTriggers sets.Set[kueue.PreemptionRuleTrigger]
 }
 
 func NewPreemptionEvaluator(
@@ -53,14 +56,35 @@ func NewPreemptionEvaluator(
 	clock clock.Clock,
 	config kueue.PreemptionConfig,
 	reader client.Reader,
+	inCycleTriggers sets.Set[kueue.PreemptionRuleTrigger],
 ) *preemptionEvaluator {
 	return &preemptionEvaluator{
-		ctx:    ctx,
-		log:    log,
-		clock:  clock,
-		config: config,
-		reader: reader,
+		ctx:             ctx,
+		log:             log,
+		clock:           clock,
+		config:          config,
+		reader:          reader,
+		inCycleTriggers: inCycleTriggers,
 	}
+}
+
+// InCycleTriggers returns the set of triggers that are met in the current scheduling cycle
+// based on the ClusterQueue snapshot and the workload's requested usage.
+func InCycleTriggers(cq *schdcache.ClusterQueueSnapshot, usage workload.Usage) sets.Set[kueue.PreemptionRuleTrigger] {
+	triggers := sets.New[kueue.PreemptionRuleTrigger]()
+	if cq == nil {
+		return triggers
+	}
+	fitsCheck := cq.Fits(usage)
+	if fitsCheck == schdcache.FitsCheckNoQuota {
+		triggers.Insert(kueue.InsufficientQuota)
+		if cq.IsQuotaReclaimableFromBorrowers(usage) {
+			triggers.Insert(kueue.QuotaReclaimRequired)
+		}
+	} else if fitsCheck == schdcache.FitsCheckNoTAS {
+		triggers.Insert(kueue.InsufficientTopology)
+	}
+	return triggers
 }
 
 func (p *preemptionEvaluator) Iter(snapshot *schdcache.Snapshot, preemptor *workload.Info, flavorsNeedPreemption sets.Set[resources.FlavorResource]) (iter.Seq[*workload.Info], error) {
@@ -145,21 +169,28 @@ func matchesWorkload(filter *filters.CandidateFilters, wl *workload.Info) bool {
 }
 
 func (p *preemptionEvaluator) isActiveTrigger(rule kueue.PreemptionRule, wlInfo *workload.Info) (bool, error) {
-	condition := meta.FindStatusCondition(wlInfo.Obj.Status.Conditions, string(rule.Trigger))
-	if condition == nil || condition.Status == metav1.ConditionFalse {
-		return false, nil
-	}
-
-	if p.clock.Since(condition.LastTransitionTime.Time) < rule.MinTriggerRequiredDuration.Duration {
-		return false, nil
-	}
-
 	selector, err := metav1.LabelSelectorAsSelector(&rule.MatchingPreemptorWorkloads)
 	if err != nil {
 		return false, err
 	}
 
-	return selector.Matches(labels.Set(wlInfo.Obj.Labels)), nil
+	if !selector.Matches(labels.Set(wlInfo.Obj.Labels)) {
+		return false, nil
+	}
+
+	condition := meta.FindStatusCondition(wlInfo.Obj.Status.Conditions, string(rule.Trigger))
+	if condition != nil && condition.Status == metav1.ConditionTrue {
+		if p.clock.Since(condition.LastTransitionTime.Time) >= rule.MinTriggerRequiredDuration.Duration {
+			return true, nil
+		}
+		return false, nil
+	}
+
+	if rule.MinTriggerRequiredDuration.Duration == 0 && p.inCycleTriggers.Has(rule.Trigger) {
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (p *preemptionEvaluator) IsAnyTriggerActive(wlInfo *workload.Info) (bool, error) {
@@ -174,4 +205,42 @@ func (p *preemptionEvaluator) IsAnyTriggerActive(wlInfo *workload.Info) (bool, e
 		}
 	}
 	return false, nil
+}
+
+// MinRemainingDuration returns the minimum remaining duration among all rules
+// matching the preemptor whose triggers are active but awaiting minTriggerRequiredDuration.
+// If no matching rule is waiting on a duration, it returns 0.
+func (p *preemptionEvaluator) MinRemainingDuration(wlInfo *workload.Info) time.Duration {
+	var minDuration time.Duration
+	for _, rule := range p.config.Spec.Rules {
+		if rule.MinTriggerRequiredDuration.Duration <= 0 {
+			continue
+		}
+		selector, err := metav1.LabelSelectorAsSelector(&rule.MatchingPreemptorWorkloads)
+		if err != nil || !selector.Matches(labels.Set(wlInfo.Obj.Labels)) {
+			continue
+		}
+		condition := meta.FindStatusCondition(wlInfo.Obj.Status.Conditions, string(rule.Trigger))
+		isTriggerActive := (condition != nil && condition.Status == metav1.ConditionTrue) || p.inCycleTriggers.Has(rule.Trigger)
+		if !isTriggerActive {
+			continue
+		}
+
+		var remaining time.Duration
+		if condition != nil && condition.Status == metav1.ConditionTrue {
+			elapsed := p.clock.Since(condition.LastTransitionTime.Time)
+			if elapsed < rule.MinTriggerRequiredDuration.Duration {
+				remaining = rule.MinTriggerRequiredDuration.Duration - elapsed
+			}
+		} else {
+			remaining = rule.MinTriggerRequiredDuration.Duration
+		}
+
+		if remaining > 0 {
+			if minDuration == 0 || remaining < minDuration {
+				minDuration = remaining
+			}
+		}
+	}
+	return minDuration
 }

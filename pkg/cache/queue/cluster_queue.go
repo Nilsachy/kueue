@@ -595,6 +595,19 @@ func (c *ClusterQueue) handleInadmissibleHash(hash workload.EquivalenceHash, rea
 	return moved
 }
 
+// MoveInadmissibleToActive moves a workload from inadmissible to active.
+// Returns true if the workload was moved.
+func (c *ClusterQueue) MoveInadmissibleToActive(key workload.Reference) bool {
+	c.rwm.Lock()
+	defer c.rwm.Unlock()
+	inadmissibleWl := c.workloads.GetInadmissible(key)
+	if inadmissibleWl == nil {
+		return false
+	}
+	delete(c.hashToBulkMoveReason, inadmissibleWl.SchedulingHash)
+	return c.workloads.MoveToActive(key, inadmissibleWl)
+}
+
 // PendingResources returns the total resources requested by all pending workloads,
 // aggregated by resource name. Pending workloads have not yet been assigned to flavors.
 func (c *ClusterQueue) pendingResources() map[corev1.ResourceName]int64 {

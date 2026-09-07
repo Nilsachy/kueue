@@ -635,7 +635,8 @@ func (p *Preemptor) configurablePreemptions(preemptionCtx *preemptionCtx) []*Tar
 		return nil
 	}
 
-	preemptionEvaluator := configurable.NewPreemptionEvaluator(preemptionCtx.ctx, preemptionCtx.log, preemptionCtx.clock, *preemptionConfig, p.client)
+	inCycleTriggers := configurable.InCycleTriggers(preemptionCtx.preemptorCQ, preemptionCtx.workloadUsage)
+	preemptionEvaluator := configurable.NewPreemptionEvaluator(preemptionCtx.ctx, preemptionCtx.log, preemptionCtx.clock, *preemptionConfig, p.client, inCycleTriggers)
 
 	iter, err := preemptionEvaluator.Iter(preemptionCtx.snapshot, &preemptionCtx.preemptor, preemptionCtx.frsNeedPreemption)
 	if err != nil {
@@ -661,6 +662,26 @@ func (p *Preemptor) configurablePreemptions(preemptionCtx *preemptionCtx) []*Tar
 
 	restoreSnapshot(preemptionCtx.snapshot, targets)
 	return nil
+}
+
+// MinRemainingDuration calculates the minimum remaining duration among all rules
+// matching the preemptor whose triggers are active but awaiting minTriggerRequiredDuration.
+func (p *Preemptor) MinRemainingDuration(ctx context.Context, wl *workload.Info, cq *schdcache.ClusterQueueSnapshot, usage workload.Usage) time.Duration {
+	if !features.Enabled(features.ConfigurablePreemption) {
+		return 0
+	}
+	if cq == nil || cq.PreemptionConfigName == nil {
+		return 0
+	}
+	preemptionConfig := &kueue.PreemptionConfig{}
+	preemptionConfigName := string(*cq.PreemptionConfigName)
+	if err := p.client.Get(ctx, client.ObjectKey{Name: preemptionConfigName}, preemptionConfig); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to get PreemptionConfig", "preemptionConfigName", preemptionConfigName)
+		return 0
+	}
+	inCycleTriggers := configurable.InCycleTriggers(cq, usage)
+	evaluator := configurable.NewPreemptionEvaluator(ctx, log.FromContext(ctx), p.clock, *preemptionConfig, p.client, inCycleTriggers)
+	return evaluator.MinRemainingDuration(wl)
 }
 
 // workloadFits determines if the workload requests would fit given the

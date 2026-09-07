@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
+	fakeclock "k8s.io/utils/clock/testing"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -798,7 +799,7 @@ func TestPreemptionEvaluatorIter(t *testing.T) {
 				t.Fatalf("unexpected error while building snapshot: %v", err)
 			}
 
-			evaluator := NewPreemptionEvaluator(ctx, log, clock.RealClock{}, tc.config, clientReader)
+			evaluator := NewPreemptionEvaluator(ctx, log, clock.RealClock{}, tc.config, clientReader, nil)
 
 			wlInfo := workload.NewInfo(tc.preemptorWl)
 			wlInfo.ClusterQueue = tc.preemptorCq
@@ -895,7 +896,7 @@ func Test_preemptionEvaluator_IsAnyTriggerActive(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			ctx, log := utiltesting.ContextWithLog(t)
-			p := NewPreemptionEvaluator(ctx, log, clock.RealClock{}, tc.config, nil)
+			p := NewPreemptionEvaluator(ctx, log, clock.RealClock{}, tc.config, nil, nil)
 
 			wlInfo := workload.NewInfo(tc.workload)
 			wlInfo.ClusterQueue = "test-cq"
@@ -909,5 +910,63 @@ func Test_preemptionEvaluator_IsAnyTriggerActive(t *testing.T) {
 				t.Errorf("IsAnyTriggerActive() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func Test_preemptionEvaluator_InCycleTriggers_And_MinRemainingDuration(t *testing.T) {
+	unitWl := *utiltestingapi.MakeWorkload("unit", "").Request(corev1.ResourceCPU, "1")
+	now := time.Now()
+
+	config := kueue.PreemptionConfig{
+		Spec: kueue.PreemptionConfigSpec{
+			Rules: []kueue.PreemptionRule{
+				{
+					Name:                       "immediate-rule",
+					Trigger:                    kueue.InsufficientQuota,
+					MinTriggerRequiredDuration: metav1.Duration{Duration: 0},
+				},
+				{
+					Name:                       "delayed-rule",
+					Trigger:                    kueue.QuotaReclaimRequired,
+					MinTriggerRequiredDuration: metav1.Duration{Duration: 30 * time.Second},
+				},
+			},
+		},
+	}
+
+	ctx, log := utiltesting.ContextWithLog(t)
+	inCycleTriggers := sets.New(kueue.InsufficientQuota, kueue.QuotaReclaimRequired)
+	p := NewPreemptionEvaluator(ctx, log, clock.RealClock{}, config, nil, inCycleTriggers)
+
+	// Workload without conditions: immediate-rule is active in-cycle, delayed-rule has 30s remaining.
+	wlInfo := workload.NewInfo(unitWl.Clone().Name("fresh-wl").Obj())
+	wlInfo.ClusterQueue = "test-cq"
+
+	active, err := p.IsAnyTriggerActive(wlInfo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !active {
+		t.Errorf("expected IsAnyTriggerActive = true via inCycleTriggers with duration 0")
+	}
+
+	remaining := p.MinRemainingDuration(wlInfo)
+	if remaining != 30*time.Second {
+		t.Errorf("expected MinRemainingDuration = 30s, got %v", remaining)
+	}
+
+	// Workload with condition already elapsed for 10s
+	wlWithCond := unitWl.Clone().Name("cond-wl").Condition(metav1.Condition{
+		Type:               string(kueue.QuotaReclaimRequired),
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.NewTime(now.Add(-10 * time.Second)),
+	}).Obj()
+	wlWithCondInfo := workload.NewInfo(wlWithCond)
+	wlWithCondInfo.ClusterQueue = "test-cq"
+
+	pClock := NewPreemptionEvaluator(ctx, log, fakeclock.NewFakeClock(now), config, nil, inCycleTriggers)
+	remaining2 := pClock.MinRemainingDuration(wlWithCondInfo)
+	if remaining2 != 20*time.Second {
+		t.Errorf("expected MinRemainingDuration = 20s, got %v", remaining2)
 	}
 }

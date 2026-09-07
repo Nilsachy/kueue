@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -197,6 +198,8 @@ type Manager struct {
 	// Once the Evicted condition is observed by scheduler the expectation
 	// can be removed - the expectation is satisfied.
 	preemptionExpectations *expectations.Store
+
+	requeueTimers map[workload.Reference]clock.Timer
 }
 
 // NewManager is a factory for cache.queue.Manager. For tests,
@@ -219,6 +222,7 @@ func NewManager(client client.Client, checker StatusChecker, requeuer inadmissib
 
 		topologyUpdateWatchers: make([]TopologyUpdateWatcher, 0),
 		secondPassQueue:        newSecondPassQueue(),
+		requeueTimers:          make(map[workload.Reference]clock.Timer),
 		AfsUsageLedger:         queueafs.NewAfsUsageLedger(),
 		requeuer:               requeuer,
 		resourceFormatter:      resources.NewResourceFormatter(),
@@ -849,6 +853,10 @@ func (m *Manager) deleteWorkloadWithoutLock(log logr.Logger, wlKey workload.Refe
 	reportLQPendingWorkloads(m, q)
 
 	m.DeleteSecondPassWithoutLock(wlKey)
+	if timer, ok := m.requeueTimers[wlKey]; ok {
+		timer.Stop()
+		delete(m.requeueTimers, wlKey)
+	}
 }
 
 // QueueAssociatedInadmissibleWorkloadsAfter requeues into the heaps all
@@ -880,6 +888,73 @@ func (m *Manager) QueueAssociatedInadmissibleWorkloadsAfter(ctx context.Context,
 	notifyRetryInadmissibleWithoutLock(m, sets.New(cq.name))
 }
 
+// RequeueInadmissibleWorkloadAfter schedules a timer to move an inadmissible workload
+// back to the active queue after the specified duration.
+func (m *Manager) RequeueInadmissibleWorkloadAfter(ctx context.Context, wlKey workload.Reference, duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
+	m.Lock()
+	defer m.Unlock()
+
+	if oldTimer, ok := m.requeueTimers[wlKey]; ok {
+		oldTimer.Stop()
+	}
+
+	log := ctrl.LoggerFrom(ctx)
+	log.V(3).Info("Scheduling requeue for inadmissible workload", "workload", wlKey, "duration", duration)
+	m.requeueTimers[wlKey] = m.clock.AfterFunc(duration, func() {
+		m.requeueInadmissibleWorkload(ctx, wlKey)
+	})
+}
+
+func (m *Manager) requeueInadmissibleWorkload(ctx context.Context, wlKey workload.Reference) {
+	m.Lock()
+	defer m.Unlock()
+
+	delete(m.requeueTimers, wlKey)
+
+	qKey, ok := m.workloadAssignedQueues[wlKey]
+	if !ok {
+		return
+	}
+	q := m.localQueues[qKey]
+	if q == nil {
+		return
+	}
+	cq := m.hm.ClusterQueue(q.ClusterQueue)
+	if cq == nil {
+		return
+	}
+
+	inadmissibleWl := cq.workloads.GetInadmissible(wlKey)
+	if inadmissibleWl == nil {
+		return
+	}
+
+	if m.client != nil {
+		var w kueue.Workload
+		if err := m.client.Get(ctx, client.ObjectKeyFromObject(inadmissibleWl.Obj), &w); err == nil {
+			if !workload.IsAdmissible(&w) {
+				return
+			}
+			wInfo := workload.NewInfo(&w, m.workloadInfoOptions...)
+			q.AddOrUpdate(wInfo)
+			cq.workloads.InsertInadmissible(wlKey, wInfo)
+		} else if apierrors.IsNotFound(err) {
+			return
+		}
+	}
+
+	if cq.MoveInadmissibleToActive(wlKey) {
+		log := ctrl.LoggerFrom(ctx)
+		log.V(3).Info("Moved inadmissible workload back to active after timer expired", "workload", wlKey, "clusterQueue", cq.name)
+		reportCQPendingWorkloads(m, cq)
+		reportLQPendingWorkloads(m, q)
+		m.Broadcast()
+	}
+}
+
 // CleanUpOnContext tracks the context. When closed, it wakes routines waiting
 // on elements to be available. It should be called before doing any calls to
 // Heads.
@@ -889,6 +964,10 @@ func (m *Manager) CleanUpOnContext(ctx context.Context) {
 	// checking ctx.Done() in Heads and entering Wait.
 	m.Lock()
 	defer m.Unlock()
+	for key, timer := range m.requeueTimers {
+		timer.Stop()
+		delete(m.requeueTimers, key)
+	}
 	m.Broadcast()
 }
 

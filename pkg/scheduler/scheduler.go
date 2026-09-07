@@ -445,6 +445,9 @@ func (s *Scheduler) processEntry(
 		e.requeueReason = qcache.RequeueReasonNoFit
 		log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
 		e.quotaReservedReason = e.assignment.NoFitReason
+		if features.Enabled(features.ConfigurablePreemption) && (e.insufficientQuota || e.quotaReclaimRequired || e.insufficientTopology) {
+			e.requeueAfter = s.preemptor.MinRemainingDuration(ctx, &e.Info, cq, usage)
+		}
 		return
 	}
 
@@ -453,6 +456,9 @@ func (s *Scheduler) processEntry(
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
 			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
 			s.reserveCapacityForUnreclaimablePreempt(log, e, cq)
+			if features.Enabled(features.ConfigurablePreemption) {
+				e.requeueAfter = s.preemptor.MinRemainingDuration(ctx, &e.Info, cq, usage)
+			}
 			return
 		}
 		if (features.Enabled(features.ConcurrentAdmission) || features.Enabled(features.MultiKueueOrchestratedPreemption)) && workload.HasClosedPreemptionGate(e.Obj) {
@@ -651,6 +657,7 @@ type entry struct {
 	status               entryStatus
 	inadmissibleMsg      string
 	requeueReason        qcache.RequeueReason
+	requeueAfter         time.Duration
 	preemptionTargets    []*preemption.Target
 	clusterQueueSnapshot *schdcache.ClusterQueueSnapshot
 	quotaReservedReason  string
@@ -1208,6 +1215,9 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 			log.Error(err, "Could not update Workload status")
 		}
 		s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, condReason, condReason, api.TruncateEventMessage(e.inadmissibleMsg))
+	}
+	if e.requeueAfter > 0 {
+		s.queues.RequeueInadmissibleWorkloadAfter(ctx, workload.Key(e.Obj), e.requeueAfter)
 	}
 }
 
