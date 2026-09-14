@@ -369,7 +369,7 @@ spec:
           numericLabels:
             - key: "tpus-count"
               relation: "Lower"
-              defaultValue: 0
+              fallbackValue: 0
 ```
 
 As it has an `AnyClusterQueue` relation, it can preempt workloads even if they are not related in any way to the preemptor cluster queue. In combination with a custom numeric label selector using strict `Lower`, this guarantees asymmetry: a larger-topology workload can preempt smaller workloads blocking the required topology domain, but smaller or equal-sized workloads cannot preempt the larger workload in return, preventing mutual preemption loops. Effectively, when the smaller workloads are re-admitted, they can be placed in smaller fragmented domains (where the larger workload cannot fit), thereby defragmenting the cluster.
@@ -439,7 +439,7 @@ Requested functionalities from the community can be satisfied with the following
        - name: preempt-same-topology-level-workloads
          trigger: "InsufficientTopology"
          candidateSelectors:
-           - relationRequirement: "SameCohort"
+           - relationRequirement: "SameParentCohort"
              relativeWorkloadPriority: "LowerOrEqual"
              workloadSelector:
                matchLabels:
@@ -470,7 +470,7 @@ Requested functionalities from the community can be satisfied with the following
        - name: reclaim-cohort-quota-from-low-priority
          trigger: "QuotaReclaimRequired"
          candidateSelectors:
-           - relationRequirement: "SameCohort"
+           - relationRequirement: "SameParentCohort"
              quota: "BorrowingCapacityFromPreemptor"
              candidateWorkloadPrioritySelector:
                matchLabels:
@@ -577,9 +577,11 @@ type PreemptionConfig struct {
 type PreemptionConfigSpec struct {
   // Rules to select preemption candidates.
   //
+  // +optional
   // +listType=map
   // +listMapKey=name
-  Rules []PreemptionRule `json:"rules"`
+  // +kubebuilder:validation:MaxItems=64
+  Rules []PreemptionRule `json:"rules,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=InsufficientQuota;QuotaReclaimRequired;InsufficientTopology
@@ -607,15 +609,16 @@ type PreemptionRule struct {
   // Name is the identifier of the preemption rule.
   //
   // +kubebuilder:validation:Required
+  // +kubebuilder:validation:MinLength=1
   // +kubebuilder:validation:MaxLength=63
   // +kubebuilder:validation:Pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
   Name string `json:"name"`
 
-  // MatchingPreemptorWorkloads is a label selector indicating which workloads can trigger preemptions
+  // PreemptorSelector is a label selector indicating which workloads can trigger preemptions
   // using this rule. Accepts all workloads if not set.
   //
   // +optional
-  MatchingPreemptorWorkloads *metav1.LabelSelector `json:"matchingPreemptorWorkloads,omitempty"`
+  PreemptorSelector *metav1.LabelSelector `json:"preemptorSelector,omitempty"`
 
   // Trigger specifies the condition (InsufficientQuota, QuotaReclaimRequired, or InsufficientTopology)
   // that must be observed on the preemptor workload for this rule to apply.
@@ -650,39 +653,39 @@ By maintaining triggers in-memory, the scheduler avoids etcd write amplification
 
 ```go
 
-// PreemptionRelationConstraint specifies the relational boundary between
+// PreemptionQueueScope specifies the relational boundary between
 // the preempting workload's queue and candidate workloads' queues.
 // Possible values are:
 // - "SameLocalQueue": restricts preemption candidates to workloads submitted to the exact same LocalQueue (matching name and namespace).
 // - "SameClusterQueue": restricts preemption candidates to workloads submitted to the same ClusterQueue as the preemptor.
-// - "SameCohort": restricts preemption candidates to workloads in ClusterQueues that share the exact same immediate direct Cohort, as well as workloads in the preemptor's own ClusterQueue (even if standalone).
+// - "SameParentCohort": restricts preemption candidates to workloads in ClusterQueues that share the exact same immediate direct Cohort, as well as workloads in the preemptor's own ClusterQueue (even if standalone).
 // - "SameCohortTree": restricts preemption candidates to workloads in ClusterQueues that belong to the same Cohort Tree (sharing the same root ancestor Cohort), as well as workloads in the preemptor's own ClusterQueue (even if standalone).
 // - "AnyClusterQueue": places no relationship restrictions on preemption candidates.
 //
-// +kubebuilder:validation:Enum=SameLocalQueue;SameClusterQueue;SameCohort;SameCohortTree;AnyClusterQueue
-type PreemptionRelationConstraint string
+// +kubebuilder:validation:Enum=SameLocalQueue;SameClusterQueue;SameParentCohort;SameCohortTree;AnyClusterQueue
+type PreemptionQueueScope string
 
 const (
   // SameLocalQueue restricts preemption candidates to workloads submitted
   // to the exact same LocalQueue (matching name and namespace).
-  SameLocalQueue PreemptionRelationConstraint = "SameLocalQueue"
+  SameLocalQueue PreemptionQueueScope = "SameLocalQueue"
 
   // SameClusterQueue restricts preemption candidates to workloads submitted
   // to the same ClusterQueue as the preemptor.
-  SameClusterQueue PreemptionRelationConstraint = "SameClusterQueue"
+  SameClusterQueue PreemptionQueueScope = "SameClusterQueue"
 
-  // SameCohort restricts preemption candidates to workloads in ClusterQueues
+  // SameParentCohort restricts preemption candidates to workloads in ClusterQueues
   // that share the exact same immediate direct Cohort, as well as workloads in the
   // preemptor's own ClusterQueue (even if standalone and lacking a parent cohort).
-  SameCohort PreemptionRelationConstraint = "SameCohort"
+  SameParentCohort PreemptionQueueScope = "SameParentCohort"
 
   // SameCohortTree restricts preemption candidates to workloads in ClusterQueues
   // that belong to the same Cohort Tree (sharing the same root ancestor Cohort),
   // as well as workloads in the preemptor's own ClusterQueue (even if standalone and lacking a parent cohort).
-  SameCohortTree PreemptionRelationConstraint = "SameCohortTree"
+  SameCohortTree PreemptionQueueScope = "SameCohortTree"
 
   // AnyClusterQueue places no relationship restrictions on preemption candidates.
-  AnyClusterQueue PreemptionRelationConstraint = "AnyClusterQueue"
+  AnyClusterQueue PreemptionQueueScope = "AnyClusterQueue"
 )
 
 
@@ -702,7 +705,7 @@ type PreemptionCandidateSelector struct {
   // RelationRequirement specifies the queue or cohort relation boundary to the preemptor workload.
   //
   // +kubebuilder:validation:Required
-  RelationRequirement PreemptionRelationConstraint `json:"relationRequirement"`
+  RelationRequirement PreemptionQueueScope `json:"relationRequirement"`
 
   // Quota specifies quota-based preemption constraints (e.g., borrowing capacity or fair sharing share).
   // Cannot be set if RelationRequirement is SameLocalQueue or SameClusterQueue.
@@ -716,6 +719,7 @@ type PreemptionCandidateSelector struct {
   // Accepts all if not set.
   //
   // +optional
+  // +listType=atomic
   NumericLabels []NumericLabelConstraint `json:"numericLabels,omitempty"`
 
   // ClusterQueueSelector defines label selector constraints on candidate ClusterQueues.
@@ -761,13 +765,13 @@ type NumericLabelConstraint struct {
   // +kubebuilder:validation:MaxLength=316
   Key string `json:"key"`
 
-  // DefaultValue is used when a workload does not have the label key
+  // FallbackValue is used when a workload does not have the label key
   // or the value under the key cannot be parsed as an integer.
   // If not specified, workloads without the label or
   // with a label value not parsable as int are treated as incomparable,
   // and therefore excluded from preemption candidates.
   // +optional
-  DefaultValue *int32 `json:"defaultValue,omitempty"`
+  FallbackValue *int32 `json:"fallbackValue,omitempty"`
 
   // Relation defines how the candidate's label value compares to the preemptor's.
   // +optional
@@ -1082,7 +1086,7 @@ Implementation of the following candidate selector fields and constraints to hav
 
 - `NumericLabels` (`NumericLabelConstraint`)
 - `RelativeWorkloadPriority` (`RelativeConstraint`)
-- `RelationRequirement` (`PreemptionRelationConstraint`)
+- `RelationRequirement` (`PreemptionQueueScope`)
 
 Expose the implementation under feature gate "ConfigurablePreemptions", integration should not change in any way the existing preemption logic.
 
@@ -1318,7 +1322,7 @@ spec:
           numericLabels:
             - key: "tpus-count"
               relation: "Lower"
-              defaultValue: 0
+              fallbackValue: 0
   ordering:
     - orderingField: "Priority"
       direction: "Ascending"
@@ -1570,7 +1574,7 @@ spec:
 
 ### Workload Priority Class Selectors
 
-Selecting preemption candidates based on workload priority class label selectors allows targeting specific priority classes (e.g. preempting only `batch-low` workloads within the same ClusterQueue or when reclaiming borrowed cohort capacity). While these use cases are well-identified, configuring priority-class label selectors is deferred to future work. Preemptor workloads are qualified at the rule level via `matchingPreemptorWorkloads`.
+Selecting preemption candidates based on workload priority class label selectors allows targeting specific priority classes (e.g. preempting only `batch-low` workloads within the same ClusterQueue or when reclaiming borrowed cohort capacity). While these use cases are well-identified, configuring priority-class label selectors is deferred to future work. Preemptor workloads are qualified at the rule level via `preemptorSelector`.
 
 Relevant use cases include:
 
@@ -1619,7 +1623,7 @@ spec:
     - name: reclaim-cohort-quota-from-low-priority
       trigger: "QuotaReclaimRequired"
       candidateSelectors:
-        - relationRequirement: "SameCohort"
+        - relationRequirement: "SameParentCohort"
           quota: "BorrowingCapacityFromPreemptor"
           candidateWorkloadPrioritySelector:
             matchLabels:
@@ -1765,10 +1769,10 @@ type PreemptionRule struct {
   // Name of the preemption rule.
   Name string `json:"name"`
 
-  // MatchingPreemptorWorkloads specifies an optional label selector to limit which preemptor workloads can activate this rule.
+  // PreemptorSelector specifies an optional label selector to limit which preemptor workloads can activate this rule.
   //
   // +optional
-  MatchingPreemptorWorkloads *metav1.LabelSelector `json:"matchingPreemptorWorkloads,omitempty"`
+  PreemptorSelector *metav1.LabelSelector `json:"preemptorSelector,omitempty"`
 
   // Trigger specifies the condition (InsufficientQuota, QuotaReclaimRequired, or InsufficientTopology)
   // that must be observed on the preemptor workload for this rule to apply.
@@ -1811,7 +1815,7 @@ spec:
           numericLabels:
             - key: "tpus-count"
               relation: "Lower"
-              defaultValue: 0
+              fallbackValue: 0
 ```
 
 ### Per-Node DRA Device Feasibility Trigger (InsufficientDRADevices)
