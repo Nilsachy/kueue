@@ -366,11 +366,11 @@ spec:
     - name: defrag-smaller-tpu-workloads
       trigger: "InsufficientTopology"
       candidateSelectors:
-        - relativeWorkloadPriority: "LowerOrEqual"
+        - priorityComparison: "LowerOrEqual"
           relationRequirement: "AnyClusterQueue"
           numericLabels:
             - key: "tpus-count"
-              relation: "Lower"
+              comparison: "Lower"
               fallbackValue: 0
 ```
 
@@ -395,12 +395,12 @@ spec:
     - name: hero-reclaim-topology
       trigger: "InsufficientTopology"
       candidateSelectors:
-        - relativeWorkloadPriority: "Lower"
+        - priorityComparison: "Lower"
           relationRequirement: "AnyClusterQueue"
     - name: hero-reclaim-quota
       trigger: "InsufficientQuota"
       candidateSelectors:
-        - relativeWorkloadPriority: "Lower"
+        - priorityComparison: "Lower"
           relationRequirement: "AnyClusterQueue"
 ```
 
@@ -426,7 +426,7 @@ Requested functionalities from the community can be satisfied with the following
          trigger: "InsufficientQuota"
          candidateSelectors:
            - relationRequirement: "SameClusterQueue"
-             relativeWorkloadPriority: "Lower"
+             priorityComparison: "Lower"
              numericLabels:
                - key: "requested-gpus"
                  maxValue: 8
@@ -442,7 +442,7 @@ Requested functionalities from the community can be satisfied with the following
          trigger: "InsufficientTopology"
          candidateSelectors:
            - relationRequirement: "SameParentCohort"
-             relativeWorkloadPriority: "LowerOrEqual"
+             priorityComparison: "LowerOrEqual"
              workloadSelector:
                matchLabels:
                  kueue.x-k8s.io/topology-level: "rack"
@@ -489,7 +489,7 @@ Requested functionalities from the community can be satisfied with the following
          trigger: "InsufficientQuota"
          candidateSelectors:
            - relationRequirement: "SameClusterQueue"
-             relativeWorkloadPriority: "Lower"
+             priorityComparison: "Lower"
              minExecutionDuration: "15m"
    ```
 
@@ -502,7 +502,7 @@ Requested functionalities from the community can be satisfied with the following
          trigger: "InsufficientQuota"
          candidateSelectors:
            - relationRequirement: "SameClusterQueue"
-             relativeWorkloadPriority: "Lower"
+             priorityComparison: "Lower"
              maxTimeFromCreationDuration: "1h"
    ```
 
@@ -718,14 +718,14 @@ type PreemptionCandidateSelector struct {
   // +optional
   WorkloadSelector *metav1.LabelSelector `json:"workloadSelector,omitempty"`
 
-  // RelativeWorkloadPriority defines how the candidate's priority compares to the preemptor's priority.
+  // PriorityComparison defines how the candidate's priority compares to the preemptor's priority.
   // For example "Lower" means that only workloads with lower
   // priority will be allowed as preemption candidates.
   // The comparison is made using effective priority (accounting for priority boost if enabled).
   // If nil, no relative priority check is enforced.
   //
   // +optional
-  RelativeWorkloadPriority *RelativeConstraint `json:"relativeWorkloadPriority,omitempty"`
+  PriorityComparison *NumericComparison `json:"priorityComparison,omitempty"`
 }
 
 
@@ -735,7 +735,7 @@ type PreemptionCandidateSelector struct {
 // required topology domain size, such as the "number of TPUs".
 // If a user has a label "number-of-tpus" that describes the number of TPUs required in a single cube,
 // it can be used to create a rule that selects only workloads requiring smaller cube slices
-// by defining relation: "Lower". Such a configuration would allow preemption of "smaller" workloads,
+// by defining comparison: "Lower". Such a configuration would allow preemption of "smaller" workloads,
 // to achieve better cluster utilization and decrease fragmentation.
 // Please note that those labels are not copied out of the box from job-like objects.
 // You should remember to append the designated labels to the list of labels
@@ -757,9 +757,9 @@ type NumericLabelConstraint struct {
   // +optional
   FallbackValue *int32 `json:"fallbackValue,omitempty"`
 
-  // Relation defines how the candidate's label value compares to the preemptor's.
+  // Comparison defines how the candidate's label value compares to the preemptor's.
   // +optional
-  Relation *RelativeConstraint `json:"relation,omitempty"`
+  Comparison *NumericComparison `json:"comparison,omitempty"`
 
   // MinValue specifies the lowest label value a candidate workload can have to be considered for preemption.
   // +optional
@@ -770,24 +770,24 @@ type NumericLabelConstraint struct {
   MaxValue *int32 `json:"maxValue,omitempty"`
 }
 
-// RelativeConstraint defines how a specified numeric property (e.g., effective priority) of the candidate compares to the same property of the preemptor.
+// NumericComparison defines how a specified numeric property (e.g., effective priority) of the candidate compares to the same property of the preemptor.
 // Possible values are:
 // - "Lower": permits preemption if candidate field value < preemptor field value
 // - "Greater": permits preemption if candidate field value > preemptor field value
 // - "LowerOrEqual": permits preemption if candidate field value <= preemptor field value
 // - "GreaterOrEqual": permits preemption if candidate field value >= preemptor field value
 // +kubebuilder:validation:Enum=Lower;Greater;LowerOrEqual;GreaterOrEqual
-type RelativeConstraint string
+type NumericComparison string
 
 const (
   // Lower permits preemption if candidate field value < preemptor field value
-  Lower RelativeConstraint = "Lower"
+  Lower NumericComparison = "Lower"
   // Greater permits preemption if candidate field value > preemptor field value
-  Greater RelativeConstraint = "Greater"
+  Greater NumericComparison = "Greater"
   // LowerOrEqual permits preemption if candidate field value <= preemptor field value
-  LowerOrEqual RelativeConstraint = "LowerOrEqual"
+  LowerOrEqual NumericComparison = "LowerOrEqual"
   // GreaterOrEqual permits preemption if candidate field value >= preemptor field value
-  GreaterOrEqual RelativeConstraint = "GreaterOrEqual"
+  GreaterOrEqual NumericComparison = "GreaterOrEqual"
 )
 
 // Kueue uses full, descriptive identifiers ("Lower", "Greater", "LowerOrEqual", "GreaterOrEqual").
@@ -1069,7 +1069,7 @@ Implementation of the foundations of PreemptionConfig:
 Implementation of the following candidate selector fields and constraints to have an MVP of defrag:
 
 - `NumericLabels` (`NumericLabelConstraint`)
-- `RelativeWorkloadPriority` (`RelativeConstraint`)
+- `PriorityComparison` (`NumericComparison`)
 - `RelationRequirement` (`PreemptionQueueScope`)
 
 Expose the implementation under feature gate "ConfigurablePreemptions", integration should not change in any way the existing preemption logic.
@@ -1301,11 +1301,11 @@ spec:
     - name: defrag-smaller-tpu-workloads
       trigger: "InsufficientTopology"
       candidateSelectors:
-        - relativeWorkloadPriority: "LowerOrEqual"
+        - priorityComparison: "LowerOrEqual"
           relationRequirement: "AnyClusterQueue"
           numericLabels:
             - key: "tpus-count"
-              relation: "Lower"
+              comparison: "Lower"
               fallbackValue: 0
   ordering:
     - orderingField: "Priority"
@@ -1320,12 +1320,12 @@ spec:
     - name: hero-reclaim-topology
       trigger: "InsufficientTopology"
       candidateSelectors:
-        - relativeWorkloadPriority: "Lower"
+        - priorityComparison: "Lower"
           relationRequirement: "AnyClusterQueue"
     - name: hero-reclaim-quota
       trigger: "InsufficientQuota"
       candidateSelectors:
-        - relativeWorkloadPriority: "Lower"
+        - priorityComparison: "Lower"
           relationRequirement: "AnyClusterQueue"
   ordering:
     - orderingField: "Priority"
@@ -1514,7 +1514,7 @@ type PreemptionCandidateSelector struct {
   MaxExecutionDuration *metav1.Duration `json:"maxExecutionDuration,omitempty"`
 
   // ExecutionTimeRelation defines how the candidate's execution time compares to the preemptor's.
-  ExecutionTimeRelation *RelativeConstraint `json:"executionTimeRelation,omitempty"`
+  ExecutionTimeRelation *NumericComparison `json:"executionTimeRelation,omitempty"`
 
   // Accepts any time from creation if not set.
   // MinTimeFromCreationDuration specifies the minimum age of the workload from creation timestamp.
@@ -1524,7 +1524,7 @@ type PreemptionCandidateSelector struct {
   MaxTimeFromCreationDuration *metav1.Duration `json:"maxTimeFromCreationDuration,omitempty"`
 
   // TimeFromCreationRelation defines how the candidate's creation time compares to the preemptor's.
-  TimeFromCreationRelation *RelativeConstraint `json:"timeFromCreationRelation,omitempty"`
+  TimeFromCreationRelation *NumericComparison `json:"timeFromCreationRelation,omitempty"`
 }
 ```
 
@@ -1539,7 +1539,7 @@ spec:
       trigger: "InsufficientQuota"
       candidateSelectors:
         - relationRequirement: "SameClusterQueue"
-          relativeWorkloadPriority: "Lower"
+          priorityComparison: "Lower"
           minExecutionDuration: "15m"
 ```
 
@@ -1552,7 +1552,7 @@ spec:
       trigger: "InsufficientQuota"
       candidateSelectors:
         - relationRequirement: "SameClusterQueue"
-          relativeWorkloadPriority: "Lower"
+          priorityComparison: "Lower"
           maxTimeFromCreationDuration: "1h"
 ```
 
@@ -1835,11 +1835,11 @@ spec:
       trigger: "InsufficientTopology"
       minTriggerRequiredDuration: "30s"
       candidateSelectors:
-        - relativeWorkloadPriority: "LowerOrEqual"
+        - priorityComparison: "LowerOrEqual"
           relationRequirement: "AnyClusterQueue"
           numericLabels:
             - key: "tpus-count"
-              relation: "Lower"
+              comparison: "Lower"
               fallbackValue: 0
 ```
 
