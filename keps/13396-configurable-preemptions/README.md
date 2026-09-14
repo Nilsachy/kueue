@@ -67,6 +67,8 @@
     - [Examples with Workload Priority Class Selectors](#examples-with-workload-priority-class-selectors)
       - [Story 1 - Priority Threshold for Within-ClusterQueue Preemptions](#story-1---priority-threshold-for-within-clusterqueue-preemptions)
       - [Story 2 - Priority Threshold for Reclaim Within Cohort](#story-2---priority-threshold-for-reclaim-within-cohort)
+  - [Quota-Based Candidate Selectors (QuotaConstraint)](#quota-based-candidate-selectors-quotaconstraint)
+    - [Proposed API for Quota-Based Candidate Selectors](#proposed-api-for-quota-based-candidate-selectors)
   - [PreemptionLimit (Rate-Limiting Guardrails)](#preemptionlimit-rate-limiting-guardrails)
     - [Proposed API for PreemptionLimit](#proposed-api-for-preemptionlimit)
     - [Observability When Reaching Preemption Limits](#observability-when-reaching-preemption-limits)
@@ -100,7 +102,7 @@ updates.
 
 This KEP introduces **Configurable Preemptions** in Kueue through the `PreemptionConfig` cluster-scoped CRD (with rate-limiting guardrails via `PreemptionLimit` deferred to future work).
 This enables declarative preemption policies for scenarios unsupported by existing heuristics, including topology defragmentation, mission-critical "hero" workloads, and business SLA constraints.
-With `PreemptionConfig`, administrators can configure explicit triggers (quota or topology constraints) and candidate selectors (such as priority relations, queue relations, and custom numeric labels, with minimal trigger duration, time-based candidate duration selectors, priority class selectors, custom ordering, per-selector per-CQ priority queues, and `PreemptionLimit` deferred to future work). In the initial iteration, candidate evaluation reuses the default ordering rules from classical preemption and fair sharing. In Alpha, `PreemptionConfig` is referenced via an annotation on the `ClusterQueue` (`kueue.x-k8s.io/preemption-config`), keeping the defaulting of `spec.preemption` intact and merging the candidate outputs of both classical and configurable preemption strategies. For Beta+, as `PreemptionConfig` achieves full feature parity with classical preemption, both strategies will become mutually exclusive via a formal API field, and the annotation will be retired.
+With `PreemptionConfig`, administrators can configure explicit triggers (quota or topology constraints) and candidate selectors (such as priority relations, queue relations, and custom numeric labels, with quota-based candidate selectors, minimal trigger duration, time-based candidate duration selectors, priority class selectors, custom ordering, per-selector per-CQ priority queues, and `PreemptionLimit` deferred to future work). In the initial iteration, candidate evaluation reuses the default ordering rules from classical preemption and fair sharing. In Alpha, `PreemptionConfig` is referenced via an annotation on the `ClusterQueue` (`kueue.x-k8s.io/preemption-config`), keeping the defaulting of `spec.preemption` intact and merging the candidate outputs of both classical and configurable preemption strategies. For Beta+, as `PreemptionConfig` achieves full feature parity with classical preemption, both strategies will become mutually exclusive via a formal API field, and the annotation will be retired.
 
 ## Motivation
 
@@ -689,30 +691,12 @@ const (
 )
 
 
-// +kubebuilder:validation:Enum=BorrowingCapacityFromPreemptor;DRSLessThanOrEqualToFinalShare;DRSLessThanInitialShare;DRSAllStrategies
-type QuotaConstraint string
-
-const (
-  BorrowingCapacityFromPreemptor QuotaConstraint = "BorrowingCapacityFromPreemptor"
-  DRSLessThanOrEqualToFinalShare QuotaConstraint = "DRSLessThanOrEqualToFinalShare"
-  DRSLessThanInitialShare QuotaConstraint = "DRSLessThanInitialShare"
-  DRSAllStrategies QuotaConstraint = "DRSAllStrategies"
-)
-
-
 // PreemptionCandidateSelector defines the selection criteria for workloads that are candidates for preemption.
 type PreemptionCandidateSelector struct {
   // RelationRequirement specifies the queue or cohort relation boundary to the preemptor workload.
   //
   // +kubebuilder:validation:Required
   RelationRequirement PreemptionQueueScope `json:"relationRequirement"`
-
-  // Quota specifies quota-based preemption constraints (e.g., borrowing capacity or fair sharing share).
-  // Cannot be set if RelationRequirement is SameLocalQueue or SameClusterQueue.
-  // Accepts all if not set.
-  //
-  // +optional
-  Quota *QuotaConstraint `json:"quota,omitempty"`
 
   // NumericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
   // Multiple numeric labels are joined using AND-rule (all have to be satisfied).
@@ -1628,6 +1612,47 @@ spec:
           candidateWorkloadPrioritySelector:
             matchLabels:
               kueue.x-k8s.io/priority-class: "batch-low"
+```
+
+### Quota-Based Candidate Selectors (QuotaConstraint)
+
+In Alpha, candidate evaluation reuses the regular preemption ordering rules from classical preemption and fair sharing, which already take borrowing capacity and Dominant Resource Share (DRS) into account dynamically. Explicit pre-filtering of preemption candidates via a `Quota` constraint (such as `BorrowingCapacityFromPreemptor` or DRS share comparisons) is therefore not needed for Alpha and is deferred to future work.
+
+#### Proposed API for Quota-Based Candidate Selectors
+
+In a future iteration, `PreemptionCandidateSelector` can be extended with the `Quota` field:
+
+```go
+// +kubebuilder:validation:Enum=BorrowingCapacityFromPreemptor;DRSLessThanOrEqualToFinalShare;DRSLessThanInitialShare;DRSAllStrategies
+type QuotaConstraint string
+
+const (
+  // BorrowingCapacityFromPreemptor restricts preemption candidates to workloads
+  // that consume quota borrowed from the preemptor's ClusterQueue.
+  BorrowingCapacityFromPreemptor QuotaConstraint = "BorrowingCapacityFromPreemptor"
+
+  // DRSLessThanOrEqualToFinalShare restricts preemption candidates to workloads in ClusterQueues
+  // whose Dominant Resource Share after preemption remains less than or equal to their final share.
+  DRSLessThanOrEqualToFinalShare QuotaConstraint = "DRSLessThanOrEqualToFinalShare"
+
+  // DRSLessThanInitialShare restricts preemption candidates to workloads in ClusterQueues
+  // whose Dominant Resource Share before preemption was less than their initial share.
+  DRSLessThanInitialShare QuotaConstraint = "DRSLessThanInitialShare"
+
+  // DRSAllStrategies allows any preemption candidates permitted under configured DRS fair-sharing strategies.
+  DRSAllStrategies QuotaConstraint = "DRSAllStrategies"
+)
+
+type PreemptionCandidateSelector struct {
+  // ... baseline candidate selector fields ...
+
+  // Quota specifies quota-based preemption constraints (e.g., borrowing capacity or fair sharing share).
+  // Cannot be set if RelationRequirement is SameLocalQueue or SameClusterQueue.
+  // Accepts all if not set.
+  //
+  // +optional
+  Quota *QuotaConstraint `json:"quota,omitempty"`
+}
 ```
 
 ### PreemptionLimit (Rate-Limiting Guardrails)
