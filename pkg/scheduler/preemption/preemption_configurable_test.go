@@ -17,6 +17,7 @@ limitations under the License.
 package preemption
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -89,7 +90,14 @@ func TestConfigurablePreemptions(t *testing.T) {
 		incoming                *kueue.Workload
 		targetCQ                kueue.ClusterQueueReference
 		wantPreempted           sets.Set[string]
-		wantReasons             map[string]string
+		// wantPreemptedAnyOf lists the acceptable outcomes for cases where more
+		// candidates are eligible than are needed to fit the incoming workload.
+		// Candidates are collected in map iteration order and preemption stops at
+		// the first fit, so any of the eligible candidates may be picked.
+		// Remove once configurable preemption candidates are merged with the
+		// classical and fair preemption strategies.
+		wantPreemptedAnyOf []sets.Set[string]
+		wantReasons        map[string]string
 	}{
 		"no candidates for CQ without config": {
 			clusterQueues: []*kueue.ClusterQueue{
@@ -114,9 +122,10 @@ func TestConfigurablePreemptions(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			incoming:      unitWl.Clone().Name("a_incoming").Condition(insufficientQuotaCond).Obj(),
-			targetCQ:      "a",
-			wantPreempted: sets.New("/a1"),
+			incoming: unitWl.Clone().Name("a_incoming").Condition(insufficientQuotaCond).Obj(),
+			targetCQ: "a",
+			// a1 and a2 are equally eligible, and only one of them is needed.
+			wantPreemptedAnyOf: []sets.Set[string]{sets.New("/a1"), sets.New("/a2")},
 		},
 		"multiple workloads should be preempted to fit incoming workload": {
 			clusterQueues: baseCQs,
@@ -314,7 +323,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Preemption(kueue.ClusterQueuePreemption{
 						WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
 					}).
-					PreemptionConfigName(defaultConfigName).
+					Annotation(kueue.PreemptionConfigAnnotation, defaultConfigName).
 					Obj(),
 			},
 			config: kueue.PreemptionConfig{
@@ -324,13 +333,16 @@ func TestConfigurablePreemptions(t *testing.T) {
 				Spec: kueue.PreemptionConfigSpec{
 					Rules: []kueue.PreemptionRule{
 						{
-							Name:    "candidate-priority-rule",
+							Name:    "candidate-tier-rule",
 							Trigger: kueue.InsufficientQuota,
 							Candidates: []kueue.PreemptionCandidateSelector{
 								{
 									RelationRequirement: kueue.SameClusterQueue,
-									CandidateWorkloadPrioritySelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{"preemptible": "true"},
+									NumericLabels: []kueue.NumericLabelConstraint{
+										{
+											Key:      "preemption-tier",
+											Relation: ptr.To(kueue.Lower),
+										},
 									},
 								},
 							},
@@ -338,24 +350,23 @@ func TestConfigurablePreemptions(t *testing.T) {
 					},
 				},
 			},
-			workloadPriorityClasses: []kueue.WorkloadPriorityClass{
-				*utiltestingapi.MakeWorkloadPriorityClass("for-configurable-preemption").Label("preemptible", "true").Obj(),
-			},
 			admitted: []kueue.Workload{
+				// a1 has no tier label, so it is not a candidate for the configurable rule.
 				*unitWl.Clone().Name("a1").
 					Priority(10).
 					SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").
 					Priority(20).
-					PriorityClassRef(kueue.NewWorkloadPriorityClassRef("for-configurable-preemption")).
+					Label("preemption-tier", "1").
 					SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a3").
 					Priority(30).
-					PriorityClassRef(kueue.NewWorkloadPriorityClassRef("for-configurable-preemption")).
+					Label("preemption-tier", "2").
 					SimpleReserveQuota("a", "default", now).Obj(),
 			},
 			incoming: unitWl.Clone().Name("a_incoming").
 				Priority(100).
+				Label("preemption-tier", "5").
 				Request(corev1.ResourceCPU, "2").
 				Condition(insufficientQuotaCond).Obj(),
 			targetCQ:      "a",
@@ -425,7 +436,11 @@ func TestConfigurablePreemptions(t *testing.T) {
 			if len(targets) != len(gotTargets) {
 				t.Errorf("Targets contain duplicates: %v", gotTargetsList)
 			}
-			if diff := cmp.Diff(tc.wantPreempted, gotTargets, cmpopts.EquateEmpty()); diff != "" {
+			if len(tc.wantPreemptedAnyOf) > 0 {
+				if !slices.ContainsFunc(tc.wantPreemptedAnyOf, gotTargets.Equal) {
+					t.Errorf("Issued preemptions %v, want one of %v", sets.List(gotTargets), tc.wantPreemptedAnyOf)
+				}
+			} else if diff := cmp.Diff(tc.wantPreempted, gotTargets, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Issued preemptions (-want,+got):\n%s", diff)
 			}
 			if tc.wantReasons != nil {
