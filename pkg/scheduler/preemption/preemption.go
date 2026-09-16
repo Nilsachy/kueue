@@ -651,14 +651,14 @@ func (p *Preemptor) configurablePreemptions(preemptionCtx *preemptionCtx) []*Tar
 
 	preemptionEvaluator := configurable.NewPreemptionEvaluator(preemptionCtx.ctx, preemptionCtx.log, preemptionCtx.clock, *preemptionConfig, p.client)
 
-	iter, err := preemptionEvaluator.Iter(preemptionCtx.snapshot, &preemptionCtx.preemptor, preemptionCtx.frsNeedPreemption)
+	candidates, err := preemptionEvaluator.Candidates(preemptionCtx.snapshot, &preemptionCtx.preemptor, preemptionCtx.frsNeedPreemption)
 	if err != nil {
 		preemptionCtx.log.Error(err, "Failed to get candidates for preemption", "preemptionConfigName", preemptionConfigName)
 		return nil
 	}
 
 	var targets []*Target
-	for candidate := range iter {
+	for _, candidate := range candidates {
 		preemptionCtx.snapshot.RemoveWorkload(candidate)
 		targets = append(targets, &Target{
 			WorkloadInfo: candidate,
