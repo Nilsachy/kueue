@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 
@@ -49,6 +50,11 @@ type candidateElem struct {
 	// candidates above priority threshold cannot be preempted if at the same time
 	// cq would borrow from other queues/cohorts
 	preemptionVariant preemptionVariant
+	// configurable indicates that the candidate was selected by the
+	// ConfigurablePreemption rules. Such candidates are not subject to the
+	// quota-based restrictions, as they were explicitly selected by the
+	// PreemptionConfig.
+	configurable bool
 }
 
 func WorkloadUsesResources(wl *workload.Info, frsNeedPreemption sets.Set[resources.FlavorResource]) bool {
@@ -75,6 +81,9 @@ func splitEvicted(workloads []*candidateElem) ([]*candidateElem, []*candidateEle
 // with and without borrowing. The runs are independent which means that the same candidates
 // might be returned for both, but note that the candidates with borrowing are a subset of
 // candidates without borrowing.
+// The configurableCandidates, selected by the ConfigurablePreemption rules, are merged with
+// the candidates found by the classical algorithm. They are not subject to the quota-based
+// restrictions, see candidateIsValid.
 func NewCandidateIterator(
 	hierarchicalReclaimCtx *HierarchicalPreemptionCtx,
 	enabledAfs bool,
@@ -82,27 +91,30 @@ func NewCandidateIterator(
 	snapshot *schdcache.Snapshot,
 	clock clock.Clock,
 	ordering func(logr.Logger, bool, *workload.Info, *workload.Info, kueue.ClusterQueueReference, time.Time) int,
+	configurableCandidates []*workload.Info,
 ) *candidateIterator {
 	sameQueueCandidates := collectSameQueueCandidates(hierarchicalReclaimCtx)
 	hierarchyCandidates, priorityCandidates := collectCandidatesForHierarchicalReclaim(hierarchicalReclaimCtx)
-	slices.SortFunc(sameQueueCandidates, func(a, b *candidateElem) int {
+	configurableOnlyCandidates := markConfigurableCandidates(configurableCandidates, sameQueueCandidates, hierarchyCandidates, priorityCandidates)
+	sortFn := func(a, b *candidateElem) int {
 		return ordering(hierarchicalReclaimCtx.Log, enabledAfs, a.wl, b.wl, hierarchicalReclaimCtx.Cq.Name, clock.Now())
-	})
-	slices.SortFunc(priorityCandidates, func(a, b *candidateElem) int {
-		return ordering(hierarchicalReclaimCtx.Log, enabledAfs, a.wl, b.wl, hierarchicalReclaimCtx.Cq.Name, clock.Now())
-	})
-	slices.SortFunc(hierarchyCandidates, func(a, b *candidateElem) int {
-		return ordering(hierarchicalReclaimCtx.Log, enabledAfs, a.wl, b.wl, hierarchicalReclaimCtx.Cq.Name, clock.Now())
-	})
+	}
+	slices.SortFunc(sameQueueCandidates, sortFn)
+	slices.SortFunc(priorityCandidates, sortFn)
+	slices.SortFunc(hierarchyCandidates, sortFn)
+	slices.SortFunc(configurableOnlyCandidates, sortFn)
 
 	evictedHierarchicalReclaimCandidates, nonEvictedHierarchicalReclaimCandidates := splitEvicted(hierarchyCandidates)
+	evictedConfigurableCandidates, nonEvictedConfigurableCandidates := splitEvicted(configurableOnlyCandidates)
 	evictedSTCandidates, nonEvictedSTCandidates := splitEvicted(priorityCandidates)
 	evictedSameQueueCandidates, nonEvictedSameQueueCandidates := splitEvicted(sameQueueCandidates)
-	allCandidates := make([]*candidateElem, 0, len(hierarchyCandidates)+len(priorityCandidates)+len(sameQueueCandidates))
+	allCandidates := make([]*candidateElem, 0, len(hierarchyCandidates)+len(configurableOnlyCandidates)+len(priorityCandidates)+len(sameQueueCandidates))
 	allCandidates = append(allCandidates, evictedHierarchicalReclaimCandidates...)
+	allCandidates = append(allCandidates, evictedConfigurableCandidates...)
 	allCandidates = append(allCandidates, evictedSTCandidates...)
 	allCandidates = append(allCandidates, evictedSameQueueCandidates...)
 	allCandidates = append(allCandidates, nonEvictedHierarchicalReclaimCandidates...)
+	allCandidates = append(allCandidates, nonEvictedConfigurableCandidates...)
 	allCandidates = append(allCandidates, nonEvictedSTCandidates...)
 	allCandidates = append(allCandidates, nonEvictedSameQueueCandidates...)
 	return &candidateIterator{
@@ -114,6 +126,42 @@ func NewCandidateIterator(
 		NoCandidateForHierarchicalReclaim: len(hierarchyCandidates) == 0,
 		hierarchicalReclaimCtx:            hierarchicalReclaimCtx,
 	}
+}
+
+// markConfigurableCandidates flags the candidates which were already collected by the
+// classical algorithm, so that they are not rejected by the quota-based restrictions,
+// and returns the elements for the candidates which are only selected by the
+// ConfigurablePreemption rules. A candidate is never duplicated, as that would lead
+// to removing the same workload from the snapshot twice.
+func markConfigurableCandidates(configurableCandidates []*workload.Info, collectedCandidates ...[]*candidateElem) []*candidateElem {
+	if len(configurableCandidates) == 0 {
+		return nil
+	}
+	configurableUIDs := sets.New[types.UID]()
+	for _, wl := range configurableCandidates {
+		configurableUIDs.Insert(wl.Obj.UID)
+	}
+	collectedUIDs := sets.New[types.UID]()
+	for _, candidates := range collectedCandidates {
+		for _, candidate := range candidates {
+			collectedUIDs.Insert(candidate.wl.Obj.UID)
+			if configurableUIDs.Has(candidate.wl.Obj.UID) {
+				candidate.configurable = true
+			}
+		}
+	}
+	var configurableOnlyCandidates []*candidateElem
+	for _, wl := range configurableCandidates {
+		if collectedUIDs.Has(wl.Obj.UID) {
+			continue
+		}
+		configurableOnlyCandidates = append(configurableOnlyCandidates, &candidateElem{
+			wl:                wl,
+			preemptionVariant: ConfigurablePreemption,
+			configurable:      true,
+		})
+	}
+	return configurableOnlyCandidates
 }
 
 // Next allows to iterate over the ordered sequence of candidates, with the reason
@@ -134,6 +182,11 @@ func (c *candidateIterator) Next(borrow bool) (*workload.Info, string) {
 // as eg. some candidates can only be considered without borrowing
 // Also, preemption of candidates might invalidate other candidates
 func (c *candidateIterator) candidateIsValid(candidate *candidateElem, borrow bool) bool {
+	// Candidates selected by the ConfigurablePreemption rules are preemptible
+	// regardless of the quota used by their ClusterQueue.
+	if candidate.configurable {
+		return true
+	}
 	if c.hierarchicalReclaimCtx.Cq.Name == candidate.wl.ClusterQueue {
 		return true
 	}

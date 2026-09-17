@@ -326,7 +326,7 @@ func TestRunFirstFsStrategyLogging(t *testing.T) {
 				evaluated++
 				return tc.passOnEvaluation != 0 && evaluated == tc.passOnEvaluation
 			}
-			fits, targets, retryCandidates := runFirstFsStrategy(fixture.preemptionCtx, fixture.candidates, strategy)
+			fits, targets, retryCandidates := runFirstFsStrategy(fixture.preemptionCtx, fixture.candidates, strategy, nil)
 
 			if tc.wantAllRejected {
 				if fits {

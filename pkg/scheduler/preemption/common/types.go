@@ -16,6 +16,11 @@ limitations under the License.
 
 package common
 
+// ConfigurablePreemptionReason is reported for targets which are preempted
+// solely because they were selected by the ConfigurablePreemption rules.
+// TODO: configurable_preemptions_test.go should be updated once reason is changed.
+const ConfigurablePreemptionReason = "ConfigurablePreemption"
+
 // PreemptionPossibility represents the result
 // of a preemption simulation.
 type PreemptionPossibility int
