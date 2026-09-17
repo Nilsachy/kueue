@@ -30,6 +30,7 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	workloadjob "sigs.k8s.io/kueue/pkg/controller/jobs/job"
 	"sigs.k8s.io/kueue/pkg/features"
+	preemptioncommon "sigs.k8s.io/kueue/pkg/scheduler/preemption/common"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 	jobtesting "sigs.k8s.io/kueue/pkg/util/testingjobs/job"
 	"sigs.k8s.io/kueue/test/util"
@@ -53,7 +54,7 @@ var _ = ginkgo.Describe("Configuration Preemptions", ginkgo.Label("feature:confi
 			Rules: []kueue.PreemptionConfigPreemptionRule{
 				{
 					Name:             "test-rule-one",
-					ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+					ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 					CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 						{
 							Scope: kueue.WithinClusterQueue,
@@ -167,7 +168,7 @@ var _ = ginkgo.Describe("Configuration Preemptions", ginkgo.Label("feature:confi
 					metav1.Condition{
 						Type:   kueue.WorkloadPreempted,
 						Status: metav1.ConditionTrue,
-						Reason: "ConfigurablePreemption",
+						Reason: preemptioncommon.ConfigurablePreemptionReason,
 					},
 					cmpopts.IgnoreFields(metav1.Condition{}, "LastTransitionTime", "Message", "ObservedGeneration"),
 				)))
