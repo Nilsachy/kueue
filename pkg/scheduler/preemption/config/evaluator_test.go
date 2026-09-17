@@ -486,6 +486,40 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1"},
 		},
+		"LabelSelector filters candidate workloads matching label selector": {
+			clusterQueues: baseCqs,
+			config: kueue.PreemptionConfig{
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionRule{
+						{
+							Name:    "label-selector rule",
+							Trigger: kueue.InsufficientQuota,
+							Candidates: []kueue.PreemptionCandidateSelector{
+								{
+									RelationRequirement: kueue.SameClusterQueue,
+									LabelSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"env": "preemptible"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").
+					Label("env", "preemptible").
+					SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").
+					Label("env", "guaranteed").
+					SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a3").
+					SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
+			preemptorCq:    "a",
+			wantCandidates: []string{"a1"},
+		},
 		"multi-selector deduplication": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{

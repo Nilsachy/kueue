@@ -19,6 +19,7 @@ limitations under the License.
 package v1beta2
 
 import (
+	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	kueuev1beta2 "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 )
 
@@ -33,6 +34,9 @@ type PreemptionCandidateSelectorApplyConfiguration struct {
 	// Multiple numeric label constraints are joined using logical AND (all must be satisfied).
 	// If not set does not add any additional candidate filtering.
 	NumericLabels []NumericLabelConstraintApplyConfiguration `json:"numericLabels,omitempty"`
+	// LabelSelector defines label selector constraints on candidate Workloads.
+	// Accepts all if not set.
+	LabelSelector *v1.LabelSelectorApplyConfiguration `json:"labelSelector,omitempty"`
 	// RelativeWorkloadPriority defines how the preemptor's priority compares to the candidate's priority.
 	// For example "Lower" means that only workloads with lower priority will be allowed as preemption candidates.
 	// The comparison is made using effective priority (accounting for priority boost if enabled).
@@ -64,6 +68,14 @@ func (b *PreemptionCandidateSelectorApplyConfiguration) WithNumericLabels(values
 		}
 		b.NumericLabels = append(b.NumericLabels, *values[i])
 	}
+	return b
+}
+
+// WithLabelSelector sets the LabelSelector field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the LabelSelector field is set to the value of the last call.
+func (b *PreemptionCandidateSelectorApplyConfiguration) WithLabelSelector(value *v1.LabelSelectorApplyConfiguration) *PreemptionCandidateSelectorApplyConfiguration {
+	b.LabelSelector = value
 	return b
 }
 

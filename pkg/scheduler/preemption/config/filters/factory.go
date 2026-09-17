@@ -18,6 +18,7 @@ package filters
 
 import (
 	"github.com/go-logr/logr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
@@ -40,11 +41,18 @@ func NewCandidateFilters(
 	if !ok {
 		return CandidateFilters{}, true
 	}
+	wlLabelFilter, ok := buildWorkloadLabelFilter(log, selector.LabelSelector)
+	if !ok {
+		return CandidateFilters{}, true
+	}
 	wlNumericFilters := buildNumericLabelFilters(log, selector.NumericLabels, preemptor)
 	wlPriorityFilters := buildPriorityFilters(log, selector, preemptor)
 
 	var wlFilters []WorkloadFilter
 	wlFilters = append(wlFilters, wlRelationFilters...)
+	if wlLabelFilter != nil {
+		wlFilters = append(wlFilters, wlLabelFilter)
+	}
 	wlFilters = append(wlFilters, wlNumericFilters...)
 	wlFilters = append(wlFilters, wlPriorityFilters...)
 
@@ -98,6 +106,24 @@ func buildNumericLabelFilters(
 		filters = append(filters, NewNumericLabelFilter(log, numConstraint, preemptor))
 	}
 	return filters
+}
+
+func buildWorkloadLabelFilter(
+	log logr.Logger,
+	selector *metav1.LabelSelector,
+) (WorkloadFilter, bool) {
+	if selector == nil {
+		return nil, true
+	}
+	ls, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		log.V(3).Info("Invalid LabelSelector", "error", err, "selector", selector)
+		return nil, false
+	}
+	if ls.Empty() {
+		return nil, true
+	}
+	return NewWorkloadLabelFilter(ls), true
 }
 
 func buildPriorityFilters(

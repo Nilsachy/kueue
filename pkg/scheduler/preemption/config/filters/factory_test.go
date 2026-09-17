@@ -22,6 +22,8 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/utils/ptr"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -51,6 +53,12 @@ func TestNewCandidateFilters(t *testing.T) {
 		Priority(100).
 		Obj(), "cq1")
 
+	candSelectorProd, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+		MatchLabels: map[string]string{"env": "prod"},
+	})
+	if err != nil {
+		t.Fatalf("Failed to parse label selector: %v", err)
+	}
 	cases := map[string]struct {
 		selector      *kueue.PreemptionCandidateSelector
 		preemptor     *workload.Info
@@ -278,6 +286,91 @@ func TestNewCandidateFilters(t *testing.T) {
 				},
 			},
 		},
+		"SameClusterQueue with empty LabelSelector produces no extra WorkloadFilters": {
+			selector: &kueue.PreemptionCandidateSelector{
+				RelationRequirement: kueue.SameClusterQueue,
+				LabelSelector:       &metav1.LabelSelector{},
+			},
+			preemptor: preemptor,
+			wantFilters: CandidateFilters{
+				CQFilters: []ClusterQueueFilter{
+					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+				},
+			},
+		},
+		"SameClusterQueue with valid LabelSelector compiles into WLFilters": {
+			selector: &kueue.PreemptionCandidateSelector{
+				RelationRequirement: kueue.SameClusterQueue,
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"env": "prod"},
+				},
+			},
+			preemptor: preemptor,
+			wantFilters: CandidateFilters{
+				CQFilters: []ClusterQueueFilter{
+					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+				},
+				WLFilters: []WorkloadFilter{
+					&workloadLabelFilter{
+						selector: candSelectorProd,
+					},
+				},
+			},
+		},
+		"LabelSelector with invalid selector returns rejectAll true": {
+			selector: &kueue.PreemptionCandidateSelector{
+				RelationRequirement: kueue.SameClusterQueue,
+				LabelSelector: &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{Key: "env", Operator: metav1.LabelSelectorOperator("InvalidOp")},
+					},
+				},
+			},
+			preemptor:     preemptor,
+			wantFilters:   CandidateFilters{},
+			wantRejectAll: true,
+		},
+		"Full combination including LabelSelector compiles all filters": {
+			selector: &kueue.PreemptionCandidateSelector{
+				RelationRequirement: kueue.SameCohort,
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"env": "prod"},
+				},
+				RelativeWorkloadPriority: ptr.To(kueue.Lower),
+				NumericLabels: []kueue.NumericLabelConstraint{
+					{
+						Key:      "tpu-size",
+						Relation: ptr.To(kueue.Lower),
+					},
+				},
+			},
+			preemptor: preemptor,
+			wantFilters: CandidateFilters{
+				CQFilters: []ClusterQueueFilter{
+					&sameCohortFilter{
+						preemptorCQ:     "cq1",
+						preemptorCohort: "subA1",
+						hasCohort:       true,
+					},
+				},
+				WLFilters: []WorkloadFilter{
+					&workloadLabelFilter{
+						selector: candSelectorProd,
+					},
+					&numericLabelFilter{
+						constraint: kueue.NumericLabelConstraint{
+							Key:      "tpu-size",
+							Relation: ptr.To(kueue.Lower),
+						},
+						preemptorVal: ptr.To[int32](8),
+					},
+					&relativeWorkloadPriorityFilter{
+						relation:          kueue.Lower,
+						preemptorPriority: 100,
+					},
+				},
+			},
+		},
 	}
 
 	cmpOptions := []cmp.Option{
@@ -286,11 +379,21 @@ func TestNewCandidateFilters(t *testing.T) {
 			sameCohortFilter{},
 			sameCohortTreeFilter{},
 			sameLocalQueueFilter{},
+			workloadLabelFilter{},
 			numericLabelFilter{},
 			relativeWorkloadPriorityFilter{},
 		),
 		cmpopts.IgnoreFields(numericLabelFilter{}, "log"),
 		cmpopts.IgnoreFields(relativeWorkloadPriorityFilter{}, "log"),
+		cmp.Comparer(func(a, b labels.Selector) bool {
+			if a == nil && b == nil {
+				return true
+			}
+			if a == nil || b == nil {
+				return false
+			}
+			return a.String() == b.String()
+		}),
 		cmpopts.EquateEmpty(),
 	}
 
