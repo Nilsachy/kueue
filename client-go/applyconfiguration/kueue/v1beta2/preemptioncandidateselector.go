@@ -30,6 +30,9 @@ import (
 type PreemptionCandidateSelectorApplyConfiguration struct {
 	// RelationRequirement specifies the queue or cohort relation boundary to the preemptor workload.
 	RelationRequirement *kueuev1beta2.PreemptionRelationConstraint `json:"relationRequirement,omitempty"`
+	// ClusterQueueSelector defines label selector constraints on candidate ClusterQueues.
+	// Accepts all if not set.
+	ClusterQueueSelector *v1.LabelSelectorApplyConfiguration `json:"clusterQueueSelector,omitempty"`
 	// NumericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
 	// Multiple numeric label constraints are joined using logical AND (all must be satisfied).
 	// If not set does not add any additional candidate filtering.
@@ -55,6 +58,14 @@ func PreemptionCandidateSelector() *PreemptionCandidateSelectorApplyConfiguratio
 // If called multiple times, the RelationRequirement field is set to the value of the last call.
 func (b *PreemptionCandidateSelectorApplyConfiguration) WithRelationRequirement(value kueuev1beta2.PreemptionRelationConstraint) *PreemptionCandidateSelectorApplyConfiguration {
 	b.RelationRequirement = &value
+	return b
+}
+
+// WithClusterQueueSelector sets the ClusterQueueSelector field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the ClusterQueueSelector field is set to the value of the last call.
+func (b *PreemptionCandidateSelectorApplyConfiguration) WithClusterQueueSelector(value *v1.LabelSelectorApplyConfiguration) *PreemptionCandidateSelectorApplyConfiguration {
+	b.ClusterQueueSelector = value
 	return b
 }
 

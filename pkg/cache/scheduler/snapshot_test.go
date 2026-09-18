@@ -444,6 +444,32 @@ func TestSnapshot(t *testing.T) {
 				),
 			},
 		},
+		"clusterQueue with labels": {
+			cqs: []*kueue.ClusterQueue{
+				utiltestingapi.MakeClusterQueue("with-labels").
+					Label("env", "prod").
+					Label("tier", "batch").
+					Obj(),
+			},
+			wantSnapshot: Snapshot{
+				Manager: hierarchy.NewManagerForTest(
+					map[kueue.CohortReference]*CohortSnapshot{},
+					map[kueue.ClusterQueueReference]*ClusterQueueSnapshot{
+						"with-labels": {
+							Name:                          "with-labels",
+							Labels:                        map[string]string{"env": "prod", "tier": "batch"},
+							NamespaceSelector:             labels.Everything(),
+							AllocatableResourceGeneration: 1,
+							Status:                        active,
+							Workloads:                     map[workload.Reference]*workload.Info{},
+							FlavorFungibility:             defaultFlavorFungibility,
+							Preemption:                    defaultPreemption,
+							FairWeight:                    defaultWeight,
+						},
+					},
+				),
+			},
+		},
 		"lendingLimit with 2 clusterQueues and 2 flavors(whenCanBorrow: MayStopSearch)": {
 			cqs: []*kueue.ClusterQueue{
 				utiltestingapi.MakeClusterQueue("a").

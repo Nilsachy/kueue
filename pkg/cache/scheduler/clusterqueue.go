@@ -56,6 +56,7 @@ var (
 // holds admitted workloads.
 type clusterQueue struct {
 	Name                 kueue.ClusterQueueReference
+	Labels               map[string]string
 	ResourceGroups       []resourcegroups.ResourceGroup
 	Workloads            map[workload.Reference]*workload.Info
 	WorkloadsNotReady    sets.Set[workload.Reference]
@@ -177,6 +178,7 @@ func (c *clusterQueue) updateClusterQueue(
 		return err
 	}
 	c.NamespaceSelector = nsSelector
+	c.Labels = maps.Clone(in.Labels)
 
 	c.isStopped = ptr.Deref(in.Spec.StopPolicy, kueue.None) != kueue.None
 

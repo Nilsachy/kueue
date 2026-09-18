@@ -41,12 +41,22 @@ func NewCandidateFilters(
 	if !ok {
 		return CandidateFilters{}, true
 	}
+	cqLabelFilter, ok := buildClusterQueueLabelFilter(log, selector.ClusterQueueSelector)
+	if !ok {
+		return CandidateFilters{}, true
+	}
 	wlLabelFilter, ok := buildWorkloadLabelFilter(log, selector.LabelSelector)
 	if !ok {
 		return CandidateFilters{}, true
 	}
 	wlNumericFilters := buildNumericLabelFilters(log, selector.NumericLabels, preemptor)
 	wlPriorityFilters := buildPriorityFilters(log, selector, preemptor)
+
+	var cqFilters []ClusterQueueFilter
+	cqFilters = append(cqFilters, cqRelationFilters...)
+	if cqLabelFilter != nil {
+		cqFilters = append(cqFilters, cqLabelFilter)
+	}
 
 	var wlFilters []WorkloadFilter
 	wlFilters = append(wlFilters, wlRelationFilters...)
@@ -57,7 +67,7 @@ func NewCandidateFilters(
 	wlFilters = append(wlFilters, wlPriorityFilters...)
 
 	return CandidateFilters{
-		CQFilters: cqRelationFilters,
+		CQFilters: cqFilters,
 		WLFilters: wlFilters,
 	}, false
 }
@@ -139,4 +149,22 @@ func buildPriorityFilters(
 		filters = append(filters, NewRelativeWorkloadPriorityFilter(log, *selector.RelativeWorkloadPriority, preemptor))
 	}
 	return filters
+}
+
+func buildClusterQueueLabelFilter(
+	log logr.Logger,
+	selector *metav1.LabelSelector,
+) (ClusterQueueFilter, bool) {
+	if selector == nil {
+		return nil, true
+	}
+	ls, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		log.V(3).Info("Invalid ClusterQueueSelector", "error", err, "selector", selector)
+		return nil, false
+	}
+	if ls.Empty() {
+		return nil, true
+	}
+	return newClusterQueueLabelFilter(ls), true
 }

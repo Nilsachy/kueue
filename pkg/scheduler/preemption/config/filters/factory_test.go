@@ -59,6 +59,7 @@ func TestNewCandidateFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse label selector: %v", err)
 	}
+
 	cases := map[string]struct {
 		selector      *kueue.PreemptionCandidateSelector
 		preemptor     *workload.Info
@@ -199,6 +200,12 @@ func TestNewCandidateFilters(t *testing.T) {
 		"Full combination of all selector criteria compiles into complete CandidateFilters": {
 			selector: &kueue.PreemptionCandidateSelector{
 				RelationRequirement: kueue.SameCohort,
+				ClusterQueueSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"env": "prod"},
+				},
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"env": "prod"},
+				},
 				RelativeWorkloadPriority: ptr.To(kueue.Lower),
 				NumericLabels: []kueue.NumericLabelConstraint{
 					{
@@ -215,8 +222,14 @@ func TestNewCandidateFilters(t *testing.T) {
 						preemptorCohort: "subA1",
 						hasCohort:       true,
 					},
+					&clusterQueueLabelFilter{
+						selector: candSelectorProd,
+					},
 				},
 				WLFilters: []WorkloadFilter{
+					&workloadLabelFilter{
+						selector: candSelectorProd,
+					},
 					&numericLabelFilter{
 						constraint: kueue.NumericLabelConstraint{
 							Key:      "tpu-size",
@@ -330,46 +343,47 @@ func TestNewCandidateFilters(t *testing.T) {
 			wantFilters:   CandidateFilters{},
 			wantRejectAll: true,
 		},
-		"Full combination including LabelSelector compiles all filters": {
+		"ClusterQueueSelector instantiates clusterQueueLabelFilter": {
 			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.SameCohort,
-				LabelSelector: &metav1.LabelSelector{
+				RelationRequirement: kueue.SameClusterQueue,
+				ClusterQueueSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{"env": "prod"},
-				},
-				RelativeWorkloadPriority: ptr.To(kueue.Lower),
-				NumericLabels: []kueue.NumericLabelConstraint{
-					{
-						Key:      "tpu-size",
-						Relation: ptr.To(kueue.Lower),
-					},
 				},
 			},
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameCohortFilter{
-						preemptorCQ:     "cq1",
-						preemptorCohort: "subA1",
-						hasCohort:       true,
-					},
-				},
-				WLFilters: []WorkloadFilter{
-					&workloadLabelFilter{
+					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+					&clusterQueueLabelFilter{
 						selector: candSelectorProd,
-					},
-					&numericLabelFilter{
-						constraint: kueue.NumericLabelConstraint{
-							Key:      "tpu-size",
-							Relation: ptr.To(kueue.Lower),
-						},
-						preemptorVal: ptr.To[int32](8),
-					},
-					&relativeWorkloadPriorityFilter{
-						relation:          kueue.Lower,
-						preemptorPriority: 100,
 					},
 				},
 			},
+		},
+		"ClusterQueueSelector with empty selector adds no CQ filter": {
+			selector: &kueue.PreemptionCandidateSelector{
+				RelationRequirement:  kueue.SameClusterQueue,
+				ClusterQueueSelector: &metav1.LabelSelector{},
+			},
+			preemptor: preemptor,
+			wantFilters: CandidateFilters{
+				CQFilters: []ClusterQueueFilter{
+					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+				},
+			},
+		},
+		"ClusterQueueSelector with invalid selector returns rejectAll true": {
+			selector: &kueue.PreemptionCandidateSelector{
+				RelationRequirement: kueue.SameClusterQueue,
+				ClusterQueueSelector: &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{Key: "env", Operator: metav1.LabelSelectorOperator("InvalidOp")},
+					},
+				},
+			},
+			preemptor:     preemptor,
+			wantFilters:   CandidateFilters{},
+			wantRejectAll: true,
 		},
 	}
 
@@ -380,6 +394,7 @@ func TestNewCandidateFilters(t *testing.T) {
 			sameCohortTreeFilter{},
 			sameLocalQueueFilter{},
 			workloadLabelFilter{},
+			clusterQueueLabelFilter{},
 			numericLabelFilter{},
 			relativeWorkloadPriorityFilter{},
 		),

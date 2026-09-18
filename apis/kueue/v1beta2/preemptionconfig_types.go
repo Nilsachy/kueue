@@ -162,6 +162,11 @@ type PreemptionCandidateSelector struct {
 	// +kubebuilder:validation:Required
 	RelationRequirement PreemptionRelationConstraint `json:"relationRequirement"`
 
+	// ClusterQueueSelector defines label selector constraints on candidate ClusterQueues.
+	// Accepts all if not set.
+	// +optional
+	ClusterQueueSelector *metav1.LabelSelector `json:"clusterQueueSelector,omitempty"`
+
 	// NumericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
 	// Multiple numeric label constraints are joined using logical AND (all must be satisfied).
 	// If not set does not add any additional candidate filtering.

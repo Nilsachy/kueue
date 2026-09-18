@@ -52,6 +52,7 @@ const (
 
 type ClusterQueueSnapshot struct {
 	Name                      kueue.ClusterQueueReference
+	Labels                    map[string]string
 	ResourceGroups            []resourcegroups.ResourceGroup
 	Workloads                 map[workload.Reference]*workload.Info
 	WorkloadsNotReady         sets.Set[workload.Reference]
