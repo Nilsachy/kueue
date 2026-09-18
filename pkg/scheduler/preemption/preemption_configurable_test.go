@@ -59,13 +59,13 @@ func TestConfigurablePreemptions(t *testing.T) {
 			Name: defaultConfigName,
 		},
 		Spec: kueue.PreemptionConfigSpec{
-			Rules: []kueue.PreemptionRule{
+			Rules: []kueue.PreemptionConfigPreemptionRule{
 				{
-					Name:    "test-rule-one",
-					Trigger: kueue.InsufficientQuota,
-					Candidates: []kueue.PreemptionCandidateSelector{
+					Name:             "test-rule-one",
+					ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+					CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 						{
-							RelationRequirement: kueue.SameClusterQueue,
+							Scope: kueue.WithinClusterQueue,
 						},
 					},
 				},
@@ -147,7 +147,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 			},
 			incoming: unitWl.Clone().Name("a_incoming").Request(corev1.ResourceCPU, "1").
 				Condition(metav1.Condition{
-					Type:               string(kueue.InsufficientTopology),
+					Type:               string(kueue.QuotaFeasibleAndInsufficientTopology),
 					Status:             metav1.ConditionTrue,
 					LastTransitionTime: metav1.NewTime(now),
 				}).
@@ -162,17 +162,17 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:    "test-rule-one",
-							Trigger: kueue.InsufficientQuota,
-							Candidates: []kueue.PreemptionCandidateSelector{
+							Name:             "test-rule-one",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement: kueue.SameClusterQueue,
-									NumericLabels: []kueue.NumericLabelConstraint{
+									Scope: kueue.WithinClusterQueue,
+									NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{
 										{
-											Key:      "test-label",
-											Relation: ptr.To(kueue.Lower),
+											Key:        "test-label",
+											Comparison: ptr.To(kueue.LessThan),
 										},
 									},
 								},
@@ -214,11 +214,11 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:    "test-rule-one",
-							Trigger: kueue.InsufficientQuota,
-							MatchingPreemptorWorkloads: metav1.LabelSelector{
+							Name:             "test-rule-one",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							PreemptorSelector: &metav1.LabelSelector{
 								MatchExpressions: []metav1.LabelSelectorRequirement{
 									{
 										Key:      "test",
@@ -226,9 +226,9 @@ func TestConfigurablePreemptions(t *testing.T) {
 									},
 								},
 							},
-							Candidates: []kueue.PreemptionCandidateSelector{
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement: kueue.SameClusterQueue,
+									Scope: kueue.WithinClusterQueue,
 								},
 							},
 						},
@@ -250,14 +250,14 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:    "relative-priority-rule",
-							Trigger: kueue.InsufficientQuota,
-							Candidates: []kueue.PreemptionCandidateSelector{
+							Name:             "relative-priority-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement:      kueue.SameClusterQueue,
-									RelativeWorkloadPriority: ptr.To(kueue.Lower),
+									Scope:                    kueue.WithinClusterQueue,
+									RelativeWorkloadPriority: ptr.To(kueue.LessThan),
 								},
 							},
 						},
@@ -285,14 +285,14 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:    "boost-priority-rule",
-							Trigger: kueue.InsufficientQuota,
-							Candidates: []kueue.PreemptionCandidateSelector{
+							Name:             "boost-priority-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement:      kueue.SameClusterQueue,
-									RelativeWorkloadPriority: ptr.To(kueue.Lower),
+									Scope:                    kueue.WithinClusterQueue,
+									RelativeWorkloadPriority: ptr.To(kueue.LessThan),
 								},
 							},
 						},
@@ -331,17 +331,17 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:    "candidate-tier-rule",
-							Trigger: kueue.InsufficientQuota,
-							Candidates: []kueue.PreemptionCandidateSelector{
+							Name:             "candidate-tier-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement: kueue.SameClusterQueue,
-									NumericLabels: []kueue.NumericLabelConstraint{
+									Scope: kueue.WithinClusterQueue,
+									NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{
 										{
-											Key:      "preemption-tier",
-											Relation: ptr.To(kueue.Lower),
+											Key:        "preemption-tier",
+											Comparison: ptr.To(kueue.LessThan),
 										},
 									},
 								},

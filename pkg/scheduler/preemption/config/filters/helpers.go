@@ -22,23 +22,23 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 )
 
-// matchesRelation evaluates relation constraints between candidate and preemptor values.
-// It returns true if rel is nil, and false if an unsupported relation constraint is encountered.
-func matchesRelation(log logr.Logger, rel *kueue.RelativeConstraint, candidateVal, preemptorVal int64) bool {
-	if rel == nil {
+// matchesComparison evaluates comparison constraints between candidate and preemptor values.
+// It returns true if comparison is nil, and false if an unsupported comparison constraint is encountered.
+func matchesComparison(log logr.Logger, comparison *kueue.NumericComparison, candidateVal, preemptorVal int64) bool {
+	if comparison == nil {
 		return true // Default behavior when missing
 	}
-	switch *rel {
-	case kueue.Lower:
+	switch *comparison {
+	case kueue.LessThan:
 		return candidateVal < preemptorVal
-	case kueue.LowerOrEqual:
+	case kueue.LessThanOrEqual:
 		return candidateVal <= preemptorVal
-	case kueue.Greater:
+	case kueue.GreaterThan:
 		return candidateVal > preemptorVal
-	case kueue.GreaterOrEqual:
+	case kueue.GreaterThanOrEqual:
 		return candidateVal >= preemptorVal
 	default:
-		log.V(3).Info("Unsupported or unhandled relation constraint evaluated", "relation", *rel)
+		log.V(3).Info("Unsupported or unhandled comparison constraint evaluated", "comparison", *comparison)
 		return false
 	}
 }

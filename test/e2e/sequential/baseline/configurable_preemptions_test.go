@@ -50,18 +50,18 @@ var _ = ginkgo.Describe("Configuration Preemptions", ginkgo.Label("feature:confi
 			Name: preemptionConfigName,
 		},
 		Spec: kueue.PreemptionConfigSpec{
-			Rules: []kueue.PreemptionRule{
+			Rules: []kueue.PreemptionConfigPreemptionRule{
 				{
-					Name:    "test-rule-one",
-					Trigger: kueue.InsufficientQuota,
-					Candidates: []kueue.PreemptionCandidateSelector{
+					Name:             "test-rule-one",
+					ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+					CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 						{
-							RelationRequirement: kueue.SameClusterQueue,
-							NumericLabels: []kueue.NumericLabelConstraint{
+							Scope: kueue.WithinClusterQueue,
+							NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{
 								{
-									Key:          priorityLabel,
-									DefaultValue: ptr.To[int32](0),
-									Relation:     ptr.To(kueue.Lower),
+									Key:           priorityLabel,
+									FallbackValue: ptr.To[int32](0),
+									Comparison:    ptr.To(kueue.LessThan),
 								},
 							},
 						},

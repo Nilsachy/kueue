@@ -28,16 +28,16 @@ import (
 
 type numericLabelFilter struct {
 	log          logr.Logger
-	constraint   kueue.NumericLabelConstraint
+	constraint   kueue.PreemptionConfigNumericLabelConstraint
 	preemptorVal *int32
 }
 
 // NewNumericLabelFilter creates a WorkloadFilter to evaluate candidate workloads
-// based on customized integer labels and relationship boundaries with the preemptor workload.
-func NewNumericLabelFilter(log logr.Logger, constraint kueue.NumericLabelConstraint, preemptor *workload.Info) WorkloadFilter {
+// based on customized integer labels and numeric comparisons against the preemptor workload.
+func NewNumericLabelFilter(log logr.Logger, constraint kueue.PreemptionConfigNumericLabelConstraint, preemptor *workload.Info) WorkloadFilter {
 	filterLog := log.WithValues("filter", "NumericLabels", "key", constraint.Key)
-	if constraint.DefaultValue != nil {
-		filterLog = filterLog.WithValues("default", *constraint.DefaultValue)
+	if constraint.FallbackValue != nil {
+		filterLog = filterLog.WithValues("fallback", *constraint.FallbackValue)
 	}
 
 	f := &numericLabelFilter{
@@ -45,24 +45,24 @@ func NewNumericLabelFilter(log logr.Logger, constraint kueue.NumericLabelConstra
 		constraint: constraint,
 	}
 
-	if constraint.Relation != nil {
+	if constraint.Comparison != nil {
 		preemptorLog := filterLog.WithValues("preemptor", klog.KObj(preemptor.Obj))
-		if val, ok := tryGetLabelValue(preemptorLog, preemptor, constraint.Key, constraint.DefaultValue); ok {
+		if val, ok := tryGetLabelValue(preemptorLog, preemptor, constraint.Key, constraint.FallbackValue); ok {
 			f.preemptorVal = new(val)
 		} else {
-			preemptorLog.V(2).Info("Preemptor missing required numeric label without defaultValue; relational comparison will not match any candidates")
+			preemptorLog.V(2).Info("Preemptor missing required numeric label without fallbackValue; the comparison will not match any candidates")
 		}
 	}
 
 	return f
 }
 
-// Matches evaluates a candidate workload against absolute bounds and relationship boundaries with the preemptor.
+// Matches evaluates a candidate workload against absolute bounds and numeric comparisons against the preemptor.
 func (f *numericLabelFilter) Matches(wl *workload.Info) bool {
 	candLog := f.log.WithValues("candidate", klog.KObj(wl.Obj))
-	candVal, ok := tryGetLabelValue(candLog, wl, f.constraint.Key, f.constraint.DefaultValue)
+	candVal, ok := tryGetLabelValue(candLog, wl, f.constraint.Key, f.constraint.FallbackValue)
 	if !ok {
-		// Exclude the candidate from preemption since it lacks both the label and default
+		// Exclude the candidate from preemption since it lacks both the label and a fallback
 		return false
 	}
 
@@ -74,41 +74,41 @@ func (f *numericLabelFilter) Matches(wl *workload.Info) bool {
 		return false
 	}
 
-	// 2. Check relation constraint compared to preemptor
-	if f.constraint.Relation != nil {
+	// 2. Check the comparison constraint against the preemptor
+	if f.constraint.Comparison != nil {
 		if f.preemptorVal == nil {
-			// If preemptor has no valid label and no default is set, relation restrictions cannot be applied
+			// If preemptor has no valid label and no fallback is set, the comparison cannot be applied
 			return false
 		}
-		return matchesRelation(candLog, f.constraint.Relation, int64(candVal), int64(*f.preemptorVal))
+		return matchesComparison(candLog, f.constraint.Comparison, int64(candVal), int64(*f.preemptorVal))
 	}
 
 	return true
 }
 
 // tryGetLabelValue safely extracts a numeric int32 label from a workload.
-// If the label is incorrectly formatted or missing, it evaluates the optionally configured default.
-func tryGetLabelValue(log logr.Logger, wl *workload.Info, key string, def *int32) (int32, bool) {
+// If the label is incorrectly formatted or missing, it falls back to the optionally configured fallbackValue.
+func tryGetLabelValue(log logr.Logger, wl *workload.Info, key string, fallback *int32) (int32, bool) {
 	if wl.Obj.Labels == nil {
-		if def != nil {
-			return *def, true
+		if fallback != nil {
+			return *fallback, true
 		}
 		return 0, false
 	}
 
 	valStr, exists := wl.Obj.Labels[key]
 	if !exists {
-		if def != nil {
-			return *def, true
+		if fallback != nil {
+			return *fallback, true
 		}
 		return 0, false
 	}
 
 	val, err := strconv.ParseInt(valStr, 10, 32)
 	if err != nil {
-		log.V(3).Info("Failed to parse label into integer as expected; falling back to default", "value", valStr, "error", err)
-		if def != nil {
-			return *def, true
+		log.V(3).Info("Failed to parse label into integer as expected; falling back to the configured fallbackValue", "value", valStr, "error", err)
+		if fallback != nil {
+			return *fallback, true
 		}
 		return 0, false
 	}

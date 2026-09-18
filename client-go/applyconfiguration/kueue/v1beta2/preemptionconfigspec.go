@@ -22,7 +22,7 @@ package v1beta2
 // with apply.
 type PreemptionConfigSpecApplyConfiguration struct {
 	// Rules to select preemption candidates.
-	Rules []PreemptionRuleApplyConfiguration `json:"rules,omitempty"`
+	Rules []PreemptionConfigPreemptionRuleApplyConfiguration `json:"rules,omitempty"`
 }
 
 // PreemptionConfigSpecApplyConfiguration constructs a declarative configuration of the PreemptionConfigSpec type for use with
@@ -34,7 +34,7 @@ func PreemptionConfigSpec() *PreemptionConfigSpecApplyConfiguration {
 // WithRules adds the given value to the Rules field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the Rules field.
-func (b *PreemptionConfigSpecApplyConfiguration) WithRules(values ...*PreemptionRuleApplyConfiguration) *PreemptionConfigSpecApplyConfiguration {
+func (b *PreemptionConfigSpecApplyConfiguration) WithRules(values ...*PreemptionConfigPreemptionRuleApplyConfiguration) *PreemptionConfigSpecApplyConfiguration {
 	for i := range values {
 		if values[i] == nil {
 			panic("nil value passed to WithRules")

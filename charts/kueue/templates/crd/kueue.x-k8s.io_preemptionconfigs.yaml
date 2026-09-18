@@ -64,17 +64,98 @@ spec:
                 rules:
                   description: Rules to select preemption candidates.
                   items:
+                    description: |-
+                      PreemptionConfigPreemptionRule defines a single rule under which preemptions can be triggered
+                      and the candidate workloads eligible for preemption.
                     properties:
-                      candidates:
+                      activationPolicy:
                         description: |-
-                          Selection rules for workloads that are candidates for preemption.
-                          Candidates resulting from multiple selectors are summed into one set. No selectors result in empty candidate set, thereby disallowing any preemptions with this rule.
+                          activationPolicy determines when this rule contributes matching
+                          candidates to preemption evaluation.
+                        properties:
+                          trigger:
+                            description: |-
+                              trigger specifies the prerequisite for contributing candidates.
+
+                              Possible values are:
+                              - Always: contributes matching candidates unconditionally.
+                              - InsufficientQuota: contributes matching candidates only if preempting baseline candidates
+                                does not yield sufficient quota to admit the preemptor workload.
+                              - QuotaFeasibleAndInsufficientTopology: contributes matching candidates only if quota
+                                is feasible for the entire preemptor under at least one eligible flavor assignment
+                                (after preempting baseline candidates and any candidates from InsufficientQuota rules),
+                                but the workload cannot be admitted because no eligible flavor assignment satisfies
+                                its topology requirements.
+
+                              Baseline candidates are the deduplicated union of:
+                              - candidates selected by the preemptor's ClusterQueue.spec.preemption policy;
+                              - candidates selected by applicable rules in the referenced PreemptionConfig
+                                whose activationPolicy.trigger is Always.
+                            enum:
+                              - Always
+                              - InsufficientQuota
+                              - QuotaFeasibleAndInsufficientTopology
+                            type: string
+                        required:
+                          - trigger
+                        type: object
+                      candidateSelectors:
+                        description: |-
+                          candidateSelectors specifies the selection rules for workloads that are candidates for preemption.
+                          Candidates resulting from multiple selectors are summed into one set.
+                          No selectors result in an empty candidate set, thereby disallowing any preemptions with this rule.
                         items:
-                          description: PreemptionCandidateSelector defines the selection criteria for workloads that are candidates for preemption.
+                          description: PreemptionConfigPreemptionCandidateSelector defines the selection criteria for workloads that are candidates for preemption.
                           properties:
+                            clusterQueueSelector:
+                              description: |-
+                                clusterQueueSelector defines label selector constraints on candidate ClusterQueues.
+                                Accepts all if not set.
+                              properties:
+                                matchExpressions:
+                                  description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                                  items:
+                                    description: |-
+                                      A label selector requirement is a selector that contains values, a key, and an operator that
+                                      relates the key and values.
+                                    properties:
+                                      key:
+                                        description: key is the label key that the selector applies to.
+                                        type: string
+                                      operator:
+                                        description: |-
+                                          operator represents a key's relationship to a set of values.
+                                          Valid operators are In, NotIn, Exists and DoesNotExist.
+                                        type: string
+                                      values:
+                                        description: |-
+                                          values is an array of string values. If the operator is In or NotIn,
+                                          the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                          the values array must be empty. This array is replaced during a strategic
+                                          merge patch.
+                                        items:
+                                          type: string
+                                        type: array
+                                        x-kubernetes-list-type: atomic
+                                    required:
+                                      - key
+                                      - operator
+                                    type: object
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                                matchLabels:
+                                  additionalProperties:
+                                    type: string
+                                  description: |-
+                                    matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                    map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                    operator is "In", and the values array contains only "value". The requirements are ANDed.
+                                  type: object
+                              type: object
+                              x-kubernetes-map-type: atomic
                             labelSelector:
                               description: |-
-                                LabelSelector defines label selector constraints on candidate Workloads.
+                                labelSelector defines label selector constraints on candidate Workloads.
                                 Accepts all if not set.
                               properties:
                                 matchExpressions:
@@ -120,86 +201,109 @@ spec:
                               x-kubernetes-map-type: atomic
                             numericLabels:
                               description: |-
-                                NumericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
-                                Multiple numeric label constraints are joined using logical AND (all must be satisfied).
-                                If not set does not add any additional candidate filtering.
+                                numericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
+                                Multiple numeric labels are joined using AND-rule (all have to be satisfied).
+                                Accepts all if not set.
                               items:
                                 description: |-
-                                  NumericLabelConstraint describes the configurations for filtering a numerical label.
-                                  For example, this can be used to filter candidates based on topology domains, such as the
-                                  "number of TPUs". If a preemptor requires a large topology, you can set key="tpu-size"
-                                  and relation="Lower", allowing it to preempt smaller workloads rather than disrupting
-                                  other large topology workloads.
-                                  Please note that you should remember to append the designated label to the list of labels
-                                  copied to the workload via the Kueue main configuration.
-                                  If neither Relation, MinValue, nor MaxValue are specified, the constraint checks only that
+                                  PreemptionConfigNumericLabelConstraint describes the rule for filtering a custom numerical label.
+                                  For example, this can be used to filter candidates based on the label describing the
+                                  required topology domain size, such as the "number of TPUs".
+                                  If a user has a label "number-of-tpus" that describes the number of TPUs required in a single cube,
+                                  it can be used to create a rule that selects only workloads requiring smaller cube slices
+                                  by defining comparison: "LessThan". Such a configuration would allow preemption of "smaller"
+                                  workloads, to achieve better cluster utilization and decrease fragmentation.
+                                  Please note that those labels are not copied out of the box from job-like objects.
+                                  You should remember to append the designated labels to the list of labels
+                                  copied to the workload via the Kueue main configuration if you wish to use a custom label.
+                                  As Kubernetes label values cannot start with '-', integer labels are always non-negative.
+                                  A negative fallbackValue can thus ensure workloads without the label compare smaller than any
+                                  labeled workload if this is desired.
+                                  If neither Comparison, MinValue, nor MaxValue are specified, the constraint checks only that
                                   candidate workloads possess the designated label key with a valid integer.
                                 properties:
-                                  defaultValue:
+                                  comparison:
+                                    description: comparison defines how the candidate's label value compares to the preemptor's.
+                                    enum:
+                                      - LessThan
+                                      - GreaterThan
+                                      - LessThanOrEqual
+                                      - GreaterThanOrEqual
+                                    type: string
+                                  fallbackValue:
                                     description: |-
-                                      DefaultValue is used when a workload does not have the label key
-                                      or value under the key cannot be parsed as an integer.
-                                      If not specified workloads without the label or
-                                      with label value not parsable as int are treated as incomparable by relation (if specified),
+                                      fallbackValue is used when a workload does not have the label key
+                                      or the value under the key cannot be parsed as an integer.
+                                      If not specified, workloads without the label or
+                                      with a label value not parsable as int are treated as incomparable,
                                       and therefore excluded from preemption candidates.
                                     format: int32
                                     type: integer
                                   key:
-                                    description: Key is the label key that stores the integer value.
+                                    description: |-
+                                      key is the label key that stores the integer value in the workload that will
+                                      be used for candidate selection.
+                                    maxLength: 316
                                     type: string
                                   maxValue:
                                     description: |-
-                                      MaxValue specifies the highest label value a workload must have to be considered for preemption.
+                                      maxValue specifies the highest label value a candidate workload can have to be
+                                      considered for preemption.
                                       If not specified, no upper bound is enforced.
                                     format: int32
+                                    minimum: 0
                                     type: integer
                                   minValue:
                                     description: |-
-                                      MinValue specifies the lowest label value a workload must have to be considered for preemption.
+                                      minValue specifies the lowest label value a candidate workload can have to be
+                                      considered for preemption.
                                       If not specified, no lower bound is enforced.
                                     format: int32
+                                    minimum: 0
                                     type: integer
-                                  relation:
-                                    description: Relation defines how the preemptor compares to the candidate.
-                                    enum:
-                                      - Lower
-                                      - Greater
-                                      - LowerOrEqual
-                                      - GreaterOrEqual
-                                    type: string
                                 required:
                                   - key
                                 type: object
                               type: array
-                            relationRequirement:
-                              description: RelationRequirement specifies the queue or cohort relation boundary to the preemptor workload.
-                              enum:
-                                - SameLocalQueue
-                                - SameClusterQueue
-                                - SameCohort
-                                - SameCohortTree
-                                - AnyClusterQueue
-                              type: string
+                              x-kubernetes-list-type: atomic
                             relativeWorkloadPriority:
                               description: |-
-                                RelativeWorkloadPriority defines how the preemptor's priority compares to the candidate's priority.
-                                For example "Lower" means that only workloads with lower priority will be allowed as preemption candidates.
+                                relativeWorkloadPriority defines how the candidate's priority compares to the preemptor's priority.
+                                For example "LessThan" means that only workloads with lower priority will be allowed as preemption candidates.
                                 The comparison is made using effective priority (accounting for priority boost if enabled).
                                 If nil, no relative priority check is enforced.
+
+                                (PreemptionConfigPriorityConstraint, carrying an explicit Base/Boosted mode) once the
+                                priority boost semantics are settled.
                               enum:
-                                - Lower
-                                - Greater
-                                - LowerOrEqual
-                                - GreaterOrEqual
+                                - LessThan
+                                - GreaterThan
+                                - LessThanOrEqual
+                                - GreaterThanOrEqual
+                              type: string
+                            scope:
+                              description: scope specifies the queue or cohort relation boundary of candidates to the preemptor workload.
+                              enum:
+                                - WithinLocalQueue
+                                - WithinClusterQueue
+                                - WithinParentCohort
+                                - WithinCohortTree
+                                - AnyClusterQueue
                               type: string
                           required:
-                            - relationRequirement
+                            - scope
                           type: object
                         type: array
-                      matchingPreemptorWorkloads:
+                      name:
+                        description: Name is the identifier of the preemption rule.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      preemptorSelector:
                         description: |-
-                          Label Selector indicating which workloads can trigger preemptions
-                          using this rule.
+                          PreemptorSelector is a label selector indicating which workloads can trigger preemptions
+                          using this rule. Accepts all workloads if not set.
                         properties:
                           matchExpressions:
                             description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
@@ -242,12 +346,15 @@ spec:
                             type: object
                         type: object
                         x-kubernetes-map-type: atomic
-                      name:
-                        type: string
-                      trigger:
-                        type: string
+                    required:
+                      - activationPolicy
+                      - name
                     type: object
+                  maxItems: 64
                   type: array
+                  x-kubernetes-list-map-keys:
+                    - name
+                  x-kubernetes-list-type: map
               type: object
           type: object
       served: true
