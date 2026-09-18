@@ -1355,7 +1355,7 @@ func (a *FlavorAssigner) canPreemptWhileBorrowing() bool {
 }
 
 // usesConfigurablePreemption returns true if the ClusterQueue references a
-// PreemptionConfig. The rules of a PreemptionConfig select candidates
+// PreemptionConfig. The rules of a PreemptionConfig may select candidates
 // independently of the quota-based restrictions, so preemption might be
 // possible even if the ClusterQueue would borrow afterwards, and the classical
 // preemption policies don't allow it. Whether any rule is actually triggered is
