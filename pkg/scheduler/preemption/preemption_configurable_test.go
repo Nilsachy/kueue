@@ -72,13 +72,13 @@ func TestConfigurablePreemptions(t *testing.T) {
 			Name: defaultConfigName,
 		},
 		Spec: kueue.PreemptionConfigSpec{
-			Rules: []kueue.PreemptionRule{
+			Rules: []kueue.PreemptionConfigPreemptionRule{
 				{
 					Name:             "test-rule-one",
-					ActivationPolicy: kueue.PreemptionRuleActivationPolicy{Trigger: kueue.Always},
-					Candidates: []kueue.PreemptionCandidateSelector{
+					ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+					CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 						{
-							RelationRequirement: kueue.SameClusterQueue,
+							Scope: kueue.WithinClusterQueue,
 						},
 					},
 				},
@@ -88,17 +88,17 @@ func TestConfigurablePreemptions(t *testing.T) {
 
 	// configWithTrigger returns baseConfig with a single rule with the given trigger
 	// and selector.
-	configWithTrigger := func(trigger kueue.PreemptionRuleTrigger, selector kueue.PreemptionCandidateSelector) kueue.PreemptionConfig {
+	configWithTrigger := func(trigger kueue.PreemptionConfigActivationTrigger, selector kueue.PreemptionConfigPreemptionCandidateSelector) kueue.PreemptionConfig {
 		return kueue.PreemptionConfig{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: defaultConfigName,
 			},
 			Spec: kueue.PreemptionConfigSpec{
-				Rules: []kueue.PreemptionRule{
+				Rules: []kueue.PreemptionConfigPreemptionRule{
 					{
-						Name:             "test-rule-one",
-						ActivationPolicy: kueue.PreemptionRuleActivationPolicy{Trigger: trigger},
-						Candidates:       []kueue.PreemptionCandidateSelector{selector},
+						Name:               "test-rule-one",
+						ActivationPolicy:   kueue.PreemptionConfigActivationPolicy{Trigger: trigger},
+						CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{selector},
 					},
 				},
 			},
@@ -107,34 +107,34 @@ func TestConfigurablePreemptions(t *testing.T) {
 
 	// configWithSelector returns baseConfig with a single rule of the Always tier
 	// using the given selector.
-	configWithSelector := func(selector kueue.PreemptionCandidateSelector) kueue.PreemptionConfig {
+	configWithSelector := func(selector kueue.PreemptionConfigPreemptionCandidateSelector) kueue.PreemptionConfig {
 		return configWithTrigger(kueue.Always, selector)
 	}
 
-	lowerTierConstraint := []kueue.NumericLabelConstraint{
+	lowerTierConstraint := []kueue.PreemptionConfigNumericLabelConstraint{
 		{
-			Key:      "preemption-tier",
-			Relation: ptr.To(kueue.Lower),
+			Key:        "preemption-tier",
+			Comparison: ptr.To(kueue.LessThan),
 		},
 	}
-	sameCohortConfig := configWithSelector(kueue.PreemptionCandidateSelector{
-		RelationRequirement: kueue.SameCohort,
+	withinParentCohortConfig := configWithSelector(kueue.PreemptionConfigPreemptionCandidateSelector{
+		Scope: kueue.WithinParentCohort,
 	})
-	sameCohortTierConfig := configWithSelector(kueue.PreemptionCandidateSelector{
-		RelationRequirement: kueue.SameCohort,
-		NumericLabels:       lowerTierConstraint,
+	withinParentCohortTierConfig := configWithSelector(kueue.PreemptionConfigPreemptionCandidateSelector{
+		Scope:         kueue.WithinParentCohort,
+		NumericLabels: lowerTierConstraint,
 	})
-	anyClusterQueueConfig := configWithSelector(kueue.PreemptionCandidateSelector{
-		RelationRequirement: kueue.AnyClusterQueue,
+	anyClusterQueueConfig := configWithSelector(kueue.PreemptionConfigPreemptionCandidateSelector{
+		Scope: kueue.AnyClusterQueue,
 	})
-	tierConfig := configWithSelector(kueue.PreemptionCandidateSelector{
-		RelationRequirement: kueue.SameClusterQueue,
-		NumericLabels:       lowerTierConstraint,
+	tierConfig := configWithSelector(kueue.PreemptionConfigPreemptionCandidateSelector{
+		Scope:         kueue.WithinClusterQueue,
+		NumericLabels: lowerTierConstraint,
 	})
 	// quotaTierConfig only allows preempting the workloads of the ClusterQueue when
 	// the quota is not sufficient to admit the preemptor.
-	quotaTierConfig := configWithTrigger(kueue.InsufficientQuota, kueue.PreemptionCandidateSelector{
-		RelationRequirement: kueue.SameClusterQueue,
+	quotaTierConfig := configWithTrigger(kueue.InsufficientQuota, kueue.PreemptionConfigPreemptionCandidateSelector{
+		Scope: kueue.WithinClusterQueue,
 	})
 	// tieredConfig allows preempting the workloads of a lower tier unconditionally,
 	// and the remaining workloads of the ClusterQueue only if those are not enough to
@@ -144,7 +144,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 			Name: defaultConfigName,
 		},
 		Spec: kueue.PreemptionConfigSpec{
-			Rules: []kueue.PreemptionRule{
+			Rules: []kueue.PreemptionConfigPreemptionRule{
 				tierConfig.Spec.Rules[0],
 				quotaTierConfig.Spec.Rules[0],
 			},
@@ -159,7 +159,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 		},
 	})
 
-	// TopologyAwareScheduling fixtures, used by the QuotaFeasibleButTopologyBlocked
+	// TopologyAwareScheduling fixtures, used by the QuotaFeasibleAndInsufficientTopology
 	// tier: a hostname topology over two nodes of 2 CPUs each.
 	tasTopology := utiltestingapi.MakeDefaultOneLevelTopology("tas-single-level")
 	tasFlavor := utiltestingapi.MakeResourceFlavor("tas-default").
@@ -223,8 +223,8 @@ func TestConfigurablePreemptions(t *testing.T) {
 			Count: 2,
 		}},
 	}
-	topologyTierConfig := configWithTrigger(kueue.QuotaFeasibleButTopologyBlocked, kueue.PreemptionCandidateSelector{
-		RelationRequirement: kueue.SameClusterQueue,
+	topologyTierConfig := configWithTrigger(kueue.QuotaFeasibleAndInsufficientTopology, kueue.PreemptionConfigPreemptionCandidateSelector{
+		Scope: kueue.WithinClusterQueue,
 	})
 	cases := map[string]struct {
 		clusterQueues []*kueue.ClusterQueue
@@ -308,16 +308,16 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "test-rule-one",
-							ActivationPolicy: kueue.PreemptionRuleActivationPolicy{Trigger: kueue.Always},
-							MatchingPreemptorWorkloads: metav1.LabelSelector{
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+							PreemptorSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"team": "research"},
 							},
-							Candidates: []kueue.PreemptionCandidateSelector{
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement: kueue.SameClusterQueue,
+									Scope: kueue.WithinClusterQueue,
 								},
 							},
 						},
@@ -339,17 +339,17 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "test-rule-one",
-							ActivationPolicy: kueue.PreemptionRuleActivationPolicy{Trigger: kueue.Always},
-							Candidates: []kueue.PreemptionCandidateSelector{
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement: kueue.SameClusterQueue,
-									NumericLabels: []kueue.NumericLabelConstraint{
+									Scope: kueue.WithinClusterQueue,
+									NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{
 										{
-											Key:      "test-label",
-											Relation: ptr.To(kueue.Lower),
+											Key:        "test-label",
+											Comparison: ptr.To(kueue.LessThan),
 										},
 									},
 								},
@@ -391,11 +391,11 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "test-rule-one",
-							ActivationPolicy: kueue.PreemptionRuleActivationPolicy{Trigger: kueue.Always},
-							MatchingPreemptorWorkloads: metav1.LabelSelector{
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+							PreemptorSelector: &metav1.LabelSelector{
 								MatchExpressions: []metav1.LabelSelectorRequirement{
 									{
 										Key:      "test",
@@ -403,9 +403,9 @@ func TestConfigurablePreemptions(t *testing.T) {
 									},
 								},
 							},
-							Candidates: []kueue.PreemptionCandidateSelector{
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement: kueue.SameClusterQueue,
+									Scope: kueue.WithinClusterQueue,
 								},
 							},
 						},
@@ -427,14 +427,14 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "relative-priority-rule",
-							ActivationPolicy: kueue.PreemptionRuleActivationPolicy{Trigger: kueue.Always},
-							Candidates: []kueue.PreemptionCandidateSelector{
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement:      kueue.SameClusterQueue,
-									RelativeWorkloadPriority: ptr.To(kueue.Lower),
+									Scope:                    kueue.WithinClusterQueue,
+									RelativeWorkloadPriority: ptr.To(kueue.LessThan),
 								},
 							},
 						},
@@ -462,14 +462,14 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "boost-priority-rule",
-							ActivationPolicy: kueue.PreemptionRuleActivationPolicy{Trigger: kueue.Always},
-							Candidates: []kueue.PreemptionCandidateSelector{
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement:      kueue.SameClusterQueue,
-									RelativeWorkloadPriority: ptr.To(kueue.Lower),
+									Scope:                    kueue.WithinClusterQueue,
+									RelativeWorkloadPriority: ptr.To(kueue.LessThan),
 								},
 							},
 						},
@@ -508,17 +508,17 @@ func TestConfigurablePreemptions(t *testing.T) {
 					Name: defaultConfigName,
 				},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "candidate-tier-rule",
-							ActivationPolicy: kueue.PreemptionRuleActivationPolicy{Trigger: kueue.Always},
-							Candidates: []kueue.PreemptionCandidateSelector{
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									RelationRequirement: kueue.SameClusterQueue,
-									NumericLabels: []kueue.NumericLabelConstraint{
+									Scope: kueue.WithinClusterQueue,
+									NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{
 										{
-											Key:      "preemption-tier",
-											Relation: ptr.To(kueue.Lower),
+											Key:        "preemption-tier",
+											Comparison: ptr.To(kueue.LessThan),
 										},
 									},
 								},
@@ -572,7 +572,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 						Resource(corev1.ResourceCPU, "1").Obj()).
 					Obj(),
 			},
-			config: sameCohortConfig,
+			config: withinParentCohortConfig,
 			admitted: []kueue.Workload{
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				// b is not borrowing, so b1 would be rejected by the classical
@@ -703,7 +703,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 						Resource(corev1.ResourceCPU, "1").Obj()).
 					Obj(),
 			},
-			config:      sameCohortConfig,
+			config:      withinParentCohortConfig,
 			fairSharing: &config.FairSharing{},
 			admitted: []kueue.Workload{
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
@@ -734,7 +734,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 						Resource(corev1.ResourceCPU, "1").Obj()).
 					Obj(),
 			},
-			config:      sameCohortTierConfig,
+			config:      withinParentCohortTierConfig,
 			fairSharing: &config.FairSharing{},
 			admitted: []kueue.Workload{
 				// b is borrowing, so both b1 and b2 are Fair Sharing candidates, but only
@@ -879,7 +879,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 				"/a1": "ConfigurablePreemption",
 			},
 		},
-		"QuotaFeasibleButTopologyBlocked tier is used when the quota fits but no topology assignment is found": {
+		"QuotaFeasibleAndInsufficientTopology tier is used when the quota fits but no topology assignment is found": {
 			clusterQueues:   tasCQs("4"),
 			resourceFlavors: []*kueue.ResourceFlavor{tasFlavor},
 			topologies:      []*kueue.Topology{tasTopology},
@@ -900,10 +900,10 @@ func TestConfigurablePreemptions(t *testing.T) {
 				"/a1": "ConfigurablePreemption",
 			},
 		},
-		"QuotaFeasibleButTopologyBlocked tier is not used when the quota is insufficient": {
+		"QuotaFeasibleAndInsufficientTopology tier is not used when the quota is insufficient": {
 			// The nominal quota only covers the admitted workloads, so the preemptor
 			// is blocked by the quota rather than by the topology, and the rule of the
-			// QuotaFeasibleButTopologyBlocked tier must not be applied.
+			// QuotaFeasibleAndInsufficientTopology tier must not be applied.
 			clusterQueues:   tasCQs("2"),
 			resourceFlavors: []*kueue.ResourceFlavor{tasFlavor},
 			topologies:      []*kueue.Topology{tasTopology},
@@ -924,7 +924,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			features.SetFeatureGateDuringTest(t, features.ConfigurablePreemption, !tc.configurablePreemptionDisabled)
 			features.SetFeatureGateDuringTest(t, features.PriorityBoost, true)
-			// Only the cases exercising the QuotaFeasibleButTopologyBlocked tier need
+			// Only the cases exercising the QuotaFeasibleAndInsufficientTopology tier need
 			// TAS; the others keep running without it, as most deployments do.
 			features.SetFeatureGateDuringTest(t, features.TopologyAwareScheduling, len(tc.topologies) > 0)
 			ctx, log := utiltesting.ContextWithLog(t)

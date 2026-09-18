@@ -68,10 +68,10 @@ type TieredCandidates struct {
 	// InsufficientQuota holds the candidates that are only considered if there is not
 	// enough quota to admit the preemptor.
 	InsufficientQuota []*workload.Info
-	// QuotaFeasibleButTopologyBlocked holds the candidates that are only considered if
+	// QuotaFeasibleAndInsufficientTopology holds the candidates that are only considered if
 	// there is enough quota to admit the preemptor, but no topology assignment can be
 	// found.
-	QuotaFeasibleButTopologyBlocked []*workload.Info
+	QuotaFeasibleAndInsufficientTopology []*workload.Info
 }
 
 // Empty returns true if no rule selected any candidate.
@@ -82,7 +82,7 @@ func (t TieredCandidates) Empty() bool {
 // ConditionalTiersEmpty returns true if no rule of the tiers which are conditionally
 // reached, so every tier but Always, selected any candidate.
 func (t TieredCandidates) ConditionalTiersEmpty() bool {
-	return len(t.InsufficientQuota) == 0 && len(t.QuotaFeasibleButTopologyBlocked) == 0
+	return len(t.InsufficientQuota) == 0 && len(t.QuotaFeasibleAndInsufficientTopology) == 0
 }
 
 // Candidates returns the workloads selected as preemption candidates by the rules of
@@ -99,7 +99,7 @@ func (p *preemptionEvaluator) Candidates(
 	// selecting it, so the tiers have to be evaluated in the order in which their
 	// candidates are considered.
 	seen := sets.New[workload.Reference]()
-	forTier := func(trigger kueue.PreemptionRuleTrigger) ([]*workload.Info, error) {
+	forTier := func(trigger kueue.PreemptionConfigActivationTrigger) ([]*workload.Info, error) {
 		return p.candidatesForTier(snapshot, preemptor, flavorsNeedPreemption, trigger, seen)
 	}
 	var tieredCandidates TieredCandidates
@@ -110,7 +110,7 @@ func (p *preemptionEvaluator) Candidates(
 	if tieredCandidates.InsufficientQuota, err = forTier(kueue.InsufficientQuota); err != nil {
 		return TieredCandidates{}, err
 	}
-	if tieredCandidates.QuotaFeasibleButTopologyBlocked, err = forTier(kueue.QuotaFeasibleButTopologyBlocked); err != nil {
+	if tieredCandidates.QuotaFeasibleAndInsufficientTopology, err = forTier(kueue.QuotaFeasibleAndInsufficientTopology); err != nil {
 		return TieredCandidates{}, err
 	}
 	return tieredCandidates, nil
@@ -123,7 +123,7 @@ func (p *preemptionEvaluator) candidatesForTier(
 	snapshot *schdcache.Snapshot,
 	preemptor *workload.Info,
 	flavorsNeedPreemption sets.Set[resources.FlavorResource],
-	tier kueue.PreemptionRuleTrigger,
+	tier kueue.PreemptionConfigActivationTrigger,
 	seen sets.Set[workload.Reference],
 ) ([]*workload.Info, error) {
 	var candidates []*workload.Info
@@ -139,7 +139,7 @@ func (p *preemptionEvaluator) candidatesForTier(
 			continue
 		}
 
-		for _, selector := range rule.Candidates {
+		for _, selector := range rule.CandidateSelectors {
 			filter, rejectAll := filters.NewCandidateFilters(p.log, &selector, preemptor, snapshot)
 			if rejectAll {
 				continue
@@ -185,8 +185,13 @@ func matchesWorkload(filter *filters.CandidateFilters, wl *workload.Info) bool {
 // matchesPreemptor returns whether the rule can be used for the given preemptor.
 // Whether the tier of the rule is reached is decided by the preemption algorithm, as
 // it depends on the candidates preempted for the preceding tiers.
-func (p *preemptionEvaluator) matchesPreemptor(rule kueue.PreemptionRule, wlInfo *workload.Info) (bool, error) {
-	selector, err := metav1.LabelSelectorAsSelector(&rule.MatchingPreemptorWorkloads)
+func (p *preemptionEvaluator) matchesPreemptor(rule kueue.PreemptionConfigPreemptionRule, wlInfo *workload.Info) (bool, error) {
+	if rule.PreemptorSelector == nil {
+		// An unset selector accepts all the preemptors. Note that this differs from
+		// LabelSelectorAsSelector(nil), which matches nothing.
+		return true, nil
+	}
+	selector, err := metav1.LabelSelectorAsSelector(rule.PreemptorSelector)
 	if err != nil {
 		return false, err
 	}

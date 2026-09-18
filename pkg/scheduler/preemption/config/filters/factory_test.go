@@ -52,7 +52,7 @@ func TestNewCandidateFilters(t *testing.T) {
 		Obj(), "cq1")
 
 	cases := map[string]struct {
-		selector      *kueue.PreemptionCandidateSelector
+		selector      *kueue.PreemptionConfigPreemptionCandidateSelector
 		preemptor     *workload.Info
 		wantFilters   CandidateFilters
 		wantRejectAll bool
@@ -62,39 +62,39 @@ func TestNewCandidateFilters(t *testing.T) {
 			preemptor:   preemptor,
 			wantFilters: CandidateFilters{},
 		},
-		"SameLocalQueue instantiates sameClusterQueueFilter and sameLocalQueueFilter": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.SameLocalQueue,
+		"WithinLocalQueue instantiates withinClusterQueueFilter and withinLocalQueueFilter": {
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope: kueue.WithinLocalQueue,
 			},
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+					&withinClusterQueueFilter{preemptorCQ: "cq1"},
 				},
 				WLFilters: []WorkloadFilter{
-					&sameLocalQueueFilter{namespace: "ns1", queueName: "lq1"},
+					&withinLocalQueueFilter{namespace: "ns1", queueName: "lq1"},
 				},
 			},
 		},
-		"SameClusterQueue instantiates sameClusterQueueFilter": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.SameClusterQueue,
+		"WithinClusterQueue instantiates withinClusterQueueFilter": {
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope: kueue.WithinClusterQueue,
 			},
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+					&withinClusterQueueFilter{preemptorCQ: "cq1"},
 				},
 			},
 		},
-		"SameCohort resolves immediate parent cohort from snapshot": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.SameCohort,
+		"WithinParentCohort resolves immediate parent cohort from snapshot": {
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope: kueue.WithinParentCohort,
 			},
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameCohortFilter{
+					&withinParentCohortFilter{
 						preemptorCQ:     "cq1",
 						preemptorCohort: "subA1",
 						hasCohort:       true,
@@ -102,14 +102,14 @@ func TestNewCandidateFilters(t *testing.T) {
 				},
 			},
 		},
-		"SameCohortTree resolves root ancestor cohort from snapshot": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.SameCohortTree,
+		"WithinCohortTree resolves root ancestor cohort from snapshot": {
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope: kueue.WithinCohortTree,
 			},
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameCohortTreeFilter{
+					&withinCohortTreeFilter{
 						preemptorCQ:         "cq1",
 						preemptorRootCohort: "rootA",
 						hasCohort:           true,
@@ -118,41 +118,41 @@ func TestNewCandidateFilters(t *testing.T) {
 			},
 		},
 		"AnyClusterQueue results in empty filters": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.AnyClusterQueue,
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope: kueue.AnyClusterQueue,
 			},
 			preemptor:   preemptor,
 			wantFilters: CandidateFilters{},
 		},
-		"unrecognized relation requirement returns rejectAll true": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.PreemptionRelationConstraint("UnknownRelation"),
+		"unrecognized candidate scope returns rejectAll true": {
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope: kueue.PreemptionConfigPreemptionQueueScope("UnknownScope"),
 			},
 			preemptor:     preemptor,
 			wantFilters:   CandidateFilters{},
 			wantRejectAll: true,
 		},
-		"SameClusterQueue with empty NumericLabels produces no WorkloadFilters": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.SameClusterQueue,
-				NumericLabels:       []kueue.NumericLabelConstraint{},
+		"WithinClusterQueue with empty NumericLabels produces no WorkloadFilters": {
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope:         kueue.WithinClusterQueue,
+				NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{},
 			},
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+					&withinClusterQueueFilter{preemptorCQ: "cq1"},
 				},
 				WLFilters: nil,
 			},
 		},
-		"Combined SameLocalQueue and NumericLabelConstraints appends both relation and numeric WorkloadFilters": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.SameLocalQueue,
-				NumericLabels: []kueue.NumericLabelConstraint{
+		"Combined WithinLocalQueue and NumericLabelConstraints appends both scope and numeric WorkloadFilters": {
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope: kueue.WithinLocalQueue,
+				NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{
 					{
-						Key:          "tpu-size",
-						DefaultValue: ptr.To[int32](1),
-						Relation:     ptr.To(kueue.LowerOrEqual),
+						Key:           "tpu-size",
+						FallbackValue: ptr.To[int32](1),
+						Comparison:    ptr.To(kueue.LessThanOrEqual),
 					},
 					{
 						Key:      "priority-boost",
@@ -163,23 +163,23 @@ func TestNewCandidateFilters(t *testing.T) {
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+					&withinClusterQueueFilter{preemptorCQ: "cq1"},
 				},
 				WLFilters: []WorkloadFilter{
-					&sameLocalQueueFilter{
+					&withinLocalQueueFilter{
 						namespace: "ns1",
 						queueName: "lq1",
 					},
 					&numericLabelFilter{
-						constraint: kueue.NumericLabelConstraint{
-							Key:          "tpu-size",
-							DefaultValue: ptr.To[int32](1),
-							Relation:     ptr.To(kueue.LowerOrEqual),
+						constraint: kueue.PreemptionConfigNumericLabelConstraint{
+							Key:           "tpu-size",
+							FallbackValue: ptr.To[int32](1),
+							Comparison:    ptr.To(kueue.LessThanOrEqual),
 						},
 						preemptorVal: ptr.To[int32](8),
 					},
 					&numericLabelFilter{
-						constraint: kueue.NumericLabelConstraint{
+						constraint: kueue.PreemptionConfigNumericLabelConstraint{
 							Key:      "priority-boost",
 							MinValue: ptr.To[int32](10),
 						},
@@ -189,20 +189,20 @@ func TestNewCandidateFilters(t *testing.T) {
 			},
 		},
 		"Full combination of all selector criteria compiles into complete CandidateFilters": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.SameCohort,
-				RelativeWorkloadPriority: ptr.To(kueue.Lower),
-				NumericLabels: []kueue.NumericLabelConstraint{
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope:                    kueue.WithinParentCohort,
+				RelativeWorkloadPriority: ptr.To(kueue.LessThan),
+				NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{
 					{
-						Key:      "tpu-size",
-						Relation: ptr.To(kueue.Lower),
+						Key:        "tpu-size",
+						Comparison: ptr.To(kueue.LessThan),
 					},
 				},
 			},
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameCohortFilter{
+					&withinParentCohortFilter{
 						preemptorCQ:     "cq1",
 						preemptorCohort: "subA1",
 						hasCohort:       true,
@@ -210,69 +210,69 @@ func TestNewCandidateFilters(t *testing.T) {
 				},
 				WLFilters: []WorkloadFilter{
 					&numericLabelFilter{
-						constraint: kueue.NumericLabelConstraint{
-							Key:      "tpu-size",
-							Relation: ptr.To(kueue.Lower),
+						constraint: kueue.PreemptionConfigNumericLabelConstraint{
+							Key:        "tpu-size",
+							Comparison: ptr.To(kueue.LessThan),
 						},
 						preemptorVal: ptr.To[int32](8),
 					},
 					&relativeWorkloadPriorityFilter{
-						relation:          kueue.Lower,
+						comparison:        kueue.LessThan,
 						preemptorPriority: 100,
 					},
 				},
 			},
 		},
-		"SameClusterQueue with RelativeWorkloadPriority compiles both CQ and WL priority filters": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement:      kueue.SameClusterQueue,
-				RelativeWorkloadPriority: ptr.To(kueue.Lower),
+		"WithinClusterQueue with RelativeWorkloadPriority compiles both CQ and WL priority filters": {
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope:                    kueue.WithinClusterQueue,
+				RelativeWorkloadPriority: ptr.To(kueue.LessThan),
 			},
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+					&withinClusterQueueFilter{preemptorCQ: "cq1"},
 				},
 				WLFilters: []WorkloadFilter{
 					&relativeWorkloadPriorityFilter{
-						relation:          kueue.Lower,
+						comparison:        kueue.LessThan,
 						preemptorPriority: 100,
 					},
 				},
 			},
 		},
-		"Combined SameLocalQueue, NumericLabels, and RelativeWorkloadPriority compiles all filters": {
-			selector: &kueue.PreemptionCandidateSelector{
-				RelationRequirement: kueue.SameLocalQueue,
-				NumericLabels: []kueue.NumericLabelConstraint{
+		"Combined WithinLocalQueue, NumericLabels, and RelativeWorkloadPriority compiles all filters": {
+			selector: &kueue.PreemptionConfigPreemptionCandidateSelector{
+				Scope: kueue.WithinLocalQueue,
+				NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{
 					{
-						Key:          "tpu-size",
-						DefaultValue: ptr.To[int32](1),
-						Relation:     ptr.To(kueue.LowerOrEqual),
+						Key:           "tpu-size",
+						FallbackValue: ptr.To[int32](1),
+						Comparison:    ptr.To(kueue.LessThanOrEqual),
 					},
 				},
-				RelativeWorkloadPriority: ptr.To(kueue.LowerOrEqual),
+				RelativeWorkloadPriority: ptr.To(kueue.LessThanOrEqual),
 			},
 			preemptor: preemptor,
 			wantFilters: CandidateFilters{
 				CQFilters: []ClusterQueueFilter{
-					&sameClusterQueueFilter{preemptorCQ: "cq1"},
+					&withinClusterQueueFilter{preemptorCQ: "cq1"},
 				},
 				WLFilters: []WorkloadFilter{
-					&sameLocalQueueFilter{
+					&withinLocalQueueFilter{
 						namespace: "ns1",
 						queueName: "lq1",
 					},
 					&numericLabelFilter{
-						constraint: kueue.NumericLabelConstraint{
-							Key:          "tpu-size",
-							DefaultValue: ptr.To[int32](1),
-							Relation:     ptr.To(kueue.LowerOrEqual),
+						constraint: kueue.PreemptionConfigNumericLabelConstraint{
+							Key:           "tpu-size",
+							FallbackValue: ptr.To[int32](1),
+							Comparison:    ptr.To(kueue.LessThanOrEqual),
 						},
 						preemptorVal: ptr.To[int32](8),
 					},
 					&relativeWorkloadPriorityFilter{
-						relation:          kueue.LowerOrEqual,
+						comparison:        kueue.LessThanOrEqual,
 						preemptorPriority: 100,
 					},
 				},
@@ -282,10 +282,10 @@ func TestNewCandidateFilters(t *testing.T) {
 
 	cmpOptions := []cmp.Option{
 		cmp.AllowUnexported(
-			sameClusterQueueFilter{},
-			sameCohortFilter{},
-			sameCohortTreeFilter{},
-			sameLocalQueueFilter{},
+			withinClusterQueueFilter{},
+			withinParentCohortFilter{},
+			withinCohortTreeFilter{},
+			withinLocalQueueFilter{},
 			numericLabelFilter{},
 			relativeWorkloadPriorityFilter{},
 		),

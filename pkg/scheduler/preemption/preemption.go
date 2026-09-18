@@ -523,7 +523,7 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 			"insufficientQuotaCandidates",
 			workload.References(configurableCandidates.InsufficientQuota),
 			"topologyBlockedCandidates",
-			workload.References(configurableCandidates.QuotaFeasibleButTopologyBlocked),
+			workload.References(configurableCandidates.QuotaFeasibleAndInsufficientTopology),
 			"resourcesRequiringPreemption",
 			preemptionCtx.frsNeedPreemption.UnsortedList(),
 			"preemptingWorkload",
@@ -632,7 +632,7 @@ func preemptCandidates(preemptionCtx *preemptionCtx, targets []*Target, candidat
 // of the classical or the Fair Sharing algorithm, along with the ones of the Always
 // tier, are not enough to admit the incoming workload.
 // The InsufficientQuota tier is only used while the workload lacks quota, and the
-// QuotaFeasibleButTopologyBlocked tier only once the quota, including the one freed by
+// QuotaFeasibleAndInsufficientTopology tier only once the quota, including the one freed by
 // the preceding tiers, is sufficient but no topology assignment can be found.
 // TODO(#13396): move to the ConfigurablePreemption algorithm once it covers the
 // classical and Fair Sharing preemption and the three become mutually exclusive.
@@ -651,7 +651,7 @@ func preemptTieredCandidates(preemptionCtx *preemptionCtx, targets []*Target, ca
 	}
 	topologyFits := check.topology()
 	if !topologyFits {
-		topologyFits, targets = preemptCandidates(preemptionCtx, targets, candidates.QuotaFeasibleButTopologyBlocked, check.topology)
+		topologyFits, targets = preemptCandidates(preemptionCtx, targets, candidates.QuotaFeasibleAndInsufficientTopology, check.topology)
 	}
 	return topologyFits, targets
 }
@@ -756,7 +756,7 @@ func (p *Preemptor) configurableCandidates(preemptionCtx *preemptionCtx) configu
 		preemptionCtx.log.Error(err, "Failed to get candidates for preemption", "preemptionConfigName", preemptionConfigName)
 		return configurable.TieredCandidates{}
 	}
-	for _, tier := range [][]*workload.Info{candidates.Always, candidates.InsufficientQuota, candidates.QuotaFeasibleButTopologyBlocked} {
+	for _, tier := range [][]*workload.Info{candidates.Always, candidates.InsufficientQuota, candidates.QuotaFeasibleAndInsufficientTopology} {
 		slices.SortFunc(tier, p.candidatesOrdering(preemptionCtx))
 	}
 	return candidates
