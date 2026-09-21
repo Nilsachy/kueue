@@ -49,16 +49,6 @@ type candidateElem struct {
 	// candidates above priority threshold cannot be preempted if at the same time
 	// cq would borrow from other queues/cohorts
 	preemptionVariant preemptionVariant
-	// fromConfigurablePreemption indicates that the candidate was selected by the
-	// ConfigurablePreemption rules. Such candidates are not subject to the
-	// quota-based restrictions, as they were explicitly selected by the
-	// PreemptionConfig. A candidate which the classical algorithm collected as well
-	// keeps its preemptionVariant, and is therefore reported with the reason of the
-	// classical algorithm.
-	// TODO(#15893): remove once ConfigurablePreemption covers the classical
-	// preemption and the two become mutually exclusive, as the classical algorithm
-	// will then never see a candidate from the ConfigurablePreemption rules.
-	fromConfigurablePreemption bool
 }
 
 func WorkloadUsesResources(wl *workload.Info, frsNeedPreemption sets.Set[resources.FlavorResource]) bool {
@@ -135,11 +125,14 @@ func NewCandidateIterator(
 	}
 }
 
-// markConfigurableCandidates flags the candidates which were already collected by the
-// classical algorithm, so that they are not rejected by the quota-based restrictions,
-// and returns the elements for the candidates which are only selected by the
-// ConfigurablePreemption rules. A candidate is never duplicated, as that would lead
-// to removing the same workload from the snapshot twice.
+// markConfigurableCandidates reclassifies the candidates which were already collected by
+// the classical algorithm and are also selected by the ConfigurablePreemption rules, so
+// that they are not rejected by the quota-based restrictions, and returns the elements
+// for the candidates which are only selected by the rules. A candidate is never
+// duplicated, as that would lead to removing the same workload from the snapshot twice.
+// Reclassifying also changes the reported reason to ConfigurablePreemption, which is the
+// accurate one: the bypass may let a candidate through that the classical restrictions
+// would have rejected in this run.
 // TODO(#15893): remove once ConfigurablePreemption covers the classical preemption and
 // the two become mutually exclusive.
 func markConfigurableCandidates(configurableCandidates []*workload.Info, collectedCandidates ...[]*candidateElem) []*candidateElem {
@@ -156,7 +149,7 @@ func markConfigurableCandidates(configurableCandidates []*workload.Info, collect
 			key := workload.Key(candidate.wl.Obj)
 			collectedKeys.Insert(key)
 			if configurableKeys.Has(key) {
-				candidate.fromConfigurablePreemption = true
+				candidate.preemptionVariant = ConfigurablePreemption
 			}
 		}
 	}
@@ -166,9 +159,8 @@ func markConfigurableCandidates(configurableCandidates []*workload.Info, collect
 			continue
 		}
 		configurableOnlyCandidates = append(configurableOnlyCandidates, &candidateElem{
-			wl:                         wl,
-			preemptionVariant:          ConfigurablePreemption,
-			fromConfigurablePreemption: true,
+			wl:                wl,
+			preemptionVariant: ConfigurablePreemption,
 		})
 	}
 	return configurableOnlyCandidates
@@ -196,7 +188,7 @@ func (c *candidateIterator) candidateIsValid(candidate *candidateElem, borrow bo
 	// regardless of the quota used by their ClusterQueue.
 	// TODO(#15893): remove this bypass once ConfigurablePreemption covers the classical
 	// preemption and the two become mutually exclusive.
-	if candidate.fromConfigurablePreemption {
+	if candidate.preemptionVariant == ConfigurablePreemption {
 		return true
 	}
 	if c.hierarchicalReclaimCtx.Cq.Name == candidate.wl.ClusterQueue {

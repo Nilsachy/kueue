@@ -586,7 +586,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 				"/b1": "ConfigurablePreemption",
 			},
 		},
-		"candidate selected by both algorithms is preempted once, with the classical reason": {
+		"candidate selected by both algorithms is preempted once, with the ConfigurablePreemption reason": {
 			clusterQueues: []*kueue.ClusterQueue{
 				utiltestingapi.MakeClusterQueue("a").
 					Cohort("all").
@@ -606,7 +606,11 @@ func TestConfigurablePreemptions(t *testing.T) {
 			targetCQ:      "a",
 			wantPreempted: sets.New("/a1"),
 			wantReasons: map[string]string{
-				"/a1": kueue.InClusterQueueReason,
+				// The PreemptionConfig takes precedence over the classical
+				// WithinClusterQueue policy which would also have selected a1: the
+				// rules bypass the quota-based restrictions, so they, and not the
+				// classical algorithm, decide the candidate is preemptible.
+				"/a1": "ConfigurablePreemption",
 			},
 		},
 		"configurable target not needed anymore is given back": {
