@@ -49,7 +49,7 @@ type candidateElem struct {
 	// candidates above priority threshold cannot be preempted if at the same time
 	// cq would borrow from other queues/cohorts
 	preemptionVariant preemptionVariant
-	// configurable indicates that the candidate was selected by the
+	// fromConfigurablePreemption indicates that the candidate was selected by the
 	// ConfigurablePreemption rules. Such candidates are not subject to the
 	// quota-based restrictions, as they were explicitly selected by the
 	// PreemptionConfig. A candidate which the classical algorithm collected as well
@@ -57,8 +57,8 @@ type candidateElem struct {
 	// classical algorithm.
 	// TODO(#13396): remove once ConfigurablePreemption covers the classical
 	// preemption and the two become mutually exclusive, as the classical algorithm
-	// will then never see a configurable candidate.
-	configurable bool
+	// will then never see a candidate from the ConfigurablePreemption rules.
+	fromConfigurablePreemption bool
 }
 
 func WorkloadUsesResources(wl *workload.Info, frsNeedPreemption sets.Set[resources.FlavorResource]) bool {
@@ -156,7 +156,7 @@ func markConfigurableCandidates(configurableCandidates []*workload.Info, collect
 			key := workload.Key(candidate.wl.Obj)
 			collectedKeys.Insert(key)
 			if configurableKeys.Has(key) {
-				candidate.configurable = true
+				candidate.fromConfigurablePreemption = true
 			}
 		}
 	}
@@ -166,9 +166,9 @@ func markConfigurableCandidates(configurableCandidates []*workload.Info, collect
 			continue
 		}
 		configurableOnlyCandidates = append(configurableOnlyCandidates, &candidateElem{
-			wl:                wl,
-			preemptionVariant: ConfigurablePreemption,
-			configurable:      true,
+			wl:                         wl,
+			preemptionVariant:          ConfigurablePreemption,
+			fromConfigurablePreemption: true,
 		})
 	}
 	return configurableOnlyCandidates
@@ -196,7 +196,7 @@ func (c *candidateIterator) candidateIsValid(candidate *candidateElem, borrow bo
 	// regardless of the quota used by their ClusterQueue.
 	// TODO(#13396): remove this bypass once ConfigurablePreemption covers the classical
 	// preemption and the two become mutually exclusive.
-	if candidate.configurable {
+	if candidate.fromConfigurablePreemption {
 		return true
 	}
 	if c.hierarchicalReclaimCtx.Cq.Name == candidate.wl.ClusterQueue {
