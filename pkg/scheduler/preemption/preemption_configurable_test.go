@@ -491,7 +491,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 			targetCQ:      "a",
 			wantPreempted: sets.New("/a1"),
 		},
-		"classical candidates are preferred over the ones only the configurable rules select": {
+		"candidates from both classical and configurable preemption algorithms are merged": {
 			clusterQueues: []*kueue.ClusterQueue{
 				utiltestingapi.MakeClusterQueue("a").
 					Cohort("all").
@@ -550,16 +550,86 @@ func TestConfigurablePreemptions(t *testing.T) {
 				Request(corev1.ResourceCPU, "2").
 				Obj(),
 			targetCQ: "a",
-			// The classical candidates are exhausted before the configurable ones are
-			// considered, and a1 and a2 already free the 2 CPU needed. a3 is only
-			// reachable through the PreemptionConfig, and is left running: enabling
-			// ConfigurablePreemption never changes what the classical algorithm would
-			// have preempted on its own, it only adds candidates when that is not
-			// enough.
+			// The candidates the rules select are ranked with the classical ones
+			// rather than ahead of them, so the two least preferred workloads of
+			// the ClusterQueue are picked: a3 is only reached once a1 and a2 are
+			// not enough, which they are, as each frees 1 of the 2 CPU needed.
 			wantPreempted: sets.New("/a1", "/a2"),
 			wantReasons: map[string]string{
 				"/a1": kueue.InClusterQueueReason,
-				"/a2": kueue.InClusterQueueReason,
+				// Selected by both algorithms, and thus reported as the rules
+				// decide its fate.
+				"/a2": "ConfigurablePreemption",
+			},
+		},
+		"candidate selected by the configurable rules only is reached once the classical ones are not enough": {
+			clusterQueues: []*kueue.ClusterQueue{
+				utiltestingapi.MakeClusterQueue("a").
+					Cohort("all").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "3").Obj()).
+					Preemption(kueue.ClusterQueuePreemption{
+						WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
+					}).
+					Annotation(kueue.PreemptionConfigAnnotation, defaultConfigName).
+					Obj(),
+			},
+			config: kueue.PreemptionConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: defaultConfigName,
+				},
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
+						{
+							Name:             "candidate-tier-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
+								{
+									Scope: kueue.WithinClusterQueue,
+									NumericLabels: []kueue.PreemptionConfigNumericLabelConstraint{
+										{
+											Key:        "preemption-tier",
+											Comparison: ptr.To(kueue.LessThan),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			admitted: []kueue.Workload{
+				// a1 has no tier label, so it is a candidate for the classical
+				// algorithm only.
+				*unitWl.Clone().Name("a1").
+					Priority(10).
+					SimpleReserveQuota("a", "default", now).Obj(),
+				// a2 is a candidate for both algorithms.
+				*unitWl.Clone().Name("a2").
+					Priority(20).
+					Label("preemption-tier", "1").
+					SimpleReserveQuota("a", "default", now).Obj(),
+				// a3 has a higher priority than the incoming workload, so it is a
+				// candidate for the configurable algorithm only.
+				*unitWl.Clone().Name("a3").
+					Priority(200).
+					Label("preemption-tier", "2").
+					SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming: unitWl.Clone().Name("a_incoming").
+				Priority(100).
+				Label("preemption-tier", "5").
+				Request(corev1.ResourceCPU, "3").
+				Obj(),
+			targetCQ: "a",
+			// Ranking a3 with the classical candidates makes it the last resort,
+			// as it is the most preferred workload of the ClusterQueue, but it is
+			// still reached: freeing the 3 CPU needed takes all of them.
+			wantPreempted: sets.New("/a1", "/a2", "/a3"),
+			wantReasons: map[string]string{
+				"/a1": kueue.InClusterQueueReason,
+				"/a2": "ConfigurablePreemption",
+				"/a3": "ConfigurablePreemption",
 			},
 		},
 		"configurable candidate in a ClusterQueue within nominal quota is preempted": {
@@ -590,7 +660,87 @@ func TestConfigurablePreemptions(t *testing.T) {
 				"/b1": "ConfigurablePreemption",
 			},
 		},
-		"candidate selected by both algorithms is preempted by the classical one, with its reason": {
+		"candidate whose ClusterQueue stops borrowing during the walk is not preempted": {
+			// The classical walk no longer checks the fit after each removal, so the
+			// validity of the remaining candidates has to keep being re-evaluated
+			// against the mutated snapshot: removing b1 brings b back within its
+			// nominal quota, which puts b2 out of reach of the reclamation. Preempting
+			// b2 as well would admit the incoming workload at the expense of the
+			// nominal quota of b, so nothing is preempted at all.
+			clusterQueues: []*kueue.ClusterQueue{
+				utiltestingapi.MakeClusterQueue("a").
+					Cohort("all").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "2").Obj()).
+					Preemption(kueue.ClusterQueuePreemption{
+						ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+						BorrowWithinCohort: &kueue.BorrowWithinCohort{
+							Policy: kueue.BorrowWithinCohortPolicyLowerPriority,
+						},
+					}).
+					Annotation(kueue.PreemptionConfigAnnotation, defaultConfigName).
+					Obj(),
+				utiltestingapi.MakeClusterQueue("b").
+					Cohort("all").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "1").Obj()).
+					Obj(),
+			},
+			// The rules contribute nothing: their WithinClusterQueue scope keeps them
+			// to a, which holds no admitted workload.
+			config: baseConfig,
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+				*unitWl.Clone().Name("b2").SimpleReserveQuota("b", "default", now).Obj(),
+			},
+			// Admitting the incoming workload needs the 3 CPU of the whole cohort.
+			incoming: unitWl.Clone().Name("a_incoming").
+				Priority(100).
+				Request(corev1.ResourceCPU, "3").
+				Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New[string](),
+		},
+		"candidate is preempted while its ClusterQueue is still borrowing": {
+			// The counterpart of the case above, with one CPU less to reclaim: b1 is
+			// reachable, so it alone admits the incoming workload. Together the two
+			// cases pin down that only b2, which the removal of b1 puts back within
+			// the nominal quota of b, is out of reach.
+			clusterQueues: []*kueue.ClusterQueue{
+				utiltestingapi.MakeClusterQueue("a").
+					Cohort("all").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "2").Obj()).
+					Preemption(kueue.ClusterQueuePreemption{
+						ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+						BorrowWithinCohort: &kueue.BorrowWithinCohort{
+							Policy: kueue.BorrowWithinCohortPolicyLowerPriority,
+						},
+					}).
+					Annotation(kueue.PreemptionConfigAnnotation, defaultConfigName).
+					Obj(),
+				utiltestingapi.MakeClusterQueue("b").
+					Cohort("all").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "1").Obj()).
+					Obj(),
+			},
+			config: baseConfig,
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+				*unitWl.Clone().Name("b2").SimpleReserveQuota("b", "default", now).Obj(),
+			},
+			incoming: unitWl.Clone().Name("a_incoming").
+				Priority(100).
+				Request(corev1.ResourceCPU, "2").
+				Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New("/b1"),
+			wantReasons: map[string]string{
+				"/b1": kueue.InCohortReclamationReason,
+			},
+		},
+		"candidate selected by both algorithms is preempted once, with the ConfigurablePreemption reason": {
 			clusterQueues: []*kueue.ClusterQueue{
 				utiltestingapi.MakeClusterQueue("a").
 					Cohort("all").
@@ -610,9 +760,11 @@ func TestConfigurablePreemptions(t *testing.T) {
 			targetCQ:      "a",
 			wantPreempted: sets.New("/a1"),
 			wantReasons: map[string]string{
-				// The classical algorithm runs to exhaustion first and a1 alone is
-				// enough, so the Always tier, which also selects a1, is never reached.
-				"/a1": kueue.InClusterQueueReason,
+				// The PreemptionConfig takes precedence over the classical
+				// WithinClusterQueue policy which would also have selected a1: the
+				// rules bypass the quota-based restrictions, so they, and not the
+				// classical algorithm, decide the candidate is preemptible.
+				"/a1": "ConfigurablePreemption",
 			},
 		},
 		"configurable target not needed anymore is given back": {

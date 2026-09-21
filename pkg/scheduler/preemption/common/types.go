@@ -16,10 +16,12 @@ limitations under the License.
 
 package common
 
-// ConfigurablePreemptionReason is reported for targets which are preempted solely
-// because they were selected by the ConfigurablePreemption rules. A target which the
-// classical or Fair Sharing preemption would have selected anyway keeps the reason of
-// that algorithm.
+// ConfigurablePreemptionReason is reported for the targets selected by the
+// ConfigurablePreemption rules, including the ones the classical preemption would have
+// selected anyway: the rules bypass the quota-based restrictions, so they, and not the
+// classical algorithm, are what decides those candidates are preemptible.
+// A target the Fair Sharing preemption selects on its own keeps the reason of that
+// algorithm, as its candidates are not merged with the rules yet.
 const ConfigurablePreemptionReason = "ConfigurablePreemption"
 
 // PreemptionPossibility represents the result

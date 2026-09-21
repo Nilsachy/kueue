@@ -75,6 +75,13 @@ func splitEvicted(workloads []*candidateElem) ([]*candidateElem, []*candidateEle
 // with and without borrowing. The runs are independent which means that the same candidates
 // might be returned for both, but note that the candidates with borrowing are a subset of
 // candidates without borrowing.
+// The extendConfigurableCandidates function, if non-nil, receives the workloads
+// collected by the classical algorithm and returns the configurable candidates to merge
+// with them, ranked along with them. They are not subject to the quota-based
+// restrictions, see candidateIsValid.
+// TODO(#15893): drop the extendConfigurableCandidates parameter, and the merging it
+// entails, once ConfigurablePreemption covers the classical preemption and the two become
+// mutually exclusive.
 func NewCandidateIterator(
 	hierarchicalReclaimCtx *HierarchicalPreemptionCtx,
 	enabledAfs bool,
@@ -82,26 +89,37 @@ func NewCandidateIterator(
 	snapshot *schdcache.Snapshot,
 	clock clock.Clock,
 	ordering func(logr.Logger, bool, *workload.Info, *workload.Info, kueue.ClusterQueueReference, time.Time) int,
+	extendConfigurableCandidates func(collected []*workload.Info) []*workload.Info,
 ) *candidateIterator {
 	sameQueueCandidates := collectSameQueueCandidates(hierarchicalReclaimCtx)
 	hierarchyCandidates, priorityCandidates := collectCandidatesForHierarchicalReclaim(hierarchicalReclaimCtx)
+
+	// TODO(#15893): drop, along with the extendConfigurableCandidates parameter.
+	configurableOnlyCandidates := markConfigurableCandidates(extendConfigurableCandidates, sameQueueCandidates, hierarchyCandidates, priorityCandidates)
+
 	sortFn := func(a, b *candidateElem) int {
 		return ordering(hierarchicalReclaimCtx.Log, enabledAfs, a.wl, b.wl, hierarchicalReclaimCtx.Cq.Name, clock.Now())
 	}
 	slices.SortFunc(sameQueueCandidates, sortFn)
 	slices.SortFunc(priorityCandidates, sortFn)
 	slices.SortFunc(hierarchyCandidates, sortFn)
+	slices.SortFunc(configurableOnlyCandidates, sortFn)
 
 	evictedHierarchicalReclaimCandidates, nonEvictedHierarchicalReclaimCandidates := splitEvicted(hierarchyCandidates)
 	evictedSTCandidates, nonEvictedSTCandidates := splitEvicted(priorityCandidates)
 	evictedSameQueueCandidates, nonEvictedSameQueueCandidates := splitEvicted(sameQueueCandidates)
-	allCandidates := make([]*candidateElem, 0, len(hierarchyCandidates)+len(priorityCandidates)+len(sameQueueCandidates))
+	evictedConfigurableCandidates, nonEvictedConfigurableCandidates := splitEvicted(configurableOnlyCandidates)
+
+	allCandidates := make([]*candidateElem, 0, len(hierarchyCandidates)+len(priorityCandidates)+len(sameQueueCandidates)+len(configurableOnlyCandidates))
 	allCandidates = append(allCandidates, evictedHierarchicalReclaimCandidates...)
 	allCandidates = append(allCandidates, evictedSTCandidates...)
 	allCandidates = append(allCandidates, evictedSameQueueCandidates...)
+	allCandidates = append(allCandidates, evictedConfigurableCandidates...)
 	allCandidates = append(allCandidates, nonEvictedHierarchicalReclaimCandidates...)
 	allCandidates = append(allCandidates, nonEvictedSTCandidates...)
 	allCandidates = append(allCandidates, nonEvictedSameQueueCandidates...)
+	// TODO(#15893): drop, along with the extendConfigurableCandidates parameter.
+	allCandidates = append(allCandidates, nonEvictedConfigurableCandidates...)
 	return &candidateIterator{
 		runIndex:                          0,
 		frsNeedPreemption:                 frsNeedPreemption,
@@ -111,6 +129,64 @@ func NewCandidateIterator(
 		NoCandidateForHierarchicalReclaim: len(hierarchyCandidates) == 0,
 		hierarchicalReclaimCtx:            hierarchicalReclaimCtx,
 	}
+}
+
+// markConfigurableCandidates evaluates the extendConfigurableCandidates function to
+// resolve the configurable candidates, reclassifies the candidates which were already
+// collected by the classical algorithm so that they are not rejected by the quota-based
+// restrictions, and returns the elements for the candidates which are only selected by
+// the rules. A candidate is never duplicated, as that would lead to removing the same
+// workload from the snapshot twice.
+// Reclassifying also changes the reported reason to ConfigurablePreemption, which is the
+// accurate one: the bypass may let a candidate through that the classical restrictions
+// would have rejected in this run.
+// TODO(#15893): remove once ConfigurablePreemption covers the classical preemption and
+// the two become mutually exclusive.
+func markConfigurableCandidates(
+	extendConfigurableCandidates func(collected []*workload.Info) []*workload.Info,
+	collectedCandidates ...[]*candidateElem,
+) []*candidateElem {
+	if extendConfigurableCandidates == nil {
+		return nil
+	}
+	var totalLen int
+	for _, candidates := range collectedCandidates {
+		totalLen += len(candidates)
+	}
+	collected := make([]*workload.Info, 0, totalLen)
+	collectedKeys := sets.New[workload.Reference]()
+	for _, candidates := range collectedCandidates {
+		for _, candidate := range candidates {
+			collected = append(collected, candidate.wl)
+			collectedKeys.Insert(workload.Key(candidate.wl.Obj))
+		}
+	}
+	configurableCandidates := extendConfigurableCandidates(collected)
+	if len(configurableCandidates) == 0 {
+		return nil
+	}
+	configurableKeys := sets.New[workload.Reference]()
+	for _, wl := range configurableCandidates {
+		configurableKeys.Insert(workload.Key(wl.Obj))
+	}
+	for _, candidates := range collectedCandidates {
+		for _, candidate := range candidates {
+			if configurableKeys.Has(workload.Key(candidate.wl.Obj)) {
+				candidate.preemptionVariant = ConfigurablePreemption
+			}
+		}
+	}
+	var configurableOnlyCandidates []*candidateElem
+	for _, wl := range configurableCandidates {
+		if collectedKeys.Has(workload.Key(wl.Obj)) {
+			continue
+		}
+		configurableOnlyCandidates = append(configurableOnlyCandidates, &candidateElem{
+			wl:                wl,
+			preemptionVariant: ConfigurablePreemption,
+		})
+	}
+	return configurableOnlyCandidates
 }
 
 // Next allows to iterate over the ordered sequence of candidates, with the reason
@@ -131,6 +207,13 @@ func (c *candidateIterator) Next(borrow bool) (*workload.Info, string) {
 // as eg. some candidates can only be considered without borrowing
 // Also, preemption of candidates might invalidate other candidates
 func (c *candidateIterator) candidateIsValid(candidate *candidateElem, borrow bool) bool {
+	// Candidates selected by the ConfigurablePreemption rules are preemptible
+	// regardless of the quota used by their ClusterQueue.
+	// TODO(#15893): remove this bypass once ConfigurablePreemption covers the classical
+	// preemption and the two become mutually exclusive.
+	if candidate.preemptionVariant == ConfigurablePreemption {
+		return true
+	}
 	if c.hierarchicalReclaimCtx.Cq.Name == candidate.wl.ClusterQueue {
 		return true
 	}
