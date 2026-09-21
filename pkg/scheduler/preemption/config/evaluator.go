@@ -97,7 +97,7 @@ func (p *PreemptionEvaluator) Candidates(
 		if rule.ActivationPolicy.Trigger != trigger {
 			continue
 		}
-		matches, err := p.matchesPreemptor(rule, preemptor)
+		matches, err := workloadMatchesSelector(rule.PreemptorSelector, preemptor)
 		if err != nil {
 			return nil, err
 		}
@@ -148,19 +148,17 @@ func matchesWorkload(filter *filters.CandidateFilters, wl *workload.Info) bool {
 	return true
 }
 
-// matchesPreemptor returns whether the rule can be used for the given preemptor.
-// Whether the trigger of the rule is activated is decided by the preemption algorithm,
-// as it depends on the candidates preempted for the preceding triggers.
-func (p *PreemptionEvaluator) matchesPreemptor(rule kueue.PreemptionConfigPreemptionRule, wlInfo *workload.Info) (bool, error) {
-	if rule.PreemptorSelector == nil {
-		// An unset selector accepts all the preemptors. Note that this differs from
-		// LabelSelectorAsSelector(nil), which matches nothing.
+// workloadMatchesSelector returns whether the labels of the workload match the
+// selector. A nil selector accepts every workload, which differs from
+// LabelSelectorAsSelector(nil), matching none.
+func workloadMatchesSelector(selector *metav1.LabelSelector, wlInfo *workload.Info) (bool, error) {
+	if selector == nil {
 		return true, nil
 	}
-	selector, err := metav1.LabelSelectorAsSelector(rule.PreemptorSelector)
+	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
 		return false, err
 	}
 
-	return selector.Matches(labels.Set(wlInfo.Obj.Labels)), nil
+	return labelSelector.Matches(labels.Set(wlInfo.Obj.Labels)), nil
 }
