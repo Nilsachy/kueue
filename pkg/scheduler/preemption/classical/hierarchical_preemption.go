@@ -43,14 +43,6 @@ const (
 	ReclaimWithoutBorrowing
 	// Can be preemped even if preemptor CQ would be borrowing
 	ReclaimWhileBorrowing
-	// Selected by the ConfigurablePreemption rules, which makes the candidate
-	// preemptible regardless of the quota-based restrictions. A candidate the
-	// classical algorithm collected on its own is reclassified to this variant when
-	// the rules select it as well, as the bypass then decides its fate.
-	// TODO(#15893): remove, along with its PreemptionReason case, once
-	// ConfigurablePreemption covers the classical preemption and the two become
-	// mutually exclusive.
-	ConfigurablePreemption
 )
 
 func (m preemptionVariant) PreemptionReason() string {
@@ -63,8 +55,6 @@ func (m preemptionVariant) PreemptionReason() string {
 		return kueue.InCohortReclaimWhileBorrowingReason
 	case ReclaimWithoutBorrowing:
 		return kueue.InCohortReclamationReason
-	case ConfigurablePreemption:
-		return preemptioncommon.ConfigurablePreemptionReason
 	}
 	return "Unknown"
 }

@@ -491,7 +491,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 			targetCQ:      "a",
 			wantPreempted: sets.New("/a1"),
 		},
-		"candidates from both classical and configurable preemption algorithms are merged": {
+		"classical candidates are preferred over the ones only the configurable rules select": {
 			clusterQueues: []*kueue.ClusterQueue{
 				utiltestingapi.MakeClusterQueue("a").
 					Cohort("all").
@@ -550,12 +550,16 @@ func TestConfigurablePreemptions(t *testing.T) {
 				Request(corev1.ResourceCPU, "2").
 				Obj(),
 			targetCQ: "a",
-			// Candidates selected by the configurable rules are considered before the
-			// in-ClusterQueue ones, and only as many targets as needed are preempted.
-			wantPreempted: sets.New("/a1", "/a3"),
+			// The classical candidates are exhausted before the configurable ones are
+			// considered, and a1 and a2 already free the 2 CPU needed. a3 is only
+			// reachable through the PreemptionConfig, and is left running: enabling
+			// ConfigurablePreemption never changes what the classical algorithm would
+			// have preempted on its own, it only adds candidates when that is not
+			// enough.
+			wantPreempted: sets.New("/a1", "/a2"),
 			wantReasons: map[string]string{
 				"/a1": kueue.InClusterQueueReason,
-				"/a3": "ConfigurablePreemption",
+				"/a2": kueue.InClusterQueueReason,
 			},
 		},
 		"configurable candidate in a ClusterQueue within nominal quota is preempted": {
@@ -586,7 +590,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 				"/b1": "ConfigurablePreemption",
 			},
 		},
-		"candidate selected by both algorithms is preempted once, with the ConfigurablePreemption reason": {
+		"candidate selected by both algorithms is preempted by the classical one, with its reason": {
 			clusterQueues: []*kueue.ClusterQueue{
 				utiltestingapi.MakeClusterQueue("a").
 					Cohort("all").
@@ -606,11 +610,9 @@ func TestConfigurablePreemptions(t *testing.T) {
 			targetCQ:      "a",
 			wantPreempted: sets.New("/a1"),
 			wantReasons: map[string]string{
-				// The PreemptionConfig takes precedence over the classical
-				// WithinClusterQueue policy which would also have selected a1: the
-				// rules bypass the quota-based restrictions, so they, and not the
-				// classical algorithm, decide the candidate is preemptible.
-				"/a1": "ConfigurablePreemption",
+				// The classical algorithm runs to exhaustion first and a1 alone is
+				// enough, so the Always tier, which also selects a1, is never reached.
+				"/a1": kueue.InClusterQueueReason,
 			},
 		},
 		"configurable target not needed anymore is given back": {

@@ -301,11 +301,7 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 		Requests:          preemptionCtx.workloadUsage.Quota.Assigned,
 		WorkloadOrdering:  p.workloadOrdering,
 	}
-	// TODO(#15893): remove the merging of the configurable candidates, here and in the
-	// tiered phase below, once ConfigurablePreemption covers the classical preemption
-	// and the two become mutually exclusive.
-	alwaysCandidates := p.configurableCandidates(preemptionCtx, kueue.Always)
-	candidatesGenerator := classical.NewCandidateIterator(hierarchicalReclaimCtx, p.enabledAfs, preemptionCtx.frsNeedPreemption, preemptionCtx.snapshot, p.clock, preemptioncommon.CandidatesOrdering, alwaysCandidates)
+	candidatesGenerator := classical.NewCandidateIterator(hierarchicalReclaimCtx, p.enabledAfs, preemptionCtx.frsNeedPreemption, preemptionCtx.snapshot, p.clock, preemptioncommon.CandidatesOrdering)
 	var attemptPossibleOpts []preemptionAttemptOpts
 	borrowWithinCohortForbidden, _ := classical.IsBorrowingWithinCohortForbidden(preemptionCtx.preemptorCQ)
 	// We have three types of candidates:
@@ -348,9 +344,18 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 				return targets
 			}
 		}
-		// The classical candidates, including the ones of the Always tier, are not
-		// enough. Extending them with the conditional ConfigurablePreemption tiers.
-		fits, targets := p.preemptTieredCandidates(preemptionCtx, targets, classicalFitChecker(preemptionCtx, attemptOpts.borrowing))
+		// TODO(#15893): remove the ConfigurablePreemption phases below, once
+		// ConfigurablePreemption covers the classical preemption and the two become
+		// mutually exclusive.
+		//
+		// The classical candidates are exhausted: extend them with the
+		// ConfigurablePreemption ones, which are not subject to the quota-based
+		// restrictions of the classical algorithm.
+		check := classicalFitChecker(preemptionCtx, attemptOpts.borrowing)
+		fits, targets := preemptCandidates(preemptionCtx, targets, p.configurableCandidates(preemptionCtx, kueue.Always), check.fits)
+		if !fits {
+			fits, targets = p.preemptTieredCandidates(preemptionCtx, targets, check)
+		}
 		if fits {
 			targets = fillBackWorkloads(preemptionCtx, targets, attemptOpts.borrowing)
 			restoreSnapshot(preemptionCtx.snapshot, targets)
