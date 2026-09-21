@@ -1360,10 +1360,10 @@ func (a *FlavorAssigner) canPreemptWhileBorrowing() bool {
 // possible even if the ClusterQueue would borrow afterwards, and the classical
 // preemption policies don't allow it. Whether any rule is actually triggered is
 // determined by the preemption algorithm itself.
-// TODO(#13396): revisit once ConfigurablePreemption covers the classical and Fair
-// Sharing preemption and the three become mutually exclusive: the borrowing relaxation
-// should then be decided by the ConfigurablePreemption rules alone, instead of widening
-// canPreemptWhileBorrowing.
+// TODO(#15893): stop widening canPreemptWhileBorrowing, leaving the borrowing
+// relaxation to the ConfigurablePreemption rules alone, once ConfigurablePreemption
+// covers the classical and Fair Sharing preemption and the three become mutually
+// exclusive.
 func (a *FlavorAssigner) usesConfigurablePreemption() bool {
 	return features.Enabled(features.ConfigurablePreemption) && a.cq.PreemptionAnnotation != nil
 }

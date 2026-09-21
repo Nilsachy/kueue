@@ -45,7 +45,7 @@ const (
 	ReclaimWhileBorrowing
 	// Selected by the ConfigurablePreemption rules only; such a candidate
 	// is not preemptible by the classical algorithm on its own.
-	// TODO(#13396): remove, along with its PreemptionReason case, once
+	// TODO(#15893): remove, along with its PreemptionReason case, once
 	// ConfigurablePreemption covers the classical preemption and the two become
 	// mutually exclusive.
 	ConfigurablePreemption

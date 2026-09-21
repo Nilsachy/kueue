@@ -55,7 +55,7 @@ type candidateElem struct {
 	// PreemptionConfig. A candidate which the classical algorithm collected as well
 	// keeps its preemptionVariant, and is therefore reported with the reason of the
 	// classical algorithm.
-	// TODO(#13396): remove once ConfigurablePreemption covers the classical
+	// TODO(#15893): remove once ConfigurablePreemption covers the classical
 	// preemption and the two become mutually exclusive, as the classical algorithm
 	// will then never see a candidate from the ConfigurablePreemption rules.
 	fromConfigurablePreemption bool
@@ -88,7 +88,7 @@ func splitEvicted(workloads []*candidateElem) ([]*candidateElem, []*candidateEle
 // The configurableCandidates, selected by the ConfigurablePreemption rules, are merged with
 // the candidates found by the classical algorithm. They are not subject to the quota-based
 // restrictions, see candidateIsValid.
-// TODO(#13396): drop the configurableCandidates parameter, and the merging it entails,
+// TODO(#15893): drop the configurableCandidates parameter, and the merging it entails,
 // once ConfigurablePreemption covers the classical preemption and the two become
 // mutually exclusive.
 func NewCandidateIterator(
@@ -140,7 +140,7 @@ func NewCandidateIterator(
 // and returns the elements for the candidates which are only selected by the
 // ConfigurablePreemption rules. A candidate is never duplicated, as that would lead
 // to removing the same workload from the snapshot twice.
-// TODO(#13396): remove once ConfigurablePreemption covers the classical preemption and
+// TODO(#15893): remove once ConfigurablePreemption covers the classical preemption and
 // the two become mutually exclusive.
 func markConfigurableCandidates(configurableCandidates []*workload.Info, collectedCandidates ...[]*candidateElem) []*candidateElem {
 	if len(configurableCandidates) == 0 {
@@ -194,7 +194,7 @@ func (c *candidateIterator) Next(borrow bool) (*workload.Info, string) {
 func (c *candidateIterator) candidateIsValid(candidate *candidateElem, borrow bool) bool {
 	// Candidates selected by the ConfigurablePreemption rules are preemptible
 	// regardless of the quota used by their ClusterQueue.
-	// TODO(#13396): remove this bypass once ConfigurablePreemption covers the classical
+	// TODO(#15893): remove this bypass once ConfigurablePreemption covers the classical
 	// preemption and the two become mutually exclusive.
 	if candidate.fromConfigurablePreemption {
 		return true
