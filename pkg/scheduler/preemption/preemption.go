@@ -85,6 +85,13 @@ type preemptionCtx struct {
 	workloadUsage     workload.Usage
 	tasRequests       schdcache.WorkloadTASRequests
 	frsNeedPreemption sets.Set[resources.FlavorResource]
+	// configurableEvaluator selects the candidates of the PreemptionConfig referenced
+	// by the preemptor's ClusterQueue, one trigger at a time. It is nil when the
+	// ConfigurablePreemption feature is disabled, when the ClusterQueue references no
+	// PreemptionConfig, or when the PreemptionConfig cannot be read.
+	// TODO(#13396): remove once ConfigurablePreemption becomes an algorithm of its own,
+	// mutually exclusive with the classical and Fair Sharing preemption.
+	configurableEvaluator *configurable.PreemptionEvaluator
 }
 
 func New(
@@ -155,6 +162,9 @@ func (p *Preemptor) GetTargets(ctx context.Context, wl workload.Info, assignment
 }
 
 func (p *Preemptor) getTargets(preemptionCtx *preemptionCtx) []*Target {
+	// Resolved once per attempt: both algorithms evaluate several triggers, and the
+	// PreemptionConfig must not be re-read for each of them.
+	preemptionCtx.configurableEvaluator = p.newConfigurableEvaluator(preemptionCtx)
 	if p.enableFairSharing {
 		return p.fairPreemptions(preemptionCtx, p.fsStrategies)
 	}
@@ -294,8 +304,8 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 	// TODO(#13396): the classical algorithm stops merging the configurable candidates,
 	// here and in the tiered phase below, once ConfigurablePreemption covers it and the
 	// two become mutually exclusive.
-	configurableCandidates := p.configurableCandidates(preemptionCtx)
-	candidatesGenerator := classical.NewCandidateIterator(hierarchicalReclaimCtx, p.enabledAfs, preemptionCtx.frsNeedPreemption, preemptionCtx.snapshot, p.clock, preemptioncommon.CandidatesOrdering, configurableCandidates.Always)
+	alwaysCandidates := p.configurableCandidates(preemptionCtx, kueue.Always)
+	candidatesGenerator := classical.NewCandidateIterator(hierarchicalReclaimCtx, p.enabledAfs, preemptionCtx.frsNeedPreemption, preemptionCtx.snapshot, p.clock, preemptioncommon.CandidatesOrdering, alwaysCandidates)
 	var attemptPossibleOpts []preemptionAttemptOpts
 	borrowWithinCohortForbidden, _ := classical.IsBorrowingWithinCohortForbidden(preemptionCtx.preemptorCQ)
 	// We have three types of candidates:
@@ -340,7 +350,7 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 		}
 		// The classical candidates, including the ones of the Always tier, are not
 		// enough. Extending them with the conditional ConfigurablePreemption tiers.
-		fits, targets := preemptTieredCandidates(preemptionCtx, targets, configurableCandidates, classicalFitChecker(preemptionCtx, attemptOpts.borrowing))
+		fits, targets := p.preemptTieredCandidates(preemptionCtx, targets, classicalFitChecker(preemptionCtx, attemptOpts.borrowing))
 		if fits {
 			targets = fillBackWorkloads(preemptionCtx, targets, attemptOpts.borrowing)
 			restoreSnapshot(preemptionCtx.snapshot, targets)
@@ -508,8 +518,10 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 	// TODO(#13396): Fair Sharing stops interleaving the configurable tiers with its own
 	// strategies once ConfigurablePreemption covers it and the two become mutually
 	// exclusive.
-	configurableCandidates := p.configurableCandidates(preemptionCtx)
-	if len(candidates) == 0 && configurableCandidates.Empty() {
+	//
+	// The configurable candidates are evaluated at the point their phase is reached, so
+	// their emptiness isn't known here; the presence of a rule is enough to keep going.
+	if len(candidates) == 0 && !hasConfigurableRules(preemptionCtx) {
 		return nil
 	}
 	slices.SortFunc(candidates, p.candidatesOrdering(preemptionCtx))
@@ -518,12 +530,6 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 			"Simulating fair preemption",
 			"candidates",
 			workload.References(candidates),
-			"alwaysCandidates",
-			workload.References(configurableCandidates.Always),
-			"insufficientQuotaCandidates",
-			workload.References(configurableCandidates.InsufficientQuota),
-			"topologyBlockedCandidates",
-			workload.References(configurableCandidates.QuotaFeasibleAndInsufficientTopology),
 			"resourcesRequiringPreemption",
 			preemptionCtx.frsNeedPreemption.UnsortedList(),
 			"preemptingWorkload",
@@ -541,7 +547,7 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 		// Sharing rules, as they are explicitly selected by the PreemptionConfig.
 		// They are preferred over rule S2-b, which is a last resort for the
 		// candidates the first strategy rejected.
-		fits, targets = preemptCandidates(preemptionCtx, targets, configurableCandidates.Always, check.fits)
+		fits, targets = preemptCandidates(preemptionCtx, targets, p.configurableCandidates(preemptionCtx, kueue.Always), check.fits)
 	}
 	if !fits && len(strategies) > 1 {
 		if logV := preemptionCtx.log.V(6); logV.Enabled() {
@@ -555,7 +561,7 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 	if !fits {
 		// All the Fair Sharing strategies failed: extend the candidates with the
 		// conditional ConfigurablePreemption tiers.
-		fits, targets = preemptTieredCandidates(preemptionCtx, targets, configurableCandidates, check)
+		fits, targets = p.preemptTieredCandidates(preemptionCtx, targets, check)
 	}
 
 	revertSimulation()
@@ -601,8 +607,7 @@ func remainingCandidates(candidates []*workload.Info, targets []*Target) []*work
 }
 
 // preemptCandidates appends the candidates selected by the ConfigurablePreemption
-// rules to the targets, in order, until fits returns true. Candidates already selected
-// as targets by the classical or the Fair Sharing algorithm are skipped.
+// rules to the targets, in order, until fits returns true.
 // The candidates are preempted regardless of the classical or Fair Sharing rules, as
 // they are explicitly selected by the PreemptionConfig, and thus reported with the
 // ConfigurablePreemption reason.
@@ -611,6 +616,12 @@ func remainingCandidates(candidates []*workload.Info, targets []*Target) []*work
 func preemptCandidates(preemptionCtx *preemptionCtx, targets []*Target, candidates []*workload.Info, fits func() bool) (bool, []*Target) {
 	preempted := preemptedKeys(targets)
 	for _, candidate := range candidates {
+		// Callers evaluate the candidates of a trigger against the snapshot the
+		// preceding phases already mutated, and RemoveWorkload drops the workload
+		// from the very map the evaluator iterates, so a target cannot be selected
+		// twice. Kept as a safety net: preempting a workload again would leave a
+		// duplicate target behind, which restoreSnapshot would then add back once
+		// per copy. Skipping preserves the order of the remaining candidates.
 		if preempted.Has(workload.Key(candidate.Obj)) {
 			continue
 		}
@@ -628,30 +639,33 @@ func preemptCandidates(preemptionCtx *preemptionCtx, targets []*Target, candidat
 }
 
 // preemptTieredCandidates extends the targets selected so far with the candidates of
-// the conditional ConfigurablePreemption tiers, which are only used once the candidates
-// of the classical or the Fair Sharing algorithm, along with the ones of the Always
-// tier, are not enough to admit the incoming workload.
-// The InsufficientQuota tier is only used while the workload lacks quota, and the
-// QuotaFeasibleAndInsufficientTopology tier only once the quota, including the one freed by
-// the preceding tiers, is sufficient but no topology assignment can be found.
+// the conditional ConfigurablePreemption triggers, which are only used once the
+// candidates of the classical or the Fair Sharing algorithm, along with the ones of the
+// Always trigger, are not enough to admit the incoming workload.
+// The InsufficientQuota trigger is only used while the workload lacks quota, and the
+// QuotaFeasibleAndInsufficientTopology trigger only once the quota, including the one
+// freed by the preceding ones, is sufficient but no topology assignment can be found.
+// Each trigger is evaluated at the point it is reached, so its candidates exclude the
+// workloads already preempted, which are no longer in the snapshot.
 // TODO(#13396): move to the ConfigurablePreemption algorithm once it covers the
 // classical and Fair Sharing preemption and the three become mutually exclusive.
-func preemptTieredCandidates(preemptionCtx *preemptionCtx, targets []*Target, candidates configurable.TieredCandidates, check fitChecker) (bool, []*Target) {
-	if candidates.ConditionalTiersEmpty() {
+func (p *Preemptor) preemptTieredCandidates(preemptionCtx *preemptionCtx, targets []*Target, check fitChecker) (bool, []*Target) {
+	if !hasConditionalConfigurableRules(preemptionCtx) {
 		// The caller only reaches this point when the workload doesn't fit, and there
-		// is no candidate left to free resources.
+		// is no candidate left to free resources. Checked before the fit checks, as
+		// evaluating the topology one runs the TAS solver.
 		return false, targets
 	}
 	quotaFits := check.quota()
 	if !quotaFits {
-		quotaFits, targets = preemptCandidates(preemptionCtx, targets, candidates.InsufficientQuota, check.quota)
+		quotaFits, targets = preemptCandidates(preemptionCtx, targets, p.configurableCandidates(preemptionCtx, kueue.InsufficientQuota), check.quota)
 	}
 	if !quotaFits {
 		return false, targets
 	}
 	topologyFits := check.topology()
 	if !topologyFits {
-		topologyFits, targets = preemptCandidates(preemptionCtx, targets, candidates.QuotaFeasibleAndInsufficientTopology, check.topology)
+		topologyFits, targets = preemptCandidates(preemptionCtx, targets, p.configurableCandidates(preemptionCtx, kueue.QuotaFeasibleAndInsufficientTopology), check.topology)
 	}
 	return topologyFits, targets
 }
@@ -731,35 +745,63 @@ func cqIsBorrowing(cq *schdcache.ClusterQueueSnapshot, frsNeedPreemption sets.Se
 	return false
 }
 
-// configurableCandidates returns the candidates selected by the rules of the
-// PreemptionConfig referenced by the preemptor's ClusterQueue, grouped by the tier of
-// the rule that selected them, or no candidate if the ConfigurablePreemption feature is
-// disabled or the ClusterQueue doesn't reference a PreemptionConfig.
-// The candidates of the Always tier are merged with the candidates of the classical or
-// the Fair Sharing algorithm, which selects the final targets. The candidates of the
-// remaining tiers are only used if those are not enough to admit the preemptor.
-func (p *Preemptor) configurableCandidates(preemptionCtx *preemptionCtx) configurable.TieredCandidates {
+// newConfigurableEvaluator returns the evaluator for the PreemptionConfig referenced by
+// the preemptor's ClusterQueue, or nil if the ConfigurablePreemption feature is
+// disabled, the ClusterQueue references no PreemptionConfig, or it cannot be read.
+// TODO(#13396): remove once ConfigurablePreemption becomes an algorithm of its own and
+// resolves its own configuration.
+func (p *Preemptor) newConfigurableEvaluator(preemptionCtx *preemptionCtx) *configurable.PreemptionEvaluator {
 	if !features.Enabled(features.ConfigurablePreemption) || preemptionCtx.preemptorCQ.PreemptionAnnotation == nil {
-		return configurable.TieredCandidates{}
+		return nil
 	}
 	preemptionConfig := &kueue.PreemptionConfig{}
 	preemptionConfigName := *preemptionCtx.preemptorCQ.PreemptionAnnotation
 	if err := p.client.Get(preemptionCtx.ctx, client.ObjectKey{Name: preemptionConfigName}, preemptionConfig); err != nil {
 		preemptionCtx.log.Error(err, "Failed to get PreemptionConfig", "preemptionConfigName", preemptionConfigName)
-		return configurable.TieredCandidates{}
+		return nil
 	}
+	return configurable.NewPreemptionEvaluator(preemptionCtx.ctx, preemptionCtx.log, preemptionCtx.clock, *preemptionConfig, p.client)
+}
 
-	preemptionEvaluator := configurable.NewPreemptionEvaluator(preemptionCtx.ctx, preemptionCtx.log, preemptionCtx.clock, *preemptionConfig, p.client)
-
-	candidates, err := preemptionEvaluator.Candidates(preemptionCtx.snapshot, &preemptionCtx.preemptor, preemptionCtx.frsNeedPreemption)
+// configurableCandidates returns the candidates selected by the rules of the
+// PreemptionConfig activated by the given trigger, ordered from the most to the least
+// preferred one, or no candidate if the ClusterQueue uses no PreemptionConfig.
+// Only the candidates still admitted in the snapshot are returned, so a trigger
+// evaluated after some workloads have been preempted never returns those again.
+// TODO(#13396): remove once ConfigurablePreemption becomes an algorithm of its own,
+// mutually exclusive with the classical and Fair Sharing preemption.
+func (p *Preemptor) configurableCandidates(preemptionCtx *preemptionCtx, trigger kueue.PreemptionConfigActivationTrigger) []*workload.Info {
+	if preemptionCtx.configurableEvaluator == nil {
+		return nil
+	}
+	candidates, err := preemptionCtx.configurableEvaluator.Candidates(preemptionCtx.snapshot, &preemptionCtx.preemptor, preemptionCtx.frsNeedPreemption, trigger)
 	if err != nil {
-		preemptionCtx.log.Error(err, "Failed to get candidates for preemption", "preemptionConfigName", preemptionConfigName)
-		return configurable.TieredCandidates{}
+		preemptionCtx.log.Error(err, "Failed to get candidates for preemption", "trigger", trigger)
+		return nil
 	}
-	for _, tier := range [][]*workload.Info{candidates.Always, candidates.InsufficientQuota, candidates.QuotaFeasibleAndInsufficientTopology} {
-		slices.SortFunc(tier, p.candidatesOrdering(preemptionCtx))
-	}
+	slices.SortFunc(candidates, p.candidatesOrdering(preemptionCtx))
 	return candidates
+}
+
+// hasConfigurableRules returns whether the PreemptionConfig holds any rule at all. It
+// inspects the configuration only, which lets the callers keep going without evaluating
+// the candidates of a trigger before the phase actually reached it.
+// TODO(#13396): remove once ConfigurablePreemption becomes an algorithm of its own,
+// mutually exclusive with the classical and Fair Sharing preemption.
+func hasConfigurableRules(preemptionCtx *preemptionCtx) bool {
+	return preemptionCtx.configurableEvaluator != nil &&
+		preemptionCtx.configurableEvaluator.HasRulesFor(kueue.Always, kueue.InsufficientQuota, kueue.QuotaFeasibleAndInsufficientTopology)
+}
+
+// hasConditionalConfigurableRules returns whether the PreemptionConfig holds any rule of
+// a trigger which is only reached once the preceding ones are not enough. It inspects
+// the configuration only, and therefore lets the callers skip the fit checks guarding
+// the evaluation of those triggers.
+// TODO(#13396): remove along with the tiered phase, once ConfigurablePreemption becomes
+// an algorithm of its own.
+func hasConditionalConfigurableRules(preemptionCtx *preemptionCtx) bool {
+	return preemptionCtx.configurableEvaluator != nil &&
+		preemptionCtx.configurableEvaluator.HasRulesFor(kueue.InsufficientQuota, kueue.QuotaFeasibleAndInsufficientTopology)
 }
 
 // candidatesOrdering returns the function ordering the candidates of a preemption,

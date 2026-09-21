@@ -372,8 +372,8 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			},
 			preemptorWl: unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq: "a",
-			// a1 is selected by both rules, but only reported for the Always tier, as
-			// preempting it there makes it unavailable for the following ones.
+			// a1 is selected by both rules, but only reported for the Always trigger: it is
+			// preempted there, and therefore gone from the snapshot for the following ones.
 			wantCandidates:      []string{"a1"},
 			wantQuotaCandidates: []string{"b1"},
 		},
@@ -402,7 +402,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1"},
 		},
-		"returns non repeating candidates even when same candidates matched by different trigger rules": {
+		"returns non repeating candidates even when the same candidates are matched by several rules of a trigger": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
@@ -613,12 +613,39 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			wlInfo := workload.NewInfo(tc.preemptorWl)
 			wlInfo.ClusterQueue = tc.preemptorCq
 
+			// Candidates are not ordered, so compare them as sorted lists.
+			names := func(candidates []*workload.Info) []string {
+				return slices.Sorted(slices.Values(utilslices.Map(candidates, func(wlInfo **workload.Info) string {
+					return (*wlInfo).Obj.Name
+				})))
+			}
+
 			frsNeedPreemption := sets.New(resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU})
-			candidates, err := evaluator.Candidates(snapshot, wlInfo, frsNeedPreemption)
-			if err != nil || tc.wantError != "" {
-				gotError := ""
+			// The triggers are evaluated in the order in which the preemption algorithm
+			// reaches them, each one after the candidates of the preceding ones have
+			// been preempted. Removing them from the snapshot is what keeps a workload
+			// selected by several triggers from being offered twice.
+			gotTiers := map[string][]string{}
+			var gotErr error
+			for _, trigger := range []kueue.PreemptionConfigActivationTrigger{
+				kueue.Always,
+				kueue.InsufficientQuota,
+				kueue.QuotaFeasibleAndInsufficientTopology,
+			} {
+				candidates, err := evaluator.Candidates(snapshot, wlInfo, frsNeedPreemption, trigger)
 				if err != nil {
-					gotError = err.Error()
+					gotErr = err
+					break
+				}
+				gotTiers[string(trigger)] = names(candidates)
+				for _, candidate := range candidates {
+					snapshot.RemoveWorkload(candidate)
+				}
+			}
+			if gotErr != nil || tc.wantError != "" {
+				gotError := ""
+				if gotErr != nil {
+					gotError = gotErr.Error()
 				}
 				if diff := cmp.Diff(tc.wantError, gotError, cmpopts.EquateEmpty()); diff != "" {
 					t.Errorf("Candidates() error (-want +got):\n%s", diff)
@@ -626,21 +653,10 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				return
 			}
 
-			// Candidates are not ordered, so compare them as sorted lists.
-			names := func(candidates []*workload.Info) []string {
-				return slices.Sorted(slices.Values(utilslices.Map(candidates, func(wlInfo **workload.Info) string {
-					return (*wlInfo).Obj.Name
-				})))
-			}
-			gotTiers := map[string][]string{
-				"Always":                               names(candidates.Always),
-				"InsufficientQuota":                    names(candidates.InsufficientQuota),
-				"QuotaFeasibleAndInsufficientTopology": names(candidates.QuotaFeasibleAndInsufficientTopology),
-			}
 			wantTiers := map[string][]string{
-				"Always":                               slices.Sorted(slices.Values(tc.wantCandidates)),
-				"InsufficientQuota":                    slices.Sorted(slices.Values(tc.wantQuotaCandidates)),
-				"QuotaFeasibleAndInsufficientTopology": slices.Sorted(slices.Values(tc.wantTopologyCandidates)),
+				string(kueue.Always):                               slices.Sorted(slices.Values(tc.wantCandidates)),
+				string(kueue.InsufficientQuota):                    slices.Sorted(slices.Values(tc.wantQuotaCandidates)),
+				string(kueue.QuotaFeasibleAndInsufficientTopology): slices.Sorted(slices.Values(tc.wantTopologyCandidates)),
 			}
 			if diff := cmp.Diff(wantTiers, gotTiers, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Selected candidates (-want,+got):\n%s", diff)

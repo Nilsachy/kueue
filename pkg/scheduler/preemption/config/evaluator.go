@@ -18,6 +18,7 @@ package config
 
 import (
 	"context"
+	"slices"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,7 +35,9 @@ import (
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
-type preemptionEvaluator struct {
+// PreemptionEvaluator selects the preemption candidates of a PreemptionConfig, for one
+// trigger at a time.
+type PreemptionEvaluator struct {
 	ctx    context.Context
 	log    logr.Logger
 	clock  clock.Clock
@@ -48,8 +51,8 @@ func NewPreemptionEvaluator(
 	clock clock.Clock,
 	config kueue.PreemptionConfig,
 	reader client.Reader,
-) *preemptionEvaluator {
-	return &preemptionEvaluator{
+) *PreemptionEvaluator {
+	return &PreemptionEvaluator{
 		ctx:    ctx,
 		log:    log,
 		clock:  clock,
@@ -58,77 +61,40 @@ func NewPreemptionEvaluator(
 	}
 }
 
-// TieredCandidates holds the candidates selected by the rules of a PreemptionConfig,
-// grouped by the trigger of the rule that selected them. The candidates of a tier are
-// only considered once the candidates of the preceding tiers, along with the candidates
-// of the classical or Fair Sharing preemption, are not enough to admit the preemptor.
-type TieredCandidates struct {
-	// Always holds the candidates that are always considered.
-	Always []*workload.Info
-	// InsufficientQuota holds the candidates that are only considered if there is not
-	// enough quota to admit the preemptor.
-	InsufficientQuota []*workload.Info
-	// QuotaFeasibleAndInsufficientTopology holds the candidates that are only considered if
-	// there is enough quota to admit the preemptor, but no topology assignment can be
-	// found.
-	QuotaFeasibleAndInsufficientTopology []*workload.Info
+// HasRulesFor returns whether any rule of the PreemptionConfig is activated by one of
+// the given triggers. It only inspects the configuration, never the snapshot, and is
+// therefore cheap enough to guard the candidate evaluation.
+func (p *PreemptionEvaluator) HasRulesFor(triggers ...kueue.PreemptionConfigActivationTrigger) bool {
+	for _, rule := range p.config.Spec.Rules {
+		if slices.Contains(triggers, rule.ActivationPolicy.Trigger) {
+			return true
+		}
+	}
+	return false
 }
 
-// Empty returns true if no rule selected any candidate.
-func (t TieredCandidates) Empty() bool {
-	return len(t.Always) == 0 && t.ConditionalTiersEmpty()
-}
-
-// ConditionalTiersEmpty returns true if no rule of the tiers which are conditionally
-// reached, so every tier but Always, selected any candidate.
-func (t TieredCandidates) ConditionalTiersEmpty() bool {
-	return len(t.InsufficientQuota) == 0 && len(t.QuotaFeasibleAndInsufficientTopology) == 0
-}
-
-// Candidates returns the workloads selected as preemption candidates by the rules of
-// the PreemptionConfig, grouped by the trigger of the rule that selected them.
-// A workload selected by rules of several tiers is only returned for the first tier
-// selecting it, as preempting it in an earlier tier makes it unavailable for the
-// following ones.
-func (p *preemptionEvaluator) Candidates(
+// Candidates returns the workloads selected as preemption candidates by the rules of the
+// PreemptionConfig activated by the given trigger, deduplicated across the rules and
+// selectors of the trigger.
+//
+// The candidates are the ones present in the snapshot at the time of the call. Since
+// RemoveWorkload drops a workload from the ClusterQueue of the snapshot, a caller
+// evaluating a trigger after having preempted some workloads only gets the candidates
+// still available to it. In particular, this is what keeps a workload selected by
+// several triggers from being returned twice: by the time a conditional trigger is
+// evaluated, the preemption algorithm has exhausted the candidates of the Always
+// trigger, so those are no longer in the snapshot.
+func (p *PreemptionEvaluator) Candidates(
 	snapshot *schdcache.Snapshot,
 	preemptor *workload.Info,
 	flavorsNeedPreemption sets.Set[resources.FlavorResource],
-) (TieredCandidates, error) {
-	// A workload selected by rules of several tiers is only kept in the first tier
-	// selecting it, so the tiers have to be evaluated in the order in which their
-	// candidates are considered.
-	seen := sets.New[workload.Reference]()
-	forTier := func(trigger kueue.PreemptionConfigActivationTrigger) ([]*workload.Info, error) {
-		return p.candidatesForTier(snapshot, preemptor, flavorsNeedPreemption, trigger, seen)
-	}
-	var tieredCandidates TieredCandidates
-	var err error
-	if tieredCandidates.Always, err = forTier(kueue.Always); err != nil {
-		return TieredCandidates{}, err
-	}
-	if tieredCandidates.InsufficientQuota, err = forTier(kueue.InsufficientQuota); err != nil {
-		return TieredCandidates{}, err
-	}
-	if tieredCandidates.QuotaFeasibleAndInsufficientTopology, err = forTier(kueue.QuotaFeasibleAndInsufficientTopology); err != nil {
-		return TieredCandidates{}, err
-	}
-	return tieredCandidates, nil
-}
-
-// candidatesForTier returns the candidates selected by the rules activated by the
-// given trigger. The workloads already selected for a preceding tier, tracked in seen,
-// are skipped, and the returned ones are added to it.
-func (p *preemptionEvaluator) candidatesForTier(
-	snapshot *schdcache.Snapshot,
-	preemptor *workload.Info,
-	flavorsNeedPreemption sets.Set[resources.FlavorResource],
-	tier kueue.PreemptionConfigActivationTrigger,
-	seen sets.Set[workload.Reference],
+	trigger kueue.PreemptionConfigActivationTrigger,
 ) ([]*workload.Info, error) {
 	var candidates []*workload.Info
+	// Several rules, or several selectors of a rule, can select the same workload.
+	seen := sets.New[workload.Reference]()
 	for _, rule := range p.config.Spec.Rules {
-		if rule.ActivationPolicy.Trigger != tier {
+		if rule.ActivationPolicy.Trigger != trigger {
 			continue
 		}
 		matches, err := p.matchesPreemptor(rule, preemptor)
@@ -185,7 +151,7 @@ func matchesWorkload(filter *filters.CandidateFilters, wl *workload.Info) bool {
 // matchesPreemptor returns whether the rule can be used for the given preemptor.
 // Whether the tier of the rule is reached is decided by the preemption algorithm, as
 // it depends on the candidates preempted for the preceding tiers.
-func (p *preemptionEvaluator) matchesPreemptor(rule kueue.PreemptionConfigPreemptionRule, wlInfo *workload.Info) (bool, error) {
+func (p *PreemptionEvaluator) matchesPreemptor(rule kueue.PreemptionConfigPreemptionRule, wlInfo *workload.Info) (bool, error) {
 	if rule.PreemptorSelector == nil {
 		// An unset selector accepts all the preemptors. Note that this differs from
 		// LabelSelectorAsSelector(nil), which matches nothing.
