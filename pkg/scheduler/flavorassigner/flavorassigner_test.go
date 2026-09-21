@@ -3060,6 +3060,11 @@ func TestAssignFlavors(t *testing.T) {
 			},
 			clusterQueue: *utiltestingapi.MakeClusterQueue("test-clusterqueue").
 				Annotation(kueue.PreemptionConfigAnnotation, "test-preemption-config").
+				Preemption(kueue.ClusterQueuePreemption{
+					BorrowWithinCohort: &kueue.BorrowWithinCohort{
+						Policy: kueue.BorrowWithinCohortPolicyNever,
+					},
+				}).
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas("one").
 						ResourceQuotaWrapper(corev1.ResourceCPU).NominalQuota("0").BorrowingLimit("2").Append().
@@ -3077,6 +3082,13 @@ func TestAssignFlavors(t *testing.T) {
 			secondaryClusterQueueUsage: resources.FlavorResourceQuantities{
 				{Flavor: "one", Resource: corev1.ResourceCPU}: resources.NewAmount(2_000),
 			},
+			// The int is the height of the lowest cohort subtree that fits the request
+			// after preemption, as returned by FindHeightOfLowestSubtreeThatFits: 0
+			// means the ClusterQueue fits it on its own nominal quota, anything greater
+			// means it only fits by borrowing from an ancestor. Here it is 1 because
+			// the ClusterQueue has no nominal quota of its own, so the 2 CPU can only
+			// come from test-cohort. That is what makes this case exercise the
+			// borrowing relaxation granted by the PreemptionConfig.
 			simulationResult: map[resources.FlavorResource]simulationResultForFlavor{
 				{Flavor: "one", Resource: corev1.ResourceCPU}: {preemptioncommon.Reclaim, 1},
 			},
@@ -3110,6 +3122,11 @@ func TestAssignFlavors(t *testing.T) {
 			},
 			clusterQueue: *utiltestingapi.MakeClusterQueue("test-clusterqueue").
 				Annotation(kueue.PreemptionConfigAnnotation, "test-preemption-config").
+				Preemption(kueue.ClusterQueuePreemption{
+					BorrowWithinCohort: &kueue.BorrowWithinCohort{
+						Policy: kueue.BorrowWithinCohortPolicyNever,
+					},
+				}).
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas("one").
 						ResourceQuotaWrapper(corev1.ResourceCPU).NominalQuota("0").BorrowingLimit("2").Append().
