@@ -3049,7 +3049,7 @@ func TestAssignFlavors(t *testing.T) {
 				NoFitReason: "WaitingForQuota",
 			},
 		},
-		"preemption requiring borrowing is attempted when the ClusterQueue references a PreemptionConfig": {
+		"ClusterQueue referencing a PreemptionConfig and borrowWithinCohort Never may preempt while borrowing": {
 			featureGates: map[featuregate.Feature]bool{
 				features.ConfigurablePreemption: true,
 			},
@@ -3099,7 +3099,7 @@ func TestAssignFlavors(t *testing.T) {
 				}}},
 			},
 		},
-		"preemption requiring borrowing is not attempted when the ConfigurablePreemption feature is disabled": {
+		"ClusterQueue referencing a PreemptionConfig and borrowWithinCohort Never may not preempt while borrowing when ConfigurablePreemption is disabled": {
 			featureGates: map[featuregate.Feature]bool{
 				features.ConfigurablePreemption: false,
 			},
