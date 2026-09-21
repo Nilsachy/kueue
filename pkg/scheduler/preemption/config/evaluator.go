@@ -149,8 +149,8 @@ func matchesWorkload(filter *filters.CandidateFilters, wl *workload.Info) bool {
 }
 
 // matchesPreemptor returns whether the rule can be used for the given preemptor.
-// Whether the tier of the rule is reached is decided by the preemption algorithm, as
-// it depends on the candidates preempted for the preceding tiers.
+// Whether the trigger of the rule is activated is decided by the preemption algorithm,
+// as it depends on the candidates preempted for the preceding triggers.
 func (p *PreemptionEvaluator) matchesPreemptor(rule kueue.PreemptionConfigPreemptionRule, wlInfo *workload.Info) (bool, error) {
 	if rule.PreemptorSelector == nil {
 		// An unset selector accepts all the preemptors. Note that this differs from

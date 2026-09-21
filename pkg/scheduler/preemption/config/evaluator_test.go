@@ -71,12 +71,12 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 		preemptorWl   *kueue.Workload
 		preemptorCq   kueue.ClusterQueueReference
 		client        client.Reader
-		// wantCandidates holds the candidates of the Always tier.
+		// wantCandidates holds the candidates of the Always trigger.
 		wantCandidates []string
-		// wantQuotaCandidates holds the candidates of the InsufficientQuota tier.
+		// wantQuotaCandidates holds the candidates of the InsufficientQuota trigger.
 		wantQuotaCandidates []string
 		// wantTopologyCandidates holds the candidates of the
-		// QuotaFeasibleAndInsufficientTopology tier.
+		// QuotaFeasibleAndInsufficientTopology trigger.
 		wantTopologyCandidates []string
 		wantError              string
 	}{
@@ -173,7 +173,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1", "a2"},
 		},
-		"selects candidates for the Always tier": {
+		"selects candidates for the Always trigger": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
@@ -198,7 +198,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1", "a2"},
 		},
-		"selects candidates for the InsufficientQuota tier": {
+		"selects candidates for the InsufficientQuota trigger": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
@@ -223,7 +223,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			preemptorCq:         "a",
 			wantQuotaCandidates: []string{"a1", "a2"},
 		},
-		"selects candidates for the QuotaFeasibleAndInsufficientTopology tier": {
+		"selects candidates for the QuotaFeasibleAndInsufficientTopology trigger": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
@@ -340,7 +340,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1", "b1", "c1"},
 		},
-		"returns candidates grouped by the tier of the rule selecting them": {
+		"returns candidates grouped by the trigger of the rule selecting them": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
@@ -625,7 +625,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			// reaches them, each one after the candidates of the preceding ones have
 			// been preempted. Removing them from the snapshot is what keeps a workload
 			// selected by several triggers from being offered twice.
-			gotTiers := map[string][]string{}
+			gotByTrigger := map[string][]string{}
 			var gotErr error
 			for _, trigger := range []kueue.PreemptionConfigActivationTrigger{
 				kueue.Always,
@@ -637,7 +637,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 					gotErr = err
 					break
 				}
-				gotTiers[string(trigger)] = names(candidates)
+				gotByTrigger[string(trigger)] = names(candidates)
 				for _, candidate := range candidates {
 					snapshot.RemoveWorkload(candidate)
 				}
@@ -653,12 +653,12 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				return
 			}
 
-			wantTiers := map[string][]string{
+			wantByTrigger := map[string][]string{
 				string(kueue.Always):                               slices.Sorted(slices.Values(tc.wantCandidates)),
 				string(kueue.InsufficientQuota):                    slices.Sorted(slices.Values(tc.wantQuotaCandidates)),
 				string(kueue.QuotaFeasibleAndInsufficientTopology): slices.Sorted(slices.Values(tc.wantTopologyCandidates)),
 			}
-			if diff := cmp.Diff(wantTiers, gotTiers, cmpopts.EquateEmpty()); diff != "" {
+			if diff := cmp.Diff(wantByTrigger, gotByTrigger, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Selected candidates (-want,+got):\n%s", diff)
 			}
 		})
