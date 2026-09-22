@@ -492,9 +492,9 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a3").
 					SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
-			preemptorCq:    "a",
-			wantCandidates: []string{"a1"},
+			preemptorWl:         unitWl.Clone().Name("a-incoming").Obj(),
+			preemptorCq:         "a",
+			wantQuotaCandidates: []string{"a1"},
 		},
 		"ClusterQueueSelector filters candidates by matching ClusterQueue labels": {
 			clusterQueues: []*kueue.ClusterQueue{
@@ -533,9 +533,9 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
-			preemptorCq:    "a",
-			wantCandidates: []string{"a1"},
+			preemptorWl:         unitWl.Clone().Name("a-incoming").Obj(),
+			preemptorCq:         "a",
+			wantQuotaCandidates: []string{"a1"},
 		},
 		"multi-selector deduplication": {
 			clusterQueues: baseCqs,
