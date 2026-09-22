@@ -358,7 +358,7 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 		}
 		if features.Enabled(features.ConfigurablePreemption) {
 			var fits bool
-			fits, targets = p.mergeWithCheckFitConfigurableCandidates(preemptionCtx, targets, attemptOpts.borrowing)
+			fits, targets = p.mergeConfigurableCandidatesWithFitCheck(preemptionCtx, targets, attemptOpts.borrowing)
 			if fits {
 				targets = fillBackWorkloads(preemptionCtx, targets, attemptOpts.borrowing)
 				restoreSnapshot(preemptionCtx.snapshot, targets)
@@ -572,7 +572,7 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 		// preempted regardless of what the Fair Sharing rules allow, as the
 		// configuration selects them explicitly, so they are only considered once the
 		// strategies failed to admit the workload.
-		fits, targets = p.mergeWithCheckFitConfigurableCandidates(preemptionCtx, targets, true)
+		fits, targets = p.mergeConfigurableCandidatesWithFitCheck(preemptionCtx, targets, true)
 	}
 	if !fits {
 		if logV := preemptionCtx.log.V(6); logV.Enabled() {

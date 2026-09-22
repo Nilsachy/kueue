@@ -42,9 +42,9 @@ import (
 //
 // It is reached from three places only:
 //   - getTargets resolves the evaluator, once per attempt;
-//   - classicalPreemptions calls mergeWithCheckFitConfigurableCandidates once its
+//   - classicalPreemptions calls mergeConfigurableCandidatesWithFitCheck once its
 //     candidate walk failed to admit the workload;
-//   - fairPreemptions calls mergeWithCheckFitConfigurableCandidates once both its
+//   - fairPreemptions calls mergeConfigurableCandidatesWithFitCheck once both its
 //     strategies failed.
 //
 // TODO(#15893): delete this file, along with those call sites, once
@@ -102,7 +102,7 @@ func hasConditionalConfigurableRules(preemptionCtx *preemptionCtx) bool {
 		preemptionCtx.configurableEvaluator.HasRulesFor(kueue.InsufficientQuota, kueue.QuotaFeasibleAndInsufficientTopology)
 }
 
-// mergeWithCheckFitConfigurableCandidates preempts the candidates of the PreemptionConfig
+// mergeConfigurableCandidatesWithFitCheck preempts the candidates of the PreemptionConfig
 // on behalf of the running preemption algorithm, merging them with the targets already
 // selected, re-sorting the combined targets when the workload fits, and returning
 // (fits, targets).
@@ -110,7 +110,7 @@ func hasConditionalConfigurableRules(preemptionCtx *preemptionCtx) bool {
 // The candidates of a trigger are preempted before the next one is evaluated, so the fit
 // checks observe the state the preceding triggers left behind, and the evaluator no
 // longer returns the candidates they consumed.
-func (p *Preemptor) mergeWithCheckFitConfigurableCandidates(preemptionCtx *preemptionCtx, targets []*Target, allowBorrowing bool) (bool, []*Target) {
+func (p *Preemptor) mergeConfigurableCandidatesWithFitCheck(preemptionCtx *preemptionCtx, targets []*Target, allowBorrowing bool) (bool, []*Target) {
 	if !hasConfigurableRules(preemptionCtx) {
 		return false, targets
 	}
