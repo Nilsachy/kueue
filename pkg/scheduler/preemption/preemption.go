@@ -700,7 +700,7 @@ func workloadTopologyFits(preemptionCtx *preemptionCtx) bool {
 }
 
 // fitChecker tells whether the incoming workload fits with the current state of the
-// snapshot. It distinguishes a lack of quota from a blocked topology, as the tiers of
+// snapshot. It distinguishes a lack of quota from a blocked topology, as the triggers of
 // the ConfigurablePreemption rules are activated by the reason the workload doesn't fit.
 // fits is always the conjunction of quota and topology, which
 // extendedConfigurableCandidates relies on to know that a failing fits means a

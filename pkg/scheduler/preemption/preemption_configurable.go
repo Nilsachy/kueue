@@ -35,12 +35,12 @@ import (
 // are activated, and merging the candidates their rules select into the targets of the
 // running algorithm, without ever selecting the same workload twice.
 //
-// Both algorithms walk the same tiers, in the order the API defines them: the Always
+// Both algorithms apply the same triggers, in the order the API defines them: the Always
 // trigger first, as a baseline, then InsufficientQuota while the quota is not sufficient,
 // and finally QuotaFeasibleAndInsufficientTopology once the quota is sufficient but no
 // topology assignment can be found. They differ in when they reach them: the classical
-// algorithm merges the tiers into the candidates it orders and walks, while Fair Sharing
-// preempts them as a last resort, once its strategies failed.
+// algorithm merges the candidates of every trigger into the set it orders and walks,
+// while Fair Sharing preempts them as a last resort, once its strategies failed.
 //
 // It is reached from three places only:
 //   - getTargets resolves the evaluator, once per attempt;
@@ -112,11 +112,11 @@ func hasConditionalConfigurableRules(preemptionCtx *preemptionCtx) bool {
 //
 // A conditional trigger is activated by asking whether the incoming workload would be
 // admitted if every candidate collected so far were preempted, which is what the API
-// defines the tiers against.
+// defines the triggers against.
 //
 // The probes leave the snapshot as they found it, so unlike a phase running after the
 // walk, the evaluator still sees the candidates gathered so far and returns them again:
-// the tiers are therefore deduplicated explicitly.
+// the candidates of the triggers are therefore deduplicated explicitly.
 func (p *Preemptor) classicalConfigurableCandidates(preemptionCtx *preemptionCtx, hierarchicalReclaimCtx *classical.HierarchicalPreemptionCtx) []*workload.Info {
 	if !hasConfigurableRules(preemptionCtx) {
 		return nil
@@ -186,20 +186,20 @@ func probeFullPreemption(preemptionCtx *preemptionCtx, candidates []*workload.In
 // already selected, and returns (fits, targets).
 //
 // Unlike the classical algorithm, which probes the activation of the conditional triggers
-// on a snapshot it leaves untouched, each tier is preempted before the next one is
-// evaluated, so the fit checks observe the state the preceding tiers left behind, and the
-// evaluator no longer returns the candidates they consumed.
+// on a snapshot it leaves untouched, the candidates of a trigger are preempted before the
+// next one is evaluated, so the fit checks observe the state the preceding triggers left
+// behind, and the evaluator no longer returns the candidates they consumed.
 func (p *Preemptor) preemptFairSharingConfigurableCandidates(preemptionCtx *preemptionCtx, targets []*Target) (bool, []*Target) {
 	if !hasConfigurableRules(preemptionCtx) {
 		return false, targets
 	}
 	check := fairSharingFitChecker(preemptionCtx)
-	fits, targets := p.preemptConfigurableTier(preemptionCtx, targets, kueue.Always, check.fits)
+	fits, targets := p.preemptConfigurableCandidates(preemptionCtx, targets, kueue.Always, check.fits)
 	if fits || !hasConditionalConfigurableRules(preemptionCtx) {
 		return fits, targets
 	}
 	if !check.quota() {
-		fits, targets = p.preemptConfigurableTier(preemptionCtx, targets, kueue.InsufficientQuota, check.fits)
+		fits, targets = p.preemptConfigurableCandidates(preemptionCtx, targets, kueue.InsufficientQuota, check.fits)
 		if fits || !check.quota() {
 			// The topology trigger requires a feasible quota, so it must not be
 			// applied to a workload the quota alone keeps out.
@@ -208,24 +208,24 @@ func (p *Preemptor) preemptFairSharingConfigurableCandidates(preemptionCtx *pree
 	}
 	// The quota is sufficient while the workload still doesn't fit, and fits is the
 	// conjunction of the two checks, so the topology is what keeps the workload out.
-	return p.preemptConfigurableTier(preemptionCtx, targets, kueue.QuotaFeasibleAndInsufficientTopology, check.fits)
+	return p.preemptConfigurableCandidates(preemptionCtx, targets, kueue.QuotaFeasibleAndInsufficientTopology, check.fits)
 }
 
-// preemptConfigurableTier removes the candidates selected by the rules of the given
+// preemptConfigurableCandidates removes the candidates selected by the rules of the given
 // trigger from the snapshot and appends them to the targets, from the most to the least
 // preferred one, stopping as soon as fits returns true.
 // The candidates are preempted regardless of what the Fair Sharing rules allow, as the
 // PreemptionConfig selects them explicitly, and are thus reported with the
 // ConfigurablePreemption reason.
-func (p *Preemptor) preemptConfigurableTier(preemptionCtx *preemptionCtx, targets []*Target, trigger kueue.PreemptionConfigActivationTrigger, fits func() bool) (bool, []*Target) {
+func (p *Preemptor) preemptConfigurableCandidates(preemptionCtx *preemptionCtx, targets []*Target, trigger kueue.PreemptionConfigActivationTrigger, fits func() bool) (bool, []*Target) {
 	preempted := preemptedKeys(targets)
 	for _, candidate := range p.configurableCandidates(preemptionCtx, trigger) {
-		// The tier is evaluated against the snapshot the preceding phases already
-		// mutated, and RemoveWorkload drops the workload from the very map the
-		// evaluator iterates, so a target cannot be selected twice. Kept as a safety
-		// net: preempting a workload again would leave a duplicate target behind,
-		// which restoreSnapshot would then add back once per copy. Skipping preserves
-		// the order of the remaining candidates.
+		// The candidates of the trigger are evaluated against the snapshot the
+		// preceding phases already mutated, and RemoveWorkload drops the workload
+		// from the very map the evaluator iterates, so a target cannot be selected
+		// twice. Kept as a safety net: preempting a workload again would leave a
+		// duplicate target behind, which restoreSnapshot would then add back once
+		// per copy. Skipping preserves the order of the remaining candidates.
 		if preempted.Has(workload.Key(candidate.Obj)) {
 			continue
 		}
