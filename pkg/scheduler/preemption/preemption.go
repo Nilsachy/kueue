@@ -518,12 +518,12 @@ func runSecondFsStrategy(retryCandidates []*workload.Info, preemptionCtx *preemp
 
 func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []fairsharing.Strategy) []*Target {
 	candidates := p.findCandidates(preemptionCtx.log, preemptionCtx.preemptor.Obj, preemptionCtx.preemptorCQ, preemptionCtx.frsNeedPreemption)
-	// TODO(#15893): remove the interleaving of the configurable candidates with the Fair
-	// Sharing strategies once ConfigurablePreemption covers Fair Sharing and the two
-	// become mutually exclusive.
+	// TODO(#15893): remove the configurable candidates phase from the Fair Sharing
+	// algorithm once ConfigurablePreemption covers Fair Sharing and the two become
+	// mutually exclusive.
 	//
-	// The configurable candidates are extended upfront after DRS simulation is active,
-	// so their emptiness isn't known here; the presence of a rule is enough to keep going.
+	// The configurable candidates are only evaluated once the strategies failed, so
+	// their emptiness isn't known here; the presence of a rule is enough to keep going.
 	if len(candidates) == 0 && !hasConfigurableRules(preemptionCtx) {
 		return nil
 	}
@@ -542,17 +542,8 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 
 	// DRS values must include incoming workload.
 	revertSimulation := preemptionCtx.preemptorCQ.SimulateUsageAddition(preemptionCtx.workloadUsage)
-	check := fairSharingFitChecker(preemptionCtx)
-	configurableCandidates := p.fairSharingConfigurableCandidates(preemptionCtx, candidates, check)
 
 	fits, targets, retryCandidates := runFirstFsStrategy(preemptionCtx, candidates, strategies[0])
-	if !fits {
-		// The configurable candidates are preempted regardless of the Fair Sharing rules,
-		// as they are explicitly selected by the PreemptionConfig. They are preferred
-		// over rule S2-b, which is a last resort for the candidates the first strategy
-		// rejected.
-		fits, targets = preemptConfigurableCandidates(preemptionCtx, targets, configurableCandidates, check.fits)
-	}
 	if !fits && len(strategies) > 1 {
 		if logV := preemptionCtx.log.V(6); logV.Enabled() {
 			logV.Info("First fair sharing strategy failed, trying second strategy",
@@ -560,7 +551,14 @@ func (p *Preemptor) fairPreemptions(preemptionCtx *preemptionCtx, strategies []f
 				"targets", logging.GetObjectReferences(targets),
 				"retryCandidates", workload.References(retryCandidates))
 		}
-		fits, targets = runSecondFsStrategy(remainingCandidates(retryCandidates, targets), preemptionCtx, targets)
+		fits, targets = runSecondFsStrategy(retryCandidates, preemptionCtx, targets)
+	}
+	if !fits {
+		// The candidates selected by the PreemptionConfig are a last resort: they are
+		// preempted regardless of what the Fair Sharing rules allow, as the
+		// configuration selects them explicitly, so they are only considered once the
+		// strategies failed to admit the workload.
+		fits, targets = p.preemptFairSharingConfigurableCandidates(preemptionCtx, targets)
 	}
 
 	revertSimulation()

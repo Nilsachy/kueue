@@ -912,6 +912,55 @@ func TestConfigurablePreemptions(t *testing.T) {
 				"/b1": kueue.InCohortReclamationReason,
 			},
 		},
+		"fair sharing: the second strategy is preferred over the configurable candidates": {
+			clusterQueues: []*kueue.ClusterQueue{
+				utiltestingapi.MakeClusterQueue("a").
+					Cohort("all").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "3").Obj()).
+					Preemption(kueue.ClusterQueuePreemption{
+						ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+					}).
+					Annotation(kueue.PreemptionConfigAnnotation, defaultConfigName).
+					Obj(),
+				utiltestingapi.MakeClusterQueue("b").
+					Cohort("all").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "3").Obj()).
+					Obj(),
+				utiltestingapi.MakeClusterQueue("c").
+					Cohort("all").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "3").Obj()).
+					Obj(),
+			},
+			config:      withinParentCohortTierConfig,
+			fairSharing: &config.FairSharing{},
+			admitted: []kueue.Workload{
+				// b borrows 2 CPUs, so b1 is a Fair Sharing candidate, but only rule
+				// S2-b can preempt it: preempting b1 would leave b with a share
+				// lower than the one a reaches with the incoming workload, while a
+				// stays below the initial share of b.
+				*utiltestingapi.MakeWorkload("b1", "").Request(corev1.ResourceCPU, "5").
+					SimpleReserveQuota("b", "default", now).Obj(),
+				// c is not borrowing, so the Fair Sharing ordering prunes c1: it is
+				// only reachable through the configurable rules, even though
+				// preempting it would admit the incoming workload on its own.
+				*utiltestingapi.MakeWorkload("c1", "").Request(corev1.ResourceCPU, "3").
+					Label("preemption-tier", "1").
+					SimpleReserveQuota("c", "default", now).Obj(),
+			},
+			incoming: utiltestingapi.MakeWorkload("a_incoming", "").
+				Request(corev1.ResourceCPU, "4").
+				Label("preemption-tier", "5").Obj(),
+			targetCQ: "a",
+			// The configurable candidates are a last resort, reached only once both
+			// strategies failed, so c1 is spared.
+			wantPreempted: sets.New("/b1"),
+			wantReasons: map[string]string{
+				"/b1": kueue.InCohortFairSharingReason,
+			},
+		},
 		"fair sharing: strategies preempt the remaining targets": {
 			clusterQueues: []*kueue.ClusterQueue{
 				utiltestingapi.MakeClusterQueue("a").
@@ -1035,6 +1084,35 @@ func TestConfigurablePreemptions(t *testing.T) {
 			wantPreempted: sets.New("/a1"),
 			wantReasons: map[string]string{
 				"/a1": "ConfigurablePreemption",
+			},
+		},
+		"fair sharing: InsufficientQuota tier extends the candidates of the Always tier": {
+			clusterQueues: baseCQs,
+			config:        tieredConfig,
+			fairSharing:   &config.FairSharing{},
+			admitted: []kueue.Workload{
+				// The ClusterQueue doesn't allow preemption, so the Fair Sharing
+				// algorithm has no candidate of its own. a1 belongs to a lower tier,
+				// so it is selected by the Always rule, while a2 is only selected by
+				// the InsufficientQuota rule. The candidate ordering prefers a2, as
+				// it has a lower priority, so it would be preempted first if the
+				// tiers were considered at once.
+				*unitWl.Clone().Name("a1").
+					Priority(100).
+					Label("preemption-tier", "1").
+					SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").
+					Priority(10).
+					SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming: unitWl.Clone().Name("a_incoming").
+				Request(corev1.ResourceCPU, "2").
+				Label("preemption-tier", "5").Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New("/a1", "/a2"),
+			wantReasons: map[string]string{
+				"/a1": "ConfigurablePreemption",
+				"/a2": "ConfigurablePreemption",
 			},
 		},
 		"QuotaFeasibleAndInsufficientTopology tier is used when the quota fits but no topology assignment is found": {
