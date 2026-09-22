@@ -23,6 +23,7 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -92,7 +93,7 @@ func (p *PreemptionEvaluator) Candidates(
 ) ([]*workload.Info, error) {
 	var candidates []*workload.Info
 	// Several rules, or several selectors of a rule, can select the same workload.
-	seen := sets.New[workload.Reference]()
+	seen := sets.New[types.UID]()
 	for _, rule := range p.config.Spec.Rules {
 		if rule.ActivationPolicy.Trigger != trigger {
 			continue
@@ -117,9 +118,8 @@ func (p *PreemptionEvaluator) Candidates(
 				}
 
 				for _, wlInfo := range targetCq.Workloads {
-					key := workload.Key(wlInfo.Obj)
-					if !seen.Has(key) && matchesWorkload(&filter, wlInfo) && classical.WorkloadUsesResources(wlInfo, flavorsNeedPreemption) {
-						seen.Insert(key)
+					if !seen.Has(wlInfo.Obj.UID) && matchesWorkload(&filter, wlInfo) && classical.WorkloadUsesResources(wlInfo, flavorsNeedPreemption) {
+						seen.Insert(wlInfo.Obj.UID)
 						candidates = append(candidates, wlInfo)
 					}
 				}
