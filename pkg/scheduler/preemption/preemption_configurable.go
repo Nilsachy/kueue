@@ -161,9 +161,7 @@ func (p *Preemptor) extendedConfigurableCandidates(preemptionCtx *preemptionCtx,
 // change; the candidates must therefore be free of duplicates.
 // It is a single check over the whole set, never one per candidate: the walk which
 // follows keeps its early exit, so its cost stays proportional to the number of targets
-// rather than to the number of candidates. Checking once per candidate instead was
-// measured at up to 7.6x the allocations on a ClusterQueue holding 1000 preemptible
-// workloads, and would run the topology solver as many times.
+// rather than to the number of candidates.
 func probeFullPreemption(preemptionCtx *preemptionCtx, candidates []*workload.Info, check func() bool) bool {
 	for _, candidate := range candidates {
 		preemptionCtx.snapshot.RemoveWorkload(candidate)
