@@ -19,7 +19,6 @@ package preemption
 import (
 	"slices"
 
-	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -103,49 +102,43 @@ func hasConditionalConfigurableRules(preemptionCtx *preemptionCtx) bool {
 }
 
 // mergeConfigurableCandidatesWithFitCheck preempts the candidates of the PreemptionConfig
-// on behalf of the running preemption algorithm, appending them to the targets already
-// selected, and returning (fits, targets).
+// on behalf of the running preemption algorithm and returns (fits, configurableTargets).
 //
-// The candidates of a trigger are preempted before the next one is evaluated, so the fit
-// checks observe the state the preceding triggers left behind, and the evaluator no
-// longer returns the candidates they consumed.
-func (p *Preemptor) mergeConfigurableCandidatesWithFitCheck(preemptionCtx *preemptionCtx, targets []*Target, allowBorrowing bool) (bool, []*Target) {
+// Because preceding phases and triggers remove their targets from the snapshot, the fit
+// checks observe the state the preceding phases left behind, and the evaluator only
+// returns candidates still admitted in the snapshot.
+func (p *Preemptor) mergeConfigurableCandidatesWithFitCheck(preemptionCtx *preemptionCtx, allowBorrowing bool) (bool, []*Target) {
 	if !hasConfigurableRules(preemptionCtx) {
-		return false, targets
+		return false, nil
 	}
-	fits, targets := p.preemptConfigurableCandidates(preemptionCtx, targets, kueue.Always, allowBorrowing)
+	fits, targets := p.preemptConfigurableCandidates(preemptionCtx, kueue.Always, allowBorrowing)
 	if !fits && hasConditionalConfigurableRules(preemptionCtx) {
 		if !workloadQuotaFits(preemptionCtx, allowBorrowing) {
-			fits, targets = p.preemptConfigurableCandidates(preemptionCtx, targets, kueue.InsufficientQuota, allowBorrowing)
+			var moreTargets []*Target
+			fits, moreTargets = p.preemptConfigurableCandidates(preemptionCtx, kueue.InsufficientQuota, allowBorrowing)
+			targets = append(targets, moreTargets...)
 		}
 		if !fits && workloadQuotaFits(preemptionCtx, allowBorrowing) {
 			// The topology trigger requires a feasible quota, so it is only applied once
 			// the quota fits while the workload still doesn't fit (meaning topology is
 			// what keeps the workload out).
-			fits, targets = p.preemptConfigurableCandidates(preemptionCtx, targets, kueue.QuotaFeasibleAndInsufficientTopology, allowBorrowing)
+			var moreTargets []*Target
+			fits, moreTargets = p.preemptConfigurableCandidates(preemptionCtx, kueue.QuotaFeasibleAndInsufficientTopology, allowBorrowing)
+			targets = append(targets, moreTargets...)
 		}
 	}
 	return fits, targets
 }
 
 // preemptConfigurableCandidates removes the candidates selected by the rules of the given
-// trigger from the snapshot and appends them to the targets, from the most to the least
-// preferred one, stopping as soon as workloadFits returns true.
+// trigger from the snapshot and returns them, from the most to the least preferred one,
+// stopping as soon as workloadFits returns true.
 // The candidates are preempted regardless of what the classical or Fair Sharing rules
 // allow, as the PreemptionConfig selects them explicitly, and are thus reported with the
 // ConfigurablePreemption reason.
-func (p *Preemptor) preemptConfigurableCandidates(preemptionCtx *preemptionCtx, targets []*Target, trigger kueue.PreemptionConfigActivationTrigger, allowBorrowing bool) (bool, []*Target) {
-	preempted := preemptedKeys(targets)
+func (p *Preemptor) preemptConfigurableCandidates(preemptionCtx *preemptionCtx, trigger kueue.PreemptionConfigActivationTrigger, allowBorrowing bool) (bool, []*Target) {
+	var targets []*Target
 	for _, candidate := range p.configurableCandidates(preemptionCtx, trigger) {
-		// The candidates of the trigger are evaluated against the snapshot the
-		// preceding phases already mutated, and RemoveWorkload drops the workload
-		// from the very map the evaluator iterates, so a target cannot be selected
-		// twice. Kept as a safety net: preempting a workload again would leave a
-		// duplicate target behind, which restoreSnapshot would then add back once
-		// per copy. Skipping preserves the order of the remaining candidates.
-		if preempted.Has(workload.Key(candidate.Obj)) {
-			continue
-		}
 		preemptionCtx.snapshot.RemoveWorkload(candidate)
 		targets = append(targets, &Target{
 			WorkloadInfo: candidate,
@@ -157,13 +150,4 @@ func (p *Preemptor) preemptConfigurableCandidates(preemptionCtx *preemptionCtx, 
 		}
 	}
 	return false, targets
-}
-
-// preemptedKeys returns the keys of the workloads already selected as targets.
-func preemptedKeys(targets []*Target) sets.Set[workload.Reference] {
-	preempted := sets.New[workload.Reference]()
-	for _, target := range targets {
-		preempted.Insert(workload.Key(target.WorkloadInfo.Obj))
-	}
-	return preempted
 }
