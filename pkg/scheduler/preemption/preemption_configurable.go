@@ -188,6 +188,9 @@ func workloadKeys(candidates []*workload.Info) sets.Set[workload.Reference] {
 // the PreemptionConfig, deduplicated against candidates and extended upfront with the
 // conditional tiers if the workload doesn't fit with the given check.
 func (p *Preemptor) extendConfigurableCandidates(preemptionCtx *preemptionCtx, candidates []*workload.Info, check fitChecker) []*workload.Info {
+	if !hasConfigurableRules(preemptionCtx) {
+		return nil
+	}
 	baseline := p.baselineConfigurableCandidates(preemptionCtx)
 	collected := slices.Clone(candidates)
 	known := workloadKeys(collected)
@@ -204,9 +207,6 @@ func (p *Preemptor) extendConfigurableCandidates(preemptionCtx *preemptionCtx, c
 // the PreemptionConfig, deduplicated against the candidates of the classical
 // algorithm and extended upfront with the conditional tiers if the workload doesn't fit.
 func (p *Preemptor) classicalConfigurableCandidates(preemptionCtx *preemptionCtx, hierarchicalReclaimCtx *classical.HierarchicalPreemptionCtx) []*workload.Info {
-	if !hasConfigurableRules(preemptionCtx) {
-		return nil
-	}
 	var classicalCandidates []*workload.Info
 	if hasConditionalConfigurableRules(preemptionCtx) {
 		classicalCandidates = classical.FindCandidates(hierarchicalReclaimCtx)
