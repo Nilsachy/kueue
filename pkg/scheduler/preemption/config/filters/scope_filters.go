@@ -22,30 +22,30 @@ import (
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
-// sameClusterQueueFilter permits only candidate workloads residing in the exact same ClusterQueue as the preemptor.
-type sameClusterQueueFilter struct {
+// withinClusterQueueFilter permits only candidate workloads residing in the exact same ClusterQueue as the preemptor.
+type withinClusterQueueFilter struct {
 	preemptorCQ kueue.ClusterQueueReference
 }
 
-// NewSameClusterQueueFilter creates a ClusterQueueFilter permitting only the specified ClusterQueue.
-func NewSameClusterQueueFilter(preemptorCQ kueue.ClusterQueueReference) ClusterQueueFilter {
-	return &sameClusterQueueFilter{preemptorCQ: preemptorCQ}
+// NewWithinClusterQueueFilter creates a ClusterQueueFilter permitting only the specified ClusterQueue.
+func NewWithinClusterQueueFilter(preemptorCQ kueue.ClusterQueueReference) ClusterQueueFilter {
+	return &withinClusterQueueFilter{preemptorCQ: preemptorCQ}
 }
 
-func (f *sameClusterQueueFilter) Matches(cq *schdcache.ClusterQueueSnapshot) bool {
+func (f *withinClusterQueueFilter) Matches(cq *schdcache.ClusterQueueSnapshot) bool {
 	return cq.Name == f.preemptorCQ
 }
 
-// sameCohortFilter permits ClusterQueues sharing the immediate parent Cohort, or the preemptor's own ClusterQueue.
-type sameCohortFilter struct {
+// withinParentCohortFilter permits ClusterQueues sharing the immediate parent Cohort, or the preemptor's own ClusterQueue.
+type withinParentCohortFilter struct {
 	preemptorCQ     kueue.ClusterQueueReference
 	preemptorCohort kueue.CohortReference
 	hasCohort       bool
 }
 
-// NewSameCohortFilter encapsulates preemptor cohort resolution and caches the match target.
-func NewSameCohortFilter(preemptorCQ kueue.ClusterQueueReference, snapshot *schdcache.Snapshot) ClusterQueueFilter {
-	f := &sameCohortFilter{preemptorCQ: preemptorCQ}
+// NewWithinParentCohortFilter encapsulates preemptor cohort resolution and caches the match target.
+func NewWithinParentCohortFilter(preemptorCQ kueue.ClusterQueueReference, snapshot *schdcache.Snapshot) ClusterQueueFilter {
+	f := &withinParentCohortFilter{preemptorCQ: preemptorCQ}
 	if snapshotCQ := snapshot.ClusterQueue(preemptorCQ); snapshotCQ != nil && snapshotCQ.HasParent() {
 		f.preemptorCohort = snapshotCQ.Parent().GetName()
 		f.hasCohort = true
@@ -53,7 +53,7 @@ func NewSameCohortFilter(preemptorCQ kueue.ClusterQueueReference, snapshot *schd
 	return f
 }
 
-func (f *sameCohortFilter) Matches(cq *schdcache.ClusterQueueSnapshot) bool {
+func (f *withinParentCohortFilter) Matches(cq *schdcache.ClusterQueueSnapshot) bool {
 	// The preemptor's own ClusterQueue is always within the same cohort boundary.
 	if cq.Name == f.preemptorCQ {
 		return true
@@ -64,17 +64,17 @@ func (f *sameCohortFilter) Matches(cq *schdcache.ClusterQueueSnapshot) bool {
 	return cq.Parent().GetName() == f.preemptorCohort
 }
 
-// sameCohortTreeFilter permits ClusterQueues in the same Cohort Tree (sharing the root Cohort ancestor),
+// withinCohortTreeFilter permits ClusterQueues in the same Cohort Tree (sharing the root Cohort ancestor),
 // or the preemptor's own ClusterQueue.
-type sameCohortTreeFilter struct {
+type withinCohortTreeFilter struct {
 	preemptorCQ         kueue.ClusterQueueReference
 	preemptorRootCohort kueue.CohortReference
 	hasCohort           bool
 }
 
-// NewSameCohortTreeFilter encapsulates preemptor root cohort resolution and caches the match target.
-func NewSameCohortTreeFilter(preemptorCQ kueue.ClusterQueueReference, snapshot *schdcache.Snapshot) ClusterQueueFilter {
-	f := &sameCohortTreeFilter{preemptorCQ: preemptorCQ}
+// NewWithinCohortTreeFilter encapsulates preemptor root cohort resolution and caches the match target.
+func NewWithinCohortTreeFilter(preemptorCQ kueue.ClusterQueueReference, snapshot *schdcache.Snapshot) ClusterQueueFilter {
+	f := &withinCohortTreeFilter{preemptorCQ: preemptorCQ}
 	if snapshotCQ := snapshot.ClusterQueue(preemptorCQ); snapshotCQ != nil && snapshotCQ.HasParent() {
 		if root := snapshotCQ.Parent().Root(); root != nil {
 			f.preemptorRootCohort = root.GetName()
@@ -84,7 +84,7 @@ func NewSameCohortTreeFilter(preemptorCQ kueue.ClusterQueueReference, snapshot *
 	return f
 }
 
-func (f *sameCohortTreeFilter) Matches(cq *schdcache.ClusterQueueSnapshot) bool {
+func (f *withinCohortTreeFilter) Matches(cq *schdcache.ClusterQueueSnapshot) bool {
 	// The preemptor's own ClusterQueue is always within the same cohort tree boundary.
 	if cq.Name == f.preemptorCQ {
 		return true
@@ -96,20 +96,20 @@ func (f *sameCohortTreeFilter) Matches(cq *schdcache.ClusterQueueSnapshot) bool 
 	return root != nil && root.GetName() == f.preemptorRootCohort
 }
 
-// sameLocalQueueFilter is a WorkloadFilter matching workloads in the exact same Namespace and LocalQueue.
-type sameLocalQueueFilter struct {
+// withinLocalQueueFilter is a WorkloadFilter matching workloads in the exact same Namespace and LocalQueue.
+type withinLocalQueueFilter struct {
 	namespace string
 	queueName kueue.LocalQueueName
 }
 
-// NewSameLocalQueueFilter creates a WorkloadFilter matching the given Namespace and LocalQueue.
-func NewSameLocalQueueFilter(namespace string, queueName kueue.LocalQueueName) WorkloadFilter {
-	return &sameLocalQueueFilter{
+// NewWithinLocalQueueFilter creates a WorkloadFilter matching the given Namespace and LocalQueue.
+func NewWithinLocalQueueFilter(namespace string, queueName kueue.LocalQueueName) WorkloadFilter {
+	return &withinLocalQueueFilter{
 		namespace: namespace,
 		queueName: queueName,
 	}
 }
 
-func (f *sameLocalQueueFilter) Matches(wl *workload.Info) bool {
+func (f *withinLocalQueueFilter) Matches(wl *workload.Info) bool {
 	return wl.Obj.Namespace == f.namespace && wl.Obj.Spec.QueueName == f.queueName
 }

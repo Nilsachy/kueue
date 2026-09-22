@@ -25,11 +25,11 @@ import (
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
-// NewCandidateFilters compiles PreemptionCandidateSelector rules into CandidateFilters & RejectAll boolean (if preemptor doesn't pass).
+// NewCandidateFilters compiles PreemptionConfigPreemptionCandidateSelector rules into CandidateFilters & RejectAll boolean (if preemptor doesn't pass).
 // It returns (CandidateFilters{}, true) if the selector fails to compile and all the candidates should be rejected.
 func NewCandidateFilters(
 	log logr.Logger,
-	selector *kueue.PreemptionCandidateSelector,
+	selector *kueue.PreemptionConfigPreemptionCandidateSelector,
 	preemptor *workload.Info,
 	snapshot *schdcache.Snapshot,
 ) (CandidateFilters, bool) {
@@ -37,7 +37,7 @@ func NewCandidateFilters(
 		return CandidateFilters{}, false
 	}
 
-	cqRelationFilters, wlRelationFilters, ok := buildRelationFilters(log, selector.RelationRequirement, preemptor, snapshot)
+	cqScopeFilters, wlScopeFilters, ok := buildScopeFilters(log, selector.Scope, preemptor, snapshot)
 	if !ok {
 		return CandidateFilters{}, true
 	}
@@ -53,13 +53,13 @@ func NewCandidateFilters(
 	wlPriorityFilters := buildPriorityFilters(log, selector, preemptor)
 
 	var cqFilters []ClusterQueueFilter
-	cqFilters = append(cqFilters, cqRelationFilters...)
+	cqFilters = append(cqFilters, cqScopeFilters...)
 	if cqLabelFilter != nil {
 		cqFilters = append(cqFilters, cqLabelFilter)
 	}
 
 	var wlFilters []WorkloadFilter
-	wlFilters = append(wlFilters, wlRelationFilters...)
+	wlFilters = append(wlFilters, wlScopeFilters...)
 	if wlLabelFilter != nil {
 		wlFilters = append(wlFilters, wlLabelFilter)
 	}
@@ -72,40 +72,40 @@ func NewCandidateFilters(
 	}, false
 }
 
-func buildRelationFilters(
+func buildScopeFilters(
 	log logr.Logger,
-	relation kueue.PreemptionRelationConstraint,
+	scope kueue.PreemptionConfigPreemptionQueueScope,
 	preemptor *workload.Info,
 	snapshot *schdcache.Snapshot,
 ) ([]ClusterQueueFilter, []WorkloadFilter, bool) {
-	switch relation {
-	case kueue.SameLocalQueue:
+	switch scope {
+	case kueue.WithinLocalQueue:
 		// CQ Level: Prune all other ClusterQueues
 		// WL Level: Narrow down workloads to those matching exactly same LocalQueue
-		return []ClusterQueueFilter{NewSameClusterQueueFilter(preemptor.ClusterQueue)},
-			[]WorkloadFilter{NewSameLocalQueueFilter(preemptor.Obj.Namespace, preemptor.Obj.Spec.QueueName)}, true
+		return []ClusterQueueFilter{NewWithinClusterQueueFilter(preemptor.ClusterQueue)},
+			[]WorkloadFilter{NewWithinLocalQueueFilter(preemptor.Obj.Namespace, preemptor.Obj.Spec.QueueName)}, true
 
-	case kueue.SameClusterQueue:
-		return []ClusterQueueFilter{NewSameClusterQueueFilter(preemptor.ClusterQueue)}, nil, true
+	case kueue.WithinClusterQueue:
+		return []ClusterQueueFilter{NewWithinClusterQueueFilter(preemptor.ClusterQueue)}, nil, true
 
-	case kueue.SameCohort:
-		return []ClusterQueueFilter{NewSameCohortFilter(preemptor.ClusterQueue, snapshot)}, nil, true
+	case kueue.WithinParentCohort:
+		return []ClusterQueueFilter{NewWithinParentCohortFilter(preemptor.ClusterQueue, snapshot)}, nil, true
 
-	case kueue.SameCohortTree:
-		return []ClusterQueueFilter{NewSameCohortTreeFilter(preemptor.ClusterQueue, snapshot)}, nil, true
+	case kueue.WithinCohortTree:
+		return []ClusterQueueFilter{NewWithinCohortTreeFilter(preemptor.ClusterQueue, snapshot)}, nil, true
 
 	case kueue.AnyClusterQueue:
 		return nil, nil, true
 
 	default:
-		log.V(3).Info("Unsupported or unhandled relation constraint evaluated; 0 candidates permitted", "relation", relation)
+		log.V(3).Info("Unsupported or unhandled candidate scope evaluated; 0 candidates permitted", "scope", scope)
 		return nil, nil, false
 	}
 }
 
 func buildNumericLabelFilters(
 	log logr.Logger,
-	labels []kueue.NumericLabelConstraint,
+	labels []kueue.PreemptionConfigNumericLabelConstraint,
 	preemptor *workload.Info,
 ) []WorkloadFilter {
 	if len(labels) == 0 {
@@ -138,7 +138,7 @@ func buildWorkloadLabelFilter(
 
 func buildPriorityFilters(
 	log logr.Logger,
-	selector *kueue.PreemptionCandidateSelector,
+	selector *kueue.PreemptionConfigPreemptionCandidateSelector,
 	preemptor *workload.Info,
 ) []WorkloadFilter {
 	if selector == nil {

@@ -77,7 +77,7 @@ func (p *preemptionEvaluator) Candidates(
 			continue
 		}
 
-		for _, selector := range rule.Candidates {
+		for _, selector := range rule.CandidateSelectors {
 			filter, rejectAll := filters.NewCandidateFilters(p.log, &selector, preemptor, snapshot)
 			if rejectAll {
 				continue
@@ -119,13 +119,18 @@ func matchesWorkload(filter *filters.CandidateFilters, wl *workload.Info) bool {
 	return true
 }
 
-func (p *preemptionEvaluator) isActiveTrigger(rule kueue.PreemptionRule, wlInfo *workload.Info) (bool, error) {
-	condition := meta.FindStatusCondition(wlInfo.Obj.Status.Conditions, string(rule.Trigger))
+func (p *preemptionEvaluator) isActiveTrigger(rule kueue.PreemptionConfigPreemptionRule, wlInfo *workload.Info) (bool, error) {
+	condition := meta.FindStatusCondition(wlInfo.Obj.Status.Conditions, string(rule.ActivationPolicy.Trigger))
 	if condition == nil || condition.Status == metav1.ConditionFalse {
 		return false, nil
 	}
 
-	selector, err := metav1.LabelSelectorAsSelector(&rule.MatchingPreemptorWorkloads)
+	if rule.PreemptorSelector == nil {
+		// An unset selector accepts all the preemptors. Note that this differs from
+		// LabelSelectorAsSelector(nil), which matches nothing.
+		return true, nil
+	}
+	selector, err := metav1.LabelSelectorAsSelector(rule.PreemptorSelector)
 	if err != nil {
 		return false, err
 	}

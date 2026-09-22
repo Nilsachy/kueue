@@ -27,21 +27,21 @@ import (
 
 type relativeWorkloadPriorityFilter struct {
 	log               logr.Logger
-	relation          kueue.RelativeConstraint
+	comparison        kueue.NumericComparison
 	preemptorPriority int64
 }
 
 // NewRelativeWorkloadPriorityFilter creates a WorkloadFilter to evaluate candidate workloads
 // based on relative workload priority compared against the preemptor workload.
 // The effective priority (accounting for priority boost if configured) is used for comparison.
-func NewRelativeWorkloadPriorityFilter(log logr.Logger, relation kueue.RelativeConstraint, preemptor *workload.Info) WorkloadFilter {
-	filterLog := log.WithValues("filter", "RelativeWorkloadPriority", "relation", relation)
+func NewRelativeWorkloadPriorityFilter(log logr.Logger, comparison kueue.NumericComparison, preemptor *workload.Info) WorkloadFilter {
+	filterLog := log.WithValues("filter", "RelativeWorkloadPriority", "comparison", comparison)
 	preemptorLog := filterLog.WithValues("preemptor", klog.KObj(preemptor.Obj))
 	preemptorPriority := priority.EffectivePriority(preemptorLog, preemptor.Obj)
 
 	return &relativeWorkloadPriorityFilter{
 		log:               filterLog,
-		relation:          relation,
+		comparison:        comparison,
 		preemptorPriority: preemptorPriority,
 	}
 }
@@ -50,5 +50,5 @@ func NewRelativeWorkloadPriorityFilter(log logr.Logger, relation kueue.RelativeC
 func (f *relativeWorkloadPriorityFilter) Matches(wl *workload.Info) bool {
 	candLog := f.log.WithValues("candidate", klog.KObj(wl.Obj))
 	candPriority := priority.EffectivePriority(candLog, wl.Obj)
-	return matchesRelation(candLog, &f.relation, candPriority, f.preemptorPriority)
+	return matchesComparison(candLog, &f.comparison, candPriority, f.preemptorPriority)
 }

@@ -2084,169 +2084,25 @@ If unspecified, defaults to <code>Manual</code>.</li>
 </tbody>
 </table>
 
-## `NumericLabelConstraint`     {#kueue-x-k8s-io-v1beta2-NumericLabelConstraint}
-    
-
-**Appears in:**
-
-- [PreemptionCandidateSelector](#kueue-x-k8s-io-v1beta2-PreemptionCandidateSelector)
-
-
-<p>NumericLabelConstraint describes the configurations for filtering a numerical label.
-For example, this can be used to filter candidates based on topology domains, such as the
-&quot;number of TPUs&quot;. If a preemptor requires a large topology, you can set key=&quot;tpu-size&quot;
-and relation=&quot;Lower&quot;, allowing it to preempt smaller workloads rather than disrupting
-other large topology workloads.
-Please note that you should remember to append the designated label to the list of labels
-copied to the workload via the Kueue main configuration.
-If neither Relation, MinValue, nor MaxValue are specified, the constraint checks only that
-candidate workloads possess the designated label key with a valid integer.</p>
-
-
-<table class="table">
-<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
-<tbody>
-    
-  
-<tr><td><code>key</code> <B>[Required]</B><br/>
-<code>string</code>
-</td>
-<td>
-   <p>Key is the label key that stores the integer value.</p>
-</td>
-</tr>
-<tr><td><code>defaultValue</code><br/>
-<code>int32</code>
-</td>
-<td>
-   <p>DefaultValue is used when a workload does not have the label key
-or value under the key cannot be parsed as an integer.
-If not specified workloads without the label or
-with label value not parsable as int are treated as incomparable by relation (if specified),
-and therefore excluded from preemption candidates.</p>
-</td>
-</tr>
-<tr><td><code>relation</code><br/>
-<a href="#kueue-x-k8s-io-v1beta2-RelativeConstraint"><code>RelativeConstraint</code></a>
-</td>
-<td>
-   <p>Relation defines how the preemptor compares to the candidate.</p>
-</td>
-</tr>
-<tr><td><code>minValue</code><br/>
-<code>int32</code>
-</td>
-<td>
-   <p>MinValue specifies the lowest label value a workload must have to be considered for preemption.
-If not specified, no lower bound is enforced.</p>
-</td>
-</tr>
-<tr><td><code>maxValue</code><br/>
-<code>int32</code>
-</td>
-<td>
-   <p>MaxValue specifies the highest label value a workload must have to be considered for preemption.
-If not specified, no upper bound is enforced.</p>
-</td>
-</tr>
-</tbody>
-</table>
-
-## `Order`     {#kueue-x-k8s-io-v1beta2-Order}
-    
-
-**Appears in:**
-
-- [PreemptionConfigSpec](#kueue-x-k8s-io-v1beta2-PreemptionConfigSpec)
-
-
-<p>Order specifies a single sorting criterion and direction for ordering preemption candidates.
-Multiple Order criteria are evaluated sequentially as a multi-key comparator chain,
-with ties broken by Workload UID for deterministic ordering.</p>
-
-
-<table class="table">
-<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
-<tbody>
-    
-  
-<tr><td><code>orderingField</code> <B>[Required]</B><br/>
-<a href="#kueue-x-k8s-io-v1beta2-OrderingField"><code>OrderingField</code></a>
-</td>
-<td>
-   <p>OrderingField specifies the field to sort preemption candidates by.</p>
-</td>
-</tr>
-<tr><td><code>direction</code><br/>
-<a href="#kueue-x-k8s-io-v1beta2-OrderingDirection"><code>OrderingDirection</code></a>
-</td>
-<td>
-   <p>Direction specifies the sorting direction (Ascending or Descending).
-Defaults to Ascending if not specified.</p>
-</td>
-</tr>
-</tbody>
-</table>
-
-## `OrderingDirection`     {#kueue-x-k8s-io-v1beta2-OrderingDirection}
+## `NumericComparison`     {#kueue-x-k8s-io-v1beta2-NumericComparison}
     
 (Alias of `string`)
 
 **Appears in:**
 
-- [Order](#kueue-x-k8s-io-v1beta2-Order)
+- [PreemptionConfigNumericLabelConstraint](#kueue-x-k8s-io-v1beta2-PreemptionConfigNumericLabelConstraint)
+
+- [PreemptionConfigPreemptionCandidateSelector](#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionCandidateSelector)
 
 
-<p>OrderingDirection specifies the sort direction for a candidate ordering criterion.
+<p>NumericComparison defines how a specified numeric property (e.g., priority or custom numeric
+label value) of the candidate compares to the same property of the preemptor.
 Possible values are:</p>
 <ul>
-<li>&quot;Ascending&quot;: sort in natural ascending order (default).</li>
-<li>&quot;Descending&quot;: sort in reverse/descending order.</li>
-</ul>
-
-
-
-
-## `OrderingField`     {#kueue-x-k8s-io-v1beta2-OrderingField}
-    
-(Alias of `string`)
-
-**Appears in:**
-
-- [Order](#kueue-x-k8s-io-v1beta2-Order)
-
-
-<p>OrderingField specifies the property of candidate workloads to sort by during preemption evaluation.
-Supported values are:</p>
-<ul>
-<li>
-<p>&quot;Priority&quot;: orders workloads by effective priority (accounting for priority boost if enabled).</p>
-<ul>
-<li>Ascending (default): lowest priority first.</li>
-<li>Descending: highest priority first.</li>
-</ul>
-</li>
-<li>
-<p>&quot;AdmissionTimestamp&quot;: orders workloads by the timestamp when quota was reserved (admitted).</p>
-<ul>
-<li>Ascending (default): oldest admitted workloads first and most recently admitted last.</li>
-<li>Descending: most recently admitted workloads first and oldest admitted last.</li>
-</ul>
-</li>
-<li>
-<p>&quot;IsOtherCQ&quot;: orders workloads based on whether they belong to a different ClusterQueue than the preemptor.</p>
-<ul>
-<li>Ascending (default): workloads from the same ClusterQueue first, followed by other ClusterQueues.</li>
-<li>Descending: workloads from other ClusterQueues first, followed by the same ClusterQueue.</li>
-</ul>
-</li>
-<li>
-<p>&quot;IsOtherCohort&quot;: orders workloads based on whether they belong to a different Cohort than the preemptor.</p>
-<ul>
-<li>Ascending (default): workloads from the same Cohort first, followed by other Cohorts.</li>
-<li>Descending: workloads from other Cohorts first, followed by the same Cohort.</li>
-</ul>
-</li>
+<li>&quot;LessThan&quot;: permits preemption if candidate field value &lt; preemptor field value</li>
+<li>&quot;GreaterThan&quot;: permits preemption if candidate field value &gt; preemptor field value</li>
+<li>&quot;LessThanOrEqual&quot;: permits preemption if candidate field value &lt;= preemptor field value</li>
+<li>&quot;GreaterThanOrEqual&quot;: permits preemption if candidate field value &gt;= preemptor field value</li>
 </ul>
 
 
@@ -2808,15 +2664,15 @@ result in failure during workload admission.</p>
 </tbody>
 </table>
 
-## `PreemptionCandidateSelector`     {#kueue-x-k8s-io-v1beta2-PreemptionCandidateSelector}
+## `PreemptionConfigActivationPolicy`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigActivationPolicy}
     
 
 **Appears in:**
 
-- [PreemptionRule](#kueue-x-k8s-io-v1beta2-PreemptionRule)
+- [PreemptionConfigPreemptionRule](#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionRule)
 
 
-<p>PreemptionCandidateSelector defines the selection criteria for workloads that are candidates for preemption.</p>
+<p>PreemptionConfigActivationPolicy defines when a preemption rule contributes candidates.</p>
 
 
 <table class="table">
@@ -2824,50 +2680,258 @@ result in failure during workload admission.</p>
 <tbody>
     
   
-<tr><td><code>relationRequirement</code> <B>[Required]</B><br/>
-<a href="#kueue-x-k8s-io-v1beta2-PreemptionRelationConstraint"><code>PreemptionRelationConstraint</code></a>
+<tr><td><code>trigger</code> <B>[Required]</B><br/>
+<a href="#kueue-x-k8s-io-v1beta2-PreemptionConfigActivationTrigger"><code>PreemptionConfigActivationTrigger</code></a>
 </td>
 <td>
-   <p>RelationRequirement specifies the queue or cohort relation boundary to the preemptor workload.</p>
+   <p>trigger specifies the prerequisite for contributing candidates.</p>
+<p>Possible values are:</p>
+<ul>
+<li>Always: contributes matching candidates unconditionally.</li>
+<li>InsufficientQuota: contributes matching candidates only if preempting baseline candidates
+does not yield sufficient quota to admit the preemptor workload.</li>
+<li>QuotaFeasibleAndInsufficientTopology: contributes matching candidates only if quota
+is feasible for the entire preemptor under at least one eligible flavor assignment
+(after preempting baseline candidates and any candidates from InsufficientQuota rules),
+but the workload cannot be admitted because no eligible flavor assignment satisfies
+its topology requirements.</li>
+</ul>
+<p>Baseline candidates are the deduplicated union of:</p>
+<ul>
+<li>candidates selected by the preemptor's ClusterQueue.spec.preemption policy;</li>
+<li>candidates selected by applicable rules in the referenced PreemptionConfig
+whose activationPolicy.trigger is Always.</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+
+## `PreemptionConfigActivationTrigger`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigActivationTrigger}
+    
+(Alias of `string`)
+
+**Appears in:**
+
+- [PreemptionConfigActivationPolicy](#kueue-x-k8s-io-v1beta2-PreemptionConfigActivationPolicy)
+
+
+<p>PreemptionConfigActivationTrigger specifies when preemption rule should be treated as active.</p>
+
+
+
+
+## `PreemptionConfigNumericLabelConstraint`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigNumericLabelConstraint}
+    
+
+**Appears in:**
+
+- [PreemptionConfigPreemptionCandidateSelector](#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionCandidateSelector)
+
+
+<p>PreemptionConfigNumericLabelConstraint describes the rule for filtering a custom numerical label.
+For example, this can be used to filter candidates based on the label describing the
+required topology domain size, such as the &quot;number of TPUs&quot;.
+If a user has a label &quot;number-of-tpus&quot; that describes the number of TPUs required in a single cube,
+it can be used to create a rule that selects only workloads requiring smaller cube slices
+by defining comparison: &quot;LessThan&quot;. Such a configuration would allow preemption of &quot;smaller&quot;
+workloads, to achieve better cluster utilization and decrease fragmentation.
+Please note that those labels are not copied out of the box from job-like objects.
+You should remember to append the designated labels to the list of labels
+copied to the workload via the Kueue main configuration if you wish to use a custom label.
+As Kubernetes label values cannot start with '-', integer labels are always non-negative.
+A negative fallbackValue can thus ensure workloads without the label compare smaller than any
+labeled workload if this is desired.
+If neither Comparison, MinValue, nor MaxValue are specified, the constraint checks only that
+candidate workloads possess the designated label key with a valid integer.</p>
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>key</code> <B>[Required]</B><br/>
+<code>string</code>
+</td>
+<td>
+   <p>key is the label key that stores the integer value in the workload that will
+be used for candidate selection.</p>
+</td>
+</tr>
+<tr><td><code>fallbackValue</code><br/>
+<code>int32</code>
+</td>
+<td>
+   <p>fallbackValue is used when a workload does not have the label key
+or the value under the key cannot be parsed as an integer.
+If not specified, workloads without the label or
+with a label value not parsable as int are treated as incomparable,
+and therefore excluded from preemption candidates.</p>
+</td>
+</tr>
+<tr><td><code>comparison</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-NumericComparison"><code>NumericComparison</code></a>
+</td>
+<td>
+   <p>comparison defines how the candidate's label value compares to the preemptor's.</p>
+</td>
+</tr>
+<tr><td><code>minValue</code><br/>
+<code>int32</code>
+</td>
+<td>
+   <p>minValue specifies the lowest label value a candidate workload can have to be
+considered for preemption.
+If not specified, no lower bound is enforced.</p>
+</td>
+</tr>
+<tr><td><code>maxValue</code><br/>
+<code>int32</code>
+</td>
+<td>
+   <p>maxValue specifies the highest label value a candidate workload can have to be
+considered for preemption.
+If not specified, no upper bound is enforced.</p>
+</td>
+</tr>
+</tbody>
+</table>
+
+## `PreemptionConfigPreemptionCandidateSelector`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionCandidateSelector}
+    
+
+**Appears in:**
+
+- [PreemptionConfigPreemptionRule](#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionRule)
+
+
+<p>PreemptionConfigPreemptionCandidateSelector defines the selection criteria for workloads that are candidates for preemption.</p>
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>scope</code> <B>[Required]</B><br/>
+<a href="#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionQueueScope"><code>PreemptionConfigPreemptionQueueScope</code></a>
+</td>
+<td>
+   <p>scope specifies the queue or cohort relation boundary of candidates to the preemptor workload.</p>
+</td>
+</tr>
+<tr><td><code>clusterQueueSelector</code><br/>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta"><code>k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector</code></a>
+</td>
+<td>
+   <p>clusterQueueSelector defines label selector constraints on candidate ClusterQueues.
+Accepts all if not set.</p>
 </td>
 </tr>
 <tr><td><code>numericLabels</code><br/>
-<a href="#kueue-x-k8s-io-v1beta2-NumericLabelConstraint"><code>[]NumericLabelConstraint</code></a>
+<a href="#kueue-x-k8s-io-v1beta2-PreemptionConfigNumericLabelConstraint"><code>[]PreemptionConfigNumericLabelConstraint</code></a>
 </td>
 <td>
-   <p>NumericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
-Multiple numeric label constraints are joined using logical AND (all must be satisfied).
-If not set does not add any additional candidate filtering.</p>
+   <p>numericLabels defines rules for filtering candidates using custom numeric labels on the Workload resource.
+Multiple numeric labels are joined using AND-rule (all have to be satisfied).
+Accepts all if not set.</p>
 </td>
 </tr>
-<tr><td><code>preemptingWorkloadPrioritySelector</code><br/>
+<tr><td><code>labelSelector</code><br/>
 <a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta"><code>k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector</code></a>
 </td>
 <td>
-   <p>PreemptingWorkloadPrioritySelector specifies a label selector matching labels
-on the preemptor workload's PriorityClass or WorkloadPriorityClass.
-Workloads whose priority class matches the selector can trigger preemption of candidates defined by this selector.
-If not specified or empty, all preemptor priority classes are accepted.</p>
-</td>
-</tr>
-<tr><td><code>candidateWorkloadPrioritySelector</code><br/>
-<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta"><code>k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector</code></a>
-</td>
-<td>
-   <p>CandidateWorkloadPrioritySelector specifies a label selector matching labels
-on the candidate workload's PriorityClass or WorkloadPriorityClass.
-Workloads whose priority class matches the selector are permitted as preemption candidates.
-If not specified or empty, all candidate priority classes are accepted.</p>
+   <p>labelSelector defines label selector constraints on candidate Workloads.
+Accepts all if not set.</p>
 </td>
 </tr>
 <tr><td><code>relativeWorkloadPriority</code><br/>
-<a href="#kueue-x-k8s-io-v1beta2-RelativeConstraint"><code>RelativeConstraint</code></a>
+<a href="#kueue-x-k8s-io-v1beta2-NumericComparison"><code>NumericComparison</code></a>
 </td>
 <td>
-   <p>RelativeWorkloadPriority defines how the preemptor's priority compares to the candidate's priority.
-For example &quot;Lower&quot; means that only workloads with lower priority will be allowed as preemption candidates.
+   <p>relativeWorkloadPriority defines how the candidate's priority compares to the preemptor's priority.
+For example &quot;LessThan&quot; means that only workloads with lower priority will be allowed as preemption candidates.
 The comparison is made using effective priority (accounting for priority boost if enabled).
 If nil, no relative priority check is enforced.</p>
+<p>TODO(#13396): replace with the <code>priority</code> field of the KEP
+(PreemptionConfigPriorityConstraint, carrying an explicit Base/Boosted mode) once the
+priority boost semantics are settled.</p>
+</td>
+</tr>
+</tbody>
+</table>
+
+## `PreemptionConfigPreemptionQueueScope`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionQueueScope}
+    
+(Alias of `string`)
+
+**Appears in:**
+
+- [PreemptionConfigPreemptionCandidateSelector](#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionCandidateSelector)
+
+
+<p>PreemptionConfigPreemptionQueueScope specifies the relational boundary between
+the preempting workload's queue and candidate workloads' queues.
+Possible values are:</p>
+<ul>
+<li>&quot;WithinLocalQueue&quot;: restricts preemption candidates to workloads submitted to the exact same LocalQueue (matching name and namespace).</li>
+<li>&quot;WithinClusterQueue&quot;: restricts preemption candidates to workloads submitted to the same ClusterQueue as the preemptor.</li>
+<li>&quot;WithinParentCohort&quot;: restricts preemption candidates to workloads in ClusterQueues that share the exact same immediate direct Cohort, as well as workloads in the preemptor's own ClusterQueue (even if standalone).</li>
+<li>&quot;WithinCohortTree&quot;: restricts preemption candidates to workloads in ClusterQueues that belong to the same Cohort Tree (sharing the same root ancestor Cohort), as well as workloads in the preemptor's own ClusterQueue (even if standalone).</li>
+<li>&quot;AnyClusterQueue&quot;: places no relationship restrictions on preemption candidates.</li>
+</ul>
+
+
+
+
+## `PreemptionConfigPreemptionRule`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionRule}
+    
+
+**Appears in:**
+
+- [PreemptionConfigSpec](#kueue-x-k8s-io-v1beta2-PreemptionConfigSpec)
+
+
+<p>PreemptionConfigPreemptionRule defines a single rule under which preemptions can be triggered
+and the candidate workloads eligible for preemption.</p>
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>name</code> <B>[Required]</B><br/>
+<code>string</code>
+</td>
+<td>
+   <p>Name is the identifier of the preemption rule.</p>
+</td>
+</tr>
+<tr><td><code>preemptorSelector</code><br/>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta"><code>k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector</code></a>
+</td>
+<td>
+   <p>PreemptorSelector is a label selector indicating which workloads can trigger preemptions
+using this rule. Accepts all workloads if not set.</p>
+</td>
+</tr>
+<tr><td><code>activationPolicy</code> <B>[Required]</B><br/>
+<a href="#kueue-x-k8s-io-v1beta2-PreemptionConfigActivationPolicy"><code>PreemptionConfigActivationPolicy</code></a>
+</td>
+<td>
+   <p>activationPolicy determines when this rule contributes matching
+candidates to preemption evaluation.</p>
+</td>
+</tr>
+<tr><td><code>candidateSelectors</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionCandidateSelector"><code>[]PreemptionConfigPreemptionCandidateSelector</code></a>
+</td>
+<td>
+   <p>candidateSelectors specifies the selection rules for workloads that are candidates for preemption.
+Candidates resulting from multiple selectors are summed into one set.
+No selectors result in an empty candidate set, thereby disallowing any preemptions with this rule.</p>
 </td>
 </tr>
 </tbody>
@@ -2887,25 +2951,11 @@ If nil, no relative priority check is enforced.</p>
 <tbody>
     
   
-<tr><td><code>rules</code> <B>[Required]</B><br/>
-<a href="#kueue-x-k8s-io-v1beta2-PreemptionRule"><code>[]PreemptionRule</code></a>
+<tr><td><code>rules</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionRule"><code>[]PreemptionConfigPreemptionRule</code></a>
 </td>
 <td>
    <p>Rules to select preemption candidates.</p>
-</td>
-</tr>
-<tr><td><code>ordering</code><br/>
-<a href="#kueue-x-k8s-io-v1beta2-Order"><code>[]Order</code></a>
-</td>
-<td>
-   <p>Ordering of preemption candidates evaluated sequentially as a multi-key comparator chain.
-The order is always deterministic, as the Workload UID is used as the final tie-breaker.
-If not set, candidates will be ordered by default like this:</p>
-<ol>
-<li>Priority (Ascending: lowest priority first)</li>
-<li>AdmissionTimestamp (Descending: most recently admitted first, protecting long-running workloads)</li>
-<li>UID (Ascending: deterministic tie-breaker)</li>
-</ol>
 </td>
 </tr>
 </tbody>
@@ -2992,93 +3042,6 @@ If not set, candidates will be ordered by default like this:</p>
 **Appears in:**
 
 - [ClusterQueuePreemption](#kueue-x-k8s-io-v1beta2-ClusterQueuePreemption)
-
-
-
-
-
-## `PreemptionRelationConstraint`     {#kueue-x-k8s-io-v1beta2-PreemptionRelationConstraint}
-    
-(Alias of `string`)
-
-**Appears in:**
-
-- [PreemptionCandidateSelector](#kueue-x-k8s-io-v1beta2-PreemptionCandidateSelector)
-
-
-<p>PreemptionRelationConstraint specifies the relational boundary between
-the preempting workload's queue and candidate workloads' queues.
-Possible values are:</p>
-<ul>
-<li>&quot;SameLocalQueue&quot;: restricts preemption candidates to workloads submitted to the exact same LocalQueue (matching name and namespace).</li>
-<li>&quot;SameClusterQueue&quot;: restricts preemption candidates to workloads submitted to the same ClusterQueue as the preemptor.</li>
-<li>&quot;SameCohort&quot;: restricts preemption candidates to workloads in ClusterQueues that share the exact same immediate direct Cohort, as well as workloads in the preemptor's own ClusterQueue (even if standalone).</li>
-<li>&quot;SameCohortTree&quot;: restricts preemption candidates to workloads in ClusterQueues that belong to the same Cohort Tree (sharing the same root ancestor Cohort), as well as workloads in the preemptor's own ClusterQueue (even if standalone).</li>
-<li>&quot;AnyClusterQueue&quot;: places no relationship restrictions on preemption candidates.</li>
-</ul>
-
-
-
-
-## `PreemptionRule`     {#kueue-x-k8s-io-v1beta2-PreemptionRule}
-    
-
-**Appears in:**
-
-- [PreemptionConfigSpec](#kueue-x-k8s-io-v1beta2-PreemptionConfigSpec)
-
-
-
-<table class="table">
-<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
-<tbody>
-    
-  
-<tr><td><code>name</code> <B>[Required]</B><br/>
-<code>string</code>
-</td>
-<td>
-   <span class="text-muted">No description provided.</span></td>
-</tr>
-<tr><td><code>matchingPreemptorWorkloads</code> <B>[Required]</B><br/>
-<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta"><code>k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector</code></a>
-</td>
-<td>
-   <p>Label Selector indicating which workloads can trigger preemptions
-using this rule.</p>
-</td>
-</tr>
-<tr><td><code>trigger</code> <B>[Required]</B><br/>
-<a href="#kueue-x-k8s-io-v1beta2-PreemptionRuleTrigger"><code>PreemptionRuleTrigger</code></a>
-</td>
-<td>
-   <span class="text-muted">No description provided.</span></td>
-</tr>
-<tr><td><code>minTriggerRequiredDuration</code> <B>[Required]</B><br/>
-<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#duration-v1-meta"><code>k8s.io/apimachinery/pkg/apis/meta/v1.Duration</code></a>
-</td>
-<td>
-   <p>How long the trigger has to occur to start preempting workloads specified by candidates. 0s indicates that preemptions can be started immediately. Default is 0s.</p>
-</td>
-</tr>
-<tr><td><code>candidates</code> <B>[Required]</B><br/>
-<a href="#kueue-x-k8s-io-v1beta2-PreemptionCandidateSelector"><code>[]PreemptionCandidateSelector</code></a>
-</td>
-<td>
-   <p>Selection rules for workloads that are candidates for preemption.
-Candidates resulting from multiple selectors are summed into one set. No selectors result in empty candidate set, thereby disallowing any preemptions with this rule.</p>
-</td>
-</tr>
-</tbody>
-</table>
-
-## `PreemptionRuleTrigger`     {#kueue-x-k8s-io-v1beta2-PreemptionRuleTrigger}
-    
-(Alias of `string`)
-
-**Appears in:**
-
-- [PreemptionRule](#kueue-x-k8s-io-v1beta2-PreemptionRule)
 
 
 
@@ -3403,29 +3366,6 @@ re-queuing an evicted workload.</p>
 </tr>
 </tbody>
 </table>
-
-## `RelativeConstraint`     {#kueue-x-k8s-io-v1beta2-RelativeConstraint}
-    
-(Alias of `string`)
-
-**Appears in:**
-
-- [NumericLabelConstraint](#kueue-x-k8s-io-v1beta2-NumericLabelConstraint)
-
-- [PreemptionCandidateSelector](#kueue-x-k8s-io-v1beta2-PreemptionCandidateSelector)
-
-
-<p>RelativeConstraint defines how a specified numeric property (e.g., a label value) of the preemptor compares to the candidate.
-Possible values are:</p>
-<ul>
-<li>&quot;Lower&quot;: permits preemption if candidate &lt; preemptor</li>
-<li>&quot;Greater&quot;: permits preemption if candidate &gt; preemptor</li>
-<li>&quot;LowerOrEqual&quot;: permits preemption if candidate &lt;= preemptor</li>
-<li>&quot;GreaterOrEqual&quot;: permits preemption if candidate &gt;= preemptor</li>
-</ul>
-
-
-
 
 ## `RequeueState`     {#kueue-x-k8s-io-v1beta2-RequeueState}
     

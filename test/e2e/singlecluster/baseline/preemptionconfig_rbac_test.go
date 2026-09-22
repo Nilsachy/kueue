@@ -49,10 +49,10 @@ var _ = ginkgo.Describe("PreemptionConfig RBAC", ginkgo.Label("area:singlecluste
 			preemptionConfig := &kueue.PreemptionConfig{
 				ObjectMeta: metav1.ObjectMeta{Name: "preemptionconfig-rbac-admin"},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{{
-						Name:       "rule",
-						Trigger:    kueue.InsufficientQuota,
-						Candidates: []kueue.PreemptionCandidateSelector{{RelationRequirement: kueue.SameClusterQueue}},
+					Rules: []kueue.PreemptionConfigPreemptionRule{{
+						Name:               "rule",
+						ActivationPolicy:   kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+						CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{{Scope: kueue.WithinClusterQueue}},
 					}},
 				},
 			}
@@ -83,10 +83,10 @@ var _ = ginkgo.Describe("PreemptionConfig RBAC", ginkgo.Label("area:singlecluste
 			ginkgo.By("Updating the PreemptionConfig", func() {
 				// No Eventually: nothing else writes this object, so a retry would only hide a
 				// missing update verb behind a timeout.
-				preemptionConfig.Spec.Rules[0].Candidates[0].RelationRequirement = kueue.SameCohort
+				preemptionConfig.Spec.Rules[0].CandidateSelectors[0].Scope = kueue.WithinParentCohort
 				updated, err := preemptionConfigs.Update(ctx, preemptionConfig, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(updated.Spec.Rules[0].Candidates[0].RelationRequirement).Should(gomega.Equal(kueue.SameCohort))
+				gomega.Expect(updated.Spec.Rules[0].CandidateSelectors[0].Scope).Should(gomega.Equal(kueue.WithinParentCohort))
 				preemptionConfig = updated
 			})
 
@@ -108,10 +108,10 @@ var _ = ginkgo.Describe("PreemptionConfig RBAC", ginkgo.Label("area:singlecluste
 			preemptionConfig = &kueue.PreemptionConfig{
 				ObjectMeta: metav1.ObjectMeta{Name: "preemptionconfig-rbac-viewer"},
 				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionRule{{
-						Name:       "rule",
-						Trigger:    kueue.InsufficientQuota,
-						Candidates: []kueue.PreemptionCandidateSelector{{RelationRequirement: kueue.SameClusterQueue}},
+					Rules: []kueue.PreemptionConfigPreemptionRule{{
+						Name:               "rule",
+						ActivationPolicy:   kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+						CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{{Scope: kueue.WithinClusterQueue}},
 					}},
 				},
 			}
