@@ -358,7 +358,7 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 		}
 		if features.Enabled(features.ConfigurablePreemption) {
 			var fits bool
-			fits, targets := p.mergeWithCheckFitConfigurableCandidates(preemptionCtx, targets, attemptOpts.borrowing)
+			fits, targets = p.mergeWithCheckFitConfigurableCandidates(preemptionCtx, targets, attemptOpts.borrowing)
 			if fits {
 				targets = fillBackWorkloads(preemptionCtx, targets, attemptOpts.borrowing)
 				restoreSnapshot(preemptionCtx.snapshot, targets)
