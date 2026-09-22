@@ -371,14 +371,11 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 }
 
 func fillBackWorkloads(preemptionCtx *preemptionCtx, targets []*Target, allowBorrowing bool) []*Target {
-	startIndex := len(targets) - 2
-	if features.Enabled(features.ConfigurablePreemption) && len(targets) > 1 {
-		// When ConfigurablePreemption re-sorts targets, the last element is no longer
-		// guaranteed to be the workload whose removal just made workloadFits succeed.
-		startIndex = len(targets) - 1
+	if len(targets) <= 1 {
+		return targets
 	}
 	// In the reverse order, check if any of the workloads can be added back.
-	for i := startIndex; i >= 0; i-- {
+	for i := len(targets) - 1; i >= 0; i-- {
 		preemptionCtx.snapshot.AddWorkload(targets[i].WorkloadInfo)
 		if workloadFits(preemptionCtx, allowBorrowing) {
 			// O(1) deletion: copy the last element into index i and reduce size.
