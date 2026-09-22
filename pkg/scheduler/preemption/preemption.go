@@ -307,6 +307,7 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 	}
 	// TODO(#15893): drop the configurable preemption integration, along with
 	// preemption_configurable.go as a whole.
+	configurableCandidates := p.classicalConfigurableCandidates(preemptionCtx, hierarchicalReclaimCtx)
 	candidatesGenerator := classical.NewCandidateIterator(
 		hierarchicalReclaimCtx,
 		p.enabledAfs,
@@ -314,7 +315,7 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 		preemptionCtx.snapshot,
 		p.clock,
 		preemptioncommon.CandidatesOrdering,
-		p.classicalConfigurableCandidatesResolver(preemptionCtx),
+		configurableCandidates,
 	)
 	var attemptPossibleOpts []preemptionAttemptOpts
 	borrowWithinCohortForbidden, _ := classical.IsBorrowingWithinCohortForbidden(preemptionCtx.preemptorCQ)

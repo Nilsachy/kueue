@@ -24,6 +24,7 @@ import (
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/features"
+	"sigs.k8s.io/kueue/pkg/scheduler/preemption/classical"
 	preemptioncommon "sigs.k8s.io/kueue/pkg/scheduler/preemption/common"
 	configurable "sigs.k8s.io/kueue/pkg/scheduler/preemption/config"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -37,7 +38,7 @@ import (
 // It is reached from three places only:
 //   - getTargets resolves the evaluator, once per attempt;
 //   - classicalPreemptions resolves its configurable candidates upfront via
-//     classicalConfigurableCandidatesResolver when building its candidate iterator;
+//     classicalConfigurableCandidates when building its candidate iterator;
 //   - fairPreemptions extends the candidates upfront with fairSharingConfigurableCandidates
 //     and preempts them between its two strategies.
 //
@@ -199,17 +200,18 @@ func (p *Preemptor) extendConfigurableCandidates(preemptionCtx *preemptionCtx, c
 	return p.extendedConfigurableCandidates(preemptionCtx, collected, baseline, check)
 }
 
-// classicalConfigurableCandidatesResolver returns a function that resolves the
-// configurable candidates for classical preemption, probing upfront whether the
-// gathered classical candidates and baseline candidates are enough, and extending
-// with conditional tiers if needed.
-func (p *Preemptor) classicalConfigurableCandidatesResolver(preemptionCtx *preemptionCtx) func([]*workload.Info) []*workload.Info {
+// classicalConfigurableCandidates returns the baseline and conditional candidates of
+// the PreemptionConfig, deduplicated against the candidates of the classical
+// algorithm and extended upfront with the conditional tiers if the workload doesn't fit.
+func (p *Preemptor) classicalConfigurableCandidates(preemptionCtx *preemptionCtx, hierarchicalReclaimCtx *classical.HierarchicalPreemptionCtx) []*workload.Info {
 	if !hasConfigurableRules(preemptionCtx) {
 		return nil
 	}
-	return func(classicalCandidates []*workload.Info) []*workload.Info {
-		return p.extendConfigurableCandidates(preemptionCtx, classicalCandidates, classicalFitChecker(preemptionCtx, true))
+	var classicalCandidates []*workload.Info
+	if hasConditionalConfigurableRules(preemptionCtx) {
+		classicalCandidates = classical.FindCandidates(hierarchicalReclaimCtx)
 	}
+	return p.extendConfigurableCandidates(preemptionCtx, classicalCandidates, classicalFitChecker(preemptionCtx, true))
 }
 
 // fairSharingConfigurableCandidates returns the baseline and conditional candidates of

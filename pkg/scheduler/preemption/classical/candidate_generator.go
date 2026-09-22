@@ -70,17 +70,35 @@ func splitEvicted(workloads []*candidateElem) ([]*candidateElem, []*candidateEle
 	return workloads[:firstFalse], workloads[firstFalse:]
 }
 
+// FindCandidates returns the workloads that are candidates for classical preemption.
+// TODO(#15893): remove once ConfigurablePreemption covers classical preemption and
+// the two become mutually exclusive.
+func FindCandidates(ctx *HierarchicalPreemptionCtx) []*workload.Info {
+	sameQueueCandidates := collectSameQueueCandidates(ctx)
+	hierarchyCandidates, priorityCandidates := collectCandidatesForHierarchicalReclaim(ctx)
+	workloads := make([]*workload.Info, 0, len(sameQueueCandidates)+len(hierarchyCandidates)+len(priorityCandidates))
+	for _, candidate := range sameQueueCandidates {
+		workloads = append(workloads, candidate.wl)
+	}
+	for _, candidate := range hierarchyCandidates {
+		workloads = append(workloads, candidate.wl)
+	}
+	for _, candidate := range priorityCandidates {
+		workloads = append(workloads, candidate.wl)
+	}
+	return workloads
+}
+
 // NewCandidateIterator creates a new iterator that yields candidate workloads for preemption
 // The iterator can be used to perform two independent runs over the list of candidates:
 // with and without borrowing. The runs are independent which means that the same candidates
 // might be returned for both, but note that the candidates with borrowing are a subset of
 // candidates without borrowing.
-// The extendConfigurableCandidates function, if non-nil, receives the workloads
-// collected by the classical algorithm and returns the configurable candidates to merge
-// with them, ranked along with them. They are not subject to the quota-based
+// The configurableCandidates, selected by the ConfigurablePreemption rules, are merged with
+// the candidates found by the classical algorithm. They are not subject to the quota-based
 // restrictions, see candidateIsValid.
-// TODO(#15893): drop the extendConfigurableCandidates parameter, and the merging it
-// entails, once ConfigurablePreemption covers the classical preemption and the two become
+// TODO(#15893): drop the configurableCandidates parameter, and the merging it entails,
+// once ConfigurablePreemption covers the classical preemption and the two become
 // mutually exclusive.
 func NewCandidateIterator(
 	hierarchicalReclaimCtx *HierarchicalPreemptionCtx,
@@ -89,13 +107,13 @@ func NewCandidateIterator(
 	snapshot *schdcache.Snapshot,
 	clock clock.Clock,
 	ordering func(logr.Logger, bool, *workload.Info, *workload.Info, kueue.ClusterQueueReference, time.Time) int,
-	extendConfigurableCandidates func(collected []*workload.Info) []*workload.Info,
+	configurableCandidates []*workload.Info,
 ) *candidateIterator {
 	sameQueueCandidates := collectSameQueueCandidates(hierarchicalReclaimCtx)
 	hierarchyCandidates, priorityCandidates := collectCandidatesForHierarchicalReclaim(hierarchicalReclaimCtx)
 
-	// TODO(#15893): drop, along with the extendConfigurableCandidates parameter.
-	configurableOnlyCandidates := markConfigurableCandidates(extendConfigurableCandidates, sameQueueCandidates, hierarchyCandidates, priorityCandidates)
+	// TODO(#15893): drop, along with the configurableCandidates parameter.
+	configurableOnlyCandidates := markConfigurableCandidates(configurableCandidates, sameQueueCandidates, hierarchyCandidates, priorityCandidates)
 
 	sortFn := func(a, b *candidateElem) int {
 		return ordering(hierarchicalReclaimCtx.Log, enabledAfs, a.wl, b.wl, hierarchicalReclaimCtx.Cq.Name, clock.Now())
@@ -118,7 +136,7 @@ func NewCandidateIterator(
 	allCandidates = append(allCandidates, nonEvictedHierarchicalReclaimCandidates...)
 	allCandidates = append(allCandidates, nonEvictedSTCandidates...)
 	allCandidates = append(allCandidates, nonEvictedSameQueueCandidates...)
-	// TODO(#15893): drop, along with the extendConfigurableCandidates parameter.
+	// TODO(#15893): drop, along with the configurableCandidates parameter.
 	allCandidates = append(allCandidates, nonEvictedConfigurableCandidates...)
 	return &candidateIterator{
 		runIndex:                          0,
@@ -131,47 +149,33 @@ func NewCandidateIterator(
 	}
 }
 
-// markConfigurableCandidates evaluates the extendConfigurableCandidates function to
-// resolve the configurable candidates, reclassifies the candidates which were already
-// collected by the classical algorithm so that they are not rejected by the quota-based
-// restrictions, and returns the elements for the candidates which are only selected by
-// the rules. A candidate is never duplicated, as that would lead to removing the same
-// workload from the snapshot twice.
+// markConfigurableCandidates reclassifies the candidates which were already collected by
+// the classical algorithm and are also selected by the ConfigurablePreemption rules, so
+// that they are not rejected by the quota-based restrictions, and returns the elements
+// for the candidates which are only selected by the rules. A candidate is never
+// duplicated, as that would lead to removing the same workload from the snapshot twice.
 // Reclassifying also changes the reported reason to ConfigurablePreemption, which is the
 // accurate one: the bypass may let a candidate through that the classical restrictions
 // would have rejected in this run.
 // TODO(#15893): remove once ConfigurablePreemption covers the classical preemption and
 // the two become mutually exclusive.
 func markConfigurableCandidates(
-	extendConfigurableCandidates func(collected []*workload.Info) []*workload.Info,
+	configurableCandidates []*workload.Info,
 	collectedCandidates ...[]*candidateElem,
 ) []*candidateElem {
-	if extendConfigurableCandidates == nil {
-		return nil
-	}
-	var totalLen int
-	for _, candidates := range collectedCandidates {
-		totalLen += len(candidates)
-	}
-	collected := make([]*workload.Info, 0, totalLen)
-	collectedKeys := sets.New[workload.Reference]()
-	for _, candidates := range collectedCandidates {
-		for _, candidate := range candidates {
-			collected = append(collected, candidate.wl)
-			collectedKeys.Insert(workload.Key(candidate.wl.Obj))
-		}
-	}
-	configurableCandidates := extendConfigurableCandidates(collected)
 	if len(configurableCandidates) == 0 {
 		return nil
 	}
+	collectedKeys := sets.New[workload.Reference]()
 	configurableKeys := sets.New[workload.Reference]()
 	for _, wl := range configurableCandidates {
 		configurableKeys.Insert(workload.Key(wl.Obj))
 	}
 	for _, candidates := range collectedCandidates {
 		for _, candidate := range candidates {
-			if configurableKeys.Has(workload.Key(candidate.wl.Obj)) {
+			key := workload.Key(candidate.wl.Obj)
+			collectedKeys.Insert(key)
+			if configurableKeys.Has(key) {
 				candidate.preemptionVariant = ConfigurablePreemption
 			}
 		}
