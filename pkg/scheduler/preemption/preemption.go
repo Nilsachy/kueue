@@ -371,11 +371,8 @@ func (p *Preemptor) classicalPreemptions(preemptionCtx *preemptionCtx) []*Target
 }
 
 func fillBackWorkloads(preemptionCtx *preemptionCtx, targets []*Target, allowBorrowing bool) []*Target {
-	if len(targets) <= 1 {
-		return targets
-	}
 	// In the reverse order, check if any of the workloads can be added back.
-	for i := len(targets) - 1; i >= 0; i-- {
+	for i := len(targets) - 2; i >= 0; i-- {
 		preemptionCtx.snapshot.AddWorkload(targets[i].WorkloadInfo)
 		if workloadFits(preemptionCtx, allowBorrowing) {
 			// O(1) deletion: copy the last element into index i and reduce size.

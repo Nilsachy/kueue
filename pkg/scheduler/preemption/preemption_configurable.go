@@ -103,9 +103,8 @@ func hasConditionalConfigurableRules(preemptionCtx *preemptionCtx) bool {
 }
 
 // mergeConfigurableCandidatesWithFitCheck preempts the candidates of the PreemptionConfig
-// on behalf of the running preemption algorithm, merging them with the targets already
-// selected, re-sorting the combined targets when the workload fits, and returning
-// (fits, targets).
+// on behalf of the running preemption algorithm, appending them to the targets already
+// selected, and returning (fits, targets).
 //
 // The candidates of a trigger are preempted before the next one is evaluated, so the fit
 // checks observe the state the preceding triggers left behind, and the evaluator no
@@ -125,12 +124,6 @@ func (p *Preemptor) mergeConfigurableCandidatesWithFitCheck(preemptionCtx *preem
 			// what keeps the workload out).
 			fits, targets = p.preemptConfigurableCandidates(preemptionCtx, targets, kueue.QuotaFeasibleAndInsufficientTopology, allowBorrowing)
 		}
-	}
-	if fits {
-		ordering := p.candidatesOrdering(preemptionCtx)
-		slices.SortFunc(targets, func(a, b *Target) int {
-			return ordering(a.WorkloadInfo, b.WorkloadInfo)
-		})
 	}
 	return fits, targets
 }
