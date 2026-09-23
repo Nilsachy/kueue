@@ -98,6 +98,9 @@ func hasConditionalConfigurableRules(preemptionCtx *preemptionCtx) bool {
 // fit checks observe the updated snapshot state, and the evaluator only returns
 // candidates still admitted in the snapshot.
 func mergeConfigurableCandidatesWithFitCheck(preemptionCtx *preemptionCtx, allowBorrowing bool) (bool, []*Target) {
+	if workloadFits(preemptionCtx, allowBorrowing) {
+		return true, nil
+	}
 	if !hasConfigurableRules(preemptionCtx) {
 		return false, nil
 	}
