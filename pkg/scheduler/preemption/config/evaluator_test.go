@@ -64,21 +64,16 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 	)
 
 	tests := map[string]struct {
-		cohorts       []*kueue.Cohort
-		clusterQueues []*kueue.ClusterQueue
-		config        kueue.PreemptionConfig
-		admitted      []kueue.Workload
-		preemptorWl   *kueue.Workload
-		preemptorCq   kueue.ClusterQueueReference
-		client        client.Reader
-		// wantCandidates holds the candidates of the Always trigger.
+		cohorts        []*kueue.Cohort
+		clusterQueues  []*kueue.ClusterQueue
+		config         kueue.PreemptionConfig
+		admitted       []kueue.Workload
+		preemptorWl    *kueue.Workload
+		preemptorCq    kueue.ClusterQueueReference
+		trigger        kueue.PreemptionConfigActivationTrigger
+		client         client.Reader
 		wantCandidates []string
-		// wantQuotaCandidates holds the candidates of the InsufficientQuota trigger.
-		wantQuotaCandidates []string
-		// wantTopologyCandidates holds the candidates of the
-		// QuotaFeasibleAndInsufficientTopology trigger.
-		wantTopologyCandidates []string
-		wantError              string
+		wantError      string
 	}{
 		"no candidates for empty config": {
 			clusterQueues: baseCqs,
@@ -219,9 +214,10 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:         unitWl.Clone().Name("a-incoming").Obj(),
-			preemptorCq:         "a",
-			wantQuotaCandidates: []string{"a1", "a2"},
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
+			preemptorCq:    "a",
+			trigger:        kueue.InsufficientQuota,
+			wantCandidates: []string{"a1", "a2"},
 		},
 		"selects candidates for the QuotaFeasibleAndInsufficientTopology trigger": {
 			clusterQueues: baseCqs,
@@ -244,9 +240,10 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:            unitWl.Clone().Name("a-incoming").Obj(),
-			preemptorCq:            "a",
-			wantTopologyCandidates: []string{"a1", "a2"},
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
+			preemptorCq:    "a",
+			trigger:        kueue.QuotaFeasibleAndInsufficientTopology,
+			wantCandidates: []string{"a1", "a2"},
 		},
 		"rule with matching preemptor labels selector is triggered for matching workload": {
 			clusterQueues: baseCqs,
@@ -370,10 +367,10 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
 			},
-			preemptorWl:         unitWl.Clone().Name("a-incoming").Obj(),
-			preemptorCq:         "a",
-			wantCandidates:      []string{"a1"},
-			wantQuotaCandidates: []string{"a1", "b1"},
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
+			preemptorCq:    "a",
+			trigger:        kueue.Always,
+			wantCandidates: []string{"a1"},
 		},
 		"returns candidates which use preemptable resource": {
 			clusterQueues: baseCqs,
@@ -490,9 +487,10 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a3").
 					SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:         unitWl.Clone().Name("a-incoming").Obj(),
-			preemptorCq:         "a",
-			wantQuotaCandidates: []string{"a1"},
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
+			preemptorCq:    "a",
+			trigger:        kueue.InsufficientQuota,
+			wantCandidates: []string{"a1"},
 		},
 		"ClusterQueueSelector filters candidates by matching ClusterQueue labels": {
 			clusterQueues: []*kueue.ClusterQueue{
@@ -531,9 +529,10 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
 			},
-			preemptorWl:         unitWl.Clone().Name("a-incoming").Obj(),
-			preemptorCq:         "a",
-			wantQuotaCandidates: []string{"a1"},
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
+			preemptorCq:    "a",
+			trigger:        kueue.InsufficientQuota,
+			wantCandidates: []string{"a1"},
 		},
 		"multi-selector deduplication": {
 			clusterQueues: baseCqs,
@@ -611,32 +610,16 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			wlInfo := workload.NewInfo(tc.preemptorWl)
 			wlInfo.ClusterQueue = tc.preemptorCq
 
-			// Candidates are not ordered, so compare them as sorted lists.
-			names := func(candidates []*workload.Info) []string {
-				return slices.Sorted(slices.Values(utilslices.Map(candidates, func(wlInfo **workload.Info) string {
-					return (*wlInfo).Obj.Name
-				})))
+			trigger := tc.trigger
+			if trigger == "" {
+				trigger = kueue.Always
 			}
-
 			frsNeedPreemption := sets.New(resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU})
-			gotByTrigger := map[string][]string{}
-			var gotErr error
-			for _, trigger := range []kueue.PreemptionConfigActivationTrigger{
-				kueue.Always,
-				kueue.InsufficientQuota,
-				kueue.QuotaFeasibleAndInsufficientTopology,
-			} {
-				candidates, err := evaluator.Candidates(snapshot, wlInfo, frsNeedPreemption, trigger)
-				if err != nil {
-					gotErr = err
-					break
-				}
-				gotByTrigger[string(trigger)] = names(candidates)
-			}
-			if gotErr != nil || tc.wantError != "" {
+			candidates, err := evaluator.Candidates(snapshot, wlInfo, frsNeedPreemption, trigger)
+			if err != nil || tc.wantError != "" {
 				gotError := ""
-				if gotErr != nil {
-					gotError = gotErr.Error()
+				if err != nil {
+					gotError = err.Error()
 				}
 				if diff := cmp.Diff(tc.wantError, gotError, cmpopts.EquateEmpty()); diff != "" {
 					t.Errorf("Candidates() error (-want +got):\n%s", diff)
@@ -644,12 +627,12 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				return
 			}
 
-			wantByTrigger := map[string][]string{
-				string(kueue.Always):                               slices.Sorted(slices.Values(tc.wantCandidates)),
-				string(kueue.InsufficientQuota):                    slices.Sorted(slices.Values(tc.wantQuotaCandidates)),
-				string(kueue.QuotaFeasibleAndInsufficientTopology): slices.Sorted(slices.Values(tc.wantTopologyCandidates)),
-			}
-			if diff := cmp.Diff(wantByTrigger, gotByTrigger, cmpopts.EquateEmpty()); diff != "" {
+			// Candidates are not ordered, so compare them as sorted lists.
+			gotCandidates := slices.Sorted(slices.Values(utilslices.Map(candidates, func(wlInfo **workload.Info) string {
+				return (*wlInfo).Obj.Name
+			})))
+			wantCandidates := slices.Sorted(slices.Values(tc.wantCandidates))
+			if diff := cmp.Diff(wantCandidates, gotCandidates, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Selected candidates (-want,+got):\n%s", diff)
 			}
 		})
