@@ -1245,3 +1245,178 @@ func TestConfigurablePreemptions(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeConfigurableCandidatesWithFitCheck(t *testing.T) {
+	now := time.Now()
+	unitWl := *utiltestingapi.MakeWorkload("unit", "").Request(corev1.ResourceCPU, "1")
+	defaultAssignment := singlePodSetAssignment(flavorassigner.ResourceAssignment{
+		corev1.ResourceCPU: &flavorassigner.FlavorAssignment{
+			Name: "default", Mode: flavorassigner.Preempt,
+		},
+	})
+
+	baseCQs := []*kueue.ClusterQueue{
+		utiltestingapi.MakeClusterQueue("a").
+			Cohort("all").
+			ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+				Resource(corev1.ResourceCPU, "2").Obj()).
+			Annotation(kueue.PreemptionConfigAnnotation, "default-config").
+			Obj(),
+		utiltestingapi.MakeClusterQueue("b").
+			Cohort("all").
+			ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+				Resource(corev1.ResourceCPU, "1").Obj()).
+			Obj(),
+	}
+
+	multiTriggerConfig := kueue.PreemptionConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "default-config",
+		},
+		Spec: kueue.PreemptionConfigSpec{
+			Rules: []kueue.PreemptionConfigPreemptionRule{
+				{
+					Name:             "same-cluster-queue-rule",
+					ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+					CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
+						{
+							Scope: kueue.WithinClusterQueue,
+						},
+					},
+				},
+				{
+					Name:             "cohort-rule",
+					ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+					CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
+						{
+							Scope: kueue.WithinCohortTree,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	cases := map[string]struct {
+		clusterQueues []*kueue.ClusterQueue
+		config        *kueue.PreemptionConfig
+		admitted      []kueue.Workload
+		incoming      *kueue.Workload
+		wantFits      bool
+		wantTargets   []string
+	}{
+		"returns true without preempting when workload already fits and no rules configured": {
+			clusterQueues: []*kueue.ClusterQueue{
+				utiltestingapi.MakeClusterQueue("a").
+					Cohort("all").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+						Resource(corev1.ResourceCPU, "2").Obj()).
+					Obj(),
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming:    unitWl.Clone().Name("a_incoming").Request(corev1.ResourceCPU, "1").Obj(),
+			wantFits:    true,
+			wantTargets: nil,
+		},
+		"returns true without preempting when workload already fits even with rules configured": {
+			clusterQueues: baseCQs,
+			config:        &multiTriggerConfig,
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming:    unitWl.Clone().Name("a_incoming").Request(corev1.ResourceCPU, "1").Obj(),
+			wantFits:    true,
+			wantTargets: nil,
+		},
+		"removes candidates across triggers and does not return candidate matched by multiple triggers twice": {
+			clusterQueues: baseCQs,
+			config:        &multiTriggerConfig,
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+			},
+			// Needs 3 CPUs: Always removes a1 and a2 (2 CPUs), then InsufficientQuota
+			// selects from WithinCohortTree where a1 and a2 are already gone from snapshot,
+			// so only b1 is added.
+			incoming:    unitWl.Clone().Name("a_incoming").Request(corev1.ResourceCPU, "3").Obj(),
+			wantFits:    true,
+			wantTargets: []string{"/a1", "/a2", "/b1"},
+		},
+		"stops after Always trigger when it frees enough quota": {
+			clusterQueues: baseCQs,
+			config:        &multiTriggerConfig,
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+			},
+			incoming:    unitWl.Clone().Name("a_incoming").Request(corev1.ResourceCPU, "1").Obj(),
+			wantFits:    true,
+			wantTargets: []string{"/a1"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.ConfigurablePreemption, true)
+			ctx, log := utiltesting.ContextWithLog(t)
+			for i := range tc.admitted {
+				tc.admitted[i].UID = types.UID(tc.admitted[i].Name)
+			}
+
+			clientBuilder := utiltesting.NewClientBuilder().
+				WithLists(&kueue.WorkloadList{Items: tc.admitted})
+			if tc.config != nil {
+				clientBuilder = clientBuilder.WithLists(&kueue.PreemptionConfigList{Items: []kueue.PreemptionConfig{*tc.config}})
+			}
+			cl := clientBuilder.Build()
+
+			cqCache := schdcache.New(cl)
+			cqCache.AddOrUpdateResourceFlavor(log, utiltestingapi.MakeResourceFlavor("default").Obj())
+			for _, cq := range tc.clusterQueues {
+				if err := cqCache.AddClusterQueue(ctx, cq); err != nil {
+					t.Fatalf("Couldn't add ClusterQueue to cache: %v", err)
+				}
+			}
+
+			snapshot, err := cqCache.Snapshot(ctx)
+			if err != nil {
+				t.Fatalf("unexpected error while building snapshot: %v", err)
+			}
+
+			wlInfo := workload.NewInfo(tc.incoming)
+			wlInfo.ClusterQueue = "a"
+			preemptionCtx := &preemptionCtx{
+				ctx:               ctx,
+				clock:             clocktesting.NewFakeClock(now),
+				log:               log,
+				preemptor:         *wlInfo,
+				preemptorCQ:       snapshot.ClusterQueue("a"),
+				snapshot:          snapshot,
+				frsNeedPreemption: flavorResourcesNeedPreemption(defaultAssignment),
+				workloadUsage: workload.Usage{
+					Quota: workload.ResourceUsage{
+						Assigned: defaultAssignment.TotalRequestsFor(log, wlInfo),
+					},
+				},
+			}
+			preemptor := New(cl, workload.Ordering{}, &utiltesting.EventRecorder{}, nil, false, preemptionCtx.clock, nil, preemptexpectations.New(), nil)
+			preemptionCtx.candidatesOrdering = preemptor.candidatesOrdering(preemptionCtx)
+			preemptionCtx.configurableEvaluator = newConfigurableEvaluator(cl, preemptionCtx)
+
+			gotFits, gotTargets := mergeConfigurableCandidatesWithFitCheck(preemptionCtx, true)
+			if gotFits != tc.wantFits {
+				t.Errorf("mergeConfigurableCandidatesWithFitCheck() fits = %v, want %v", gotFits, tc.wantFits)
+			}
+			gotTargetKeys := utilslices.Map(gotTargets, func(target **Target) string {
+				return string(workload.Key((*target).WorkloadInfo.Obj))
+			})
+			if diff := cmp.Diff(tc.wantTargets, gotTargetKeys, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("mergeConfigurableCandidatesWithFitCheck() targets (-want,+got):\n%s", diff)
+			}
+		})
+	}
+}

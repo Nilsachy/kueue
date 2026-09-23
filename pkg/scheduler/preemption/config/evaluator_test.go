@@ -370,12 +370,10 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
 			},
-			preemptorWl: unitWl.Clone().Name("a-incoming").Obj(),
-			preemptorCq: "a",
-			// a1 is selected by both rules, but only reported for the Always trigger: it is
-			// preempted there, and therefore gone from the snapshot for the following ones.
+			preemptorWl:         unitWl.Clone().Name("a-incoming").Obj(),
+			preemptorCq:         "a",
 			wantCandidates:      []string{"a1"},
-			wantQuotaCandidates: []string{"b1"},
+			wantQuotaCandidates: []string{"a1", "b1"},
 		},
 		"returns candidates which use preemptable resource": {
 			clusterQueues: baseCqs,
@@ -621,10 +619,6 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			}
 
 			frsNeedPreemption := sets.New(resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU})
-			// The triggers are evaluated in the order in which the preemption algorithm
-			// reaches them, each one after the candidates of the preceding ones have
-			// been preempted. Removing them from the snapshot is what keeps a workload
-			// selected by several triggers from being offered twice.
 			gotByTrigger := map[string][]string{}
 			var gotErr error
 			for _, trigger := range []kueue.PreemptionConfigActivationTrigger{
@@ -638,9 +632,6 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 					break
 				}
 				gotByTrigger[string(trigger)] = names(candidates)
-				for _, candidate := range candidates {
-					snapshot.RemoveWorkload(candidate)
-				}
 			}
 			if gotErr != nil || tc.wantError != "" {
 				gotError := ""
