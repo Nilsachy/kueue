@@ -77,14 +77,6 @@ func (p *PreemptionEvaluator) HasRulesFor(triggers ...kueue.PreemptionConfigActi
 // Candidates returns the workloads selected as preemption candidates by the rules of the
 // PreemptionConfig activated by the given trigger, deduplicated across the rules and
 // selectors of the trigger.
-//
-// The candidates are the ones present in the snapshot at the time of the call. Since
-// RemoveWorkload drops a workload from the ClusterQueue of the snapshot, a caller
-// evaluating a trigger after having preempted some workloads only gets the candidates
-// still available to it. In particular, this is what keeps a workload selected by
-// several triggers from being returned twice: by the time a conditional trigger is
-// evaluated, the preemption algorithm has exhausted the candidates of the Always
-// trigger, so those are no longer in the snapshot.
 func (p *PreemptionEvaluator) Candidates(
 	snapshot *schdcache.Snapshot,
 	preemptor *workload.Info,

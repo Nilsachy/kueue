@@ -28,42 +28,32 @@ import (
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
-// This file holds the whole integration of ConfigurablePreemption with the classical and
-// the Fair Sharing algorithms: resolving the PreemptionConfig, checking which triggers
-// are activated, and merging the candidates their rules select into the targets of the
-// running algorithm, without ever selecting the same workload twice.
+// This file provides helpers for evaluating configurable preemption rules:
+// resolving the PreemptionConfig, checking which triggers are configured, and
+// evaluating candidate preemption across triggers.
 //
-// Both algorithms apply the same triggers as a fallback when their own candidates are not
-// enough to admit the incoming workload, in the order the API defines them: the Always
+// Triggers are applied as a fallback in the order the API defines them: the Always
 // trigger first, as a baseline, then InsufficientQuota while the quota is not sufficient,
 // and finally QuotaFeasibleAndInsufficientTopology once the quota is sufficient but no
 // topology assignment can be found.
 //
-// It is reached from three places only:
-//   - getTargets resolves the evaluator, once per attempt;
-//   - classicalPreemptions calls mergeConfigurableCandidatesWithFitCheck once its
-//     candidate walk failed to admit the workload;
-//   - fairPreemptions calls mergeConfigurableCandidatesWithFitCheck once both its
-//     strategies failed.
-//
-// TODO(#15893): delete this file, along with those call sites, once
-// ConfigurablePreemption becomes an algorithm of its own, mutually exclusive with the
-// classical and the Fair Sharing preemption.
+// TODO(#15893): delete this file once ConfigurablePreemption becomes an algorithm of its
+// own, mutually exclusive with the classical and Fair Sharing preemption.
 
 // newConfigurableEvaluator returns the evaluator for the PreemptionConfig referenced by
 // the preemptor's ClusterQueue, or nil if the ConfigurablePreemption feature is
 // disabled, the ClusterQueue references no PreemptionConfig, or it cannot be read.
-func (p *Preemptor) newConfigurableEvaluator(preemptionCtx *preemptionCtx) *configurable.PreemptionEvaluator {
+func newConfigurableEvaluator(cl client.Client, preemptionCtx *preemptionCtx) *configurable.PreemptionEvaluator {
 	if !features.Enabled(features.ConfigurablePreemption) || preemptionCtx.preemptorCQ.PreemptionAnnotation == nil {
 		return nil
 	}
 	preemptionConfig := &kueue.PreemptionConfig{}
 	preemptionConfigName := *preemptionCtx.preemptorCQ.PreemptionAnnotation
-	if err := p.client.Get(preemptionCtx.ctx, client.ObjectKey{Name: preemptionConfigName}, preemptionConfig); err != nil {
+	if err := cl.Get(preemptionCtx.ctx, client.ObjectKey{Name: preemptionConfigName}, preemptionConfig); err != nil {
 		preemptionCtx.log.Error(err, "Failed to get PreemptionConfig", "preemptionConfigName", preemptionConfigName)
 		return nil
 	}
-	return configurable.NewPreemptionEvaluator(preemptionCtx.ctx, preemptionCtx.log, preemptionCtx.clock, *preemptionConfig, p.client)
+	return configurable.NewPreemptionEvaluator(preemptionCtx.ctx, preemptionCtx.log, preemptionCtx.clock, *preemptionConfig, cl)
 }
 
 // configurableCandidates returns the candidates selected by the rules of the
@@ -71,7 +61,7 @@ func (p *Preemptor) newConfigurableEvaluator(preemptionCtx *preemptionCtx) *conf
 // preferred one, or no candidate if the ClusterQueue uses no PreemptionConfig.
 // Only the candidates still admitted in the snapshot are returned, so a trigger
 // evaluated after some workloads have been preempted never returns those again.
-func (p *Preemptor) configurableCandidates(preemptionCtx *preemptionCtx, trigger kueue.PreemptionConfigActivationTrigger) []*workload.Info {
+func configurableCandidates(preemptionCtx *preemptionCtx, trigger kueue.PreemptionConfigActivationTrigger) []*workload.Info {
 	if preemptionCtx.configurableEvaluator == nil {
 		return nil
 	}
@@ -80,7 +70,7 @@ func (p *Preemptor) configurableCandidates(preemptionCtx *preemptionCtx, trigger
 		preemptionCtx.log.Error(err, "Failed to get candidates for preemption", "trigger", trigger)
 		return nil
 	}
-	slices.SortFunc(candidates, p.candidatesOrdering(preemptionCtx))
+	slices.SortFunc(candidates, preemptionCtx.candidatesOrdering)
 	return candidates
 }
 
@@ -101,21 +91,21 @@ func hasConditionalConfigurableRules(preemptionCtx *preemptionCtx) bool {
 		preemptionCtx.configurableEvaluator.HasRulesFor(kueue.InsufficientQuota, kueue.QuotaFeasibleAndInsufficientTopology)
 }
 
-// mergeConfigurableCandidatesWithFitCheck preempts the candidates of the PreemptionConfig
-// on behalf of the running preemption algorithm and returns (fits, configurableTargets).
+// mergeConfigurableCandidatesWithFitCheck evaluates candidates across applicable
+// PreemptionConfig triggers and returns (fits, configurableTargets).
 //
-// Because preceding phases and triggers remove their targets from the snapshot, the fit
-// checks observe the state the preceding phases left behind, and the evaluator only
-// returns candidates still admitted in the snapshot.
-func (p *Preemptor) mergeConfigurableCandidatesWithFitCheck(preemptionCtx *preemptionCtx, allowBorrowing bool) (bool, []*Target) {
+// Because candidates are removed from the snapshot as they are evaluated, subsequent
+// fit checks observe the updated snapshot state, and the evaluator only returns
+// candidates still admitted in the snapshot.
+func mergeConfigurableCandidatesWithFitCheck(preemptionCtx *preemptionCtx, allowBorrowing bool) (bool, []*Target) {
 	if !hasConfigurableRules(preemptionCtx) {
 		return false, nil
 	}
-	fits, targets := p.preemptConfigurableCandidates(preemptionCtx, kueue.Always, allowBorrowing)
+	fits, targets := simulateConfigurableCandidatesPreemption(preemptionCtx, kueue.Always, allowBorrowing)
 	if !fits && hasConditionalConfigurableRules(preemptionCtx) {
 		if !workloadQuotaFits(preemptionCtx, allowBorrowing) {
 			var moreTargets []*Target
-			fits, moreTargets = p.preemptConfigurableCandidates(preemptionCtx, kueue.InsufficientQuota, allowBorrowing)
+			fits, moreTargets = simulateConfigurableCandidatesPreemption(preemptionCtx, kueue.InsufficientQuota, allowBorrowing)
 			targets = append(targets, moreTargets...)
 		}
 		if !fits && workloadQuotaFits(preemptionCtx, allowBorrowing) {
@@ -123,22 +113,22 @@ func (p *Preemptor) mergeConfigurableCandidatesWithFitCheck(preemptionCtx *preem
 			// the quota fits while the workload still doesn't fit (meaning topology is
 			// what keeps the workload out).
 			var moreTargets []*Target
-			fits, moreTargets = p.preemptConfigurableCandidates(preemptionCtx, kueue.QuotaFeasibleAndInsufficientTopology, allowBorrowing)
+			fits, moreTargets = simulateConfigurableCandidatesPreemption(preemptionCtx, kueue.QuotaFeasibleAndInsufficientTopology, allowBorrowing)
 			targets = append(targets, moreTargets...)
 		}
 	}
 	return fits, targets
 }
 
-// preemptConfigurableCandidates removes the candidates selected by the rules of the given
+// simulateConfigurableCandidatesPreemption removes the candidates selected by the rules of the given
 // trigger from the snapshot and returns them, from the most to the least preferred one,
 // stopping as soon as workloadFits returns true.
 // The candidates are preempted regardless of what the classical or Fair Sharing rules
 // allow, as the PreemptionConfig selects them explicitly, and are thus reported with the
 // ConfigurablePreemption reason.
-func (p *Preemptor) preemptConfigurableCandidates(preemptionCtx *preemptionCtx, trigger kueue.PreemptionConfigActivationTrigger, allowBorrowing bool) (bool, []*Target) {
+func simulateConfigurableCandidatesPreemption(preemptionCtx *preemptionCtx, trigger kueue.PreemptionConfigActivationTrigger, allowBorrowing bool) (bool, []*Target) {
 	var targets []*Target
-	for _, candidate := range p.configurableCandidates(preemptionCtx, trigger) {
+	for _, candidate := range configurableCandidates(preemptionCtx, trigger) {
 		preemptionCtx.snapshot.RemoveWorkload(candidate)
 		targets = append(targets, &Target{
 			WorkloadInfo: candidate,
