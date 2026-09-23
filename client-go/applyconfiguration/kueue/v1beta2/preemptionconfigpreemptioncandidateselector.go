@@ -40,15 +40,10 @@ type PreemptionConfigPreemptionCandidateSelectorApplyConfiguration struct {
 	// labelSelector defines label selector constraints on candidate Workloads.
 	// Accepts all if not set.
 	LabelSelector *v1.LabelSelectorApplyConfiguration `json:"labelSelector,omitempty"`
-	// relativeWorkloadPriority defines how the candidate's priority compares to the preemptor's priority.
-	// For example "LessThan" means that only workloads with lower priority will be allowed as preemption candidates.
-	// The comparison is made using effective priority (accounting for priority boost if enabled).
-	// If nil, no relative priority check is enforced.
-	//
-	// TODO(#13396): replace with the `priority` field of the KEP
-	// (PreemptionConfigPriorityConstraint, carrying an explicit Base/Boosted mode) once the
-	// priority boost semantics are settled.
-	RelativeWorkloadPriority *kueuev1beta2.NumericComparison `json:"relativeWorkloadPriority,omitempty"`
+	// priority defines the requirements for the priority of candidates.
+	// Workloads not matching those requirements will not be considered as preemption candidates.
+	// If nil, no priority requirements are enforced.
+	Priority *PreemptionConfigPriorityConstraintApplyConfiguration `json:"priority,omitempty"`
 }
 
 // PreemptionConfigPreemptionCandidateSelectorApplyConfiguration constructs a declarative configuration of the PreemptionConfigPreemptionCandidateSelector type for use with
@@ -94,10 +89,10 @@ func (b *PreemptionConfigPreemptionCandidateSelectorApplyConfiguration) WithLabe
 	return b
 }
 
-// WithRelativeWorkloadPriority sets the RelativeWorkloadPriority field in the declarative configuration to the given value
+// WithPriority sets the Priority field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the RelativeWorkloadPriority field is set to the value of the last call.
-func (b *PreemptionConfigPreemptionCandidateSelectorApplyConfiguration) WithRelativeWorkloadPriority(value kueuev1beta2.NumericComparison) *PreemptionConfigPreemptionCandidateSelectorApplyConfiguration {
-	b.RelativeWorkloadPriority = &value
+// If called multiple times, the Priority field is set to the value of the last call.
+func (b *PreemptionConfigPreemptionCandidateSelectorApplyConfiguration) WithPriority(value *PreemptionConfigPriorityConstraintApplyConfiguration) *PreemptionConfigPreemptionCandidateSelectorApplyConfiguration {
+	b.Priority = value
 	return b
 }

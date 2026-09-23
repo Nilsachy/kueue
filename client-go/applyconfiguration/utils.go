@@ -278,6 +278,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &kueuev1beta2.PreemptionConfigPreemptionCandidateSelectorApplyConfiguration{}
 	case v1beta2.SchemeGroupVersion.WithKind("PreemptionConfigPreemptionRule"):
 		return &kueuev1beta2.PreemptionConfigPreemptionRuleApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PreemptionConfigPriorityConstraint"):
+		return &kueuev1beta2.PreemptionConfigPriorityConstraintApplyConfiguration{}
 	case v1beta2.SchemeGroupVersion.WithKind("PreemptionConfigSpec"):
 		return &kueuev1beta2.PreemptionConfigSpecApplyConfiguration{}
 	case v1beta2.SchemeGroupVersion.WithKind("PreemptionGate"):

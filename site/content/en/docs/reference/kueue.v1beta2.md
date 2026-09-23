@@ -2092,7 +2092,7 @@ If unspecified, defaults to <code>Manual</code>.</li>
 
 - [PreemptionConfigNumericLabelConstraint](#kueue-x-k8s-io-v1beta2-PreemptionConfigNumericLabelConstraint)
 
-- [PreemptionConfigPreemptionCandidateSelector](#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionCandidateSelector)
+- [PreemptionConfigPriorityConstraint](#kueue-x-k8s-io-v1beta2-PreemptionConfigPriorityConstraint)
 
 
 <p>NumericComparison defines how a specified numeric property (e.g., priority or custom numeric
@@ -2846,17 +2846,13 @@ Accepts all if not set.</p>
 Accepts all if not set.</p>
 </td>
 </tr>
-<tr><td><code>relativeWorkloadPriority</code><br/>
-<a href="#kueue-x-k8s-io-v1beta2-NumericComparison"><code>NumericComparison</code></a>
+<tr><td><code>priority</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-PreemptionConfigPriorityConstraint"><code>PreemptionConfigPriorityConstraint</code></a>
 </td>
 <td>
-   <p>relativeWorkloadPriority defines how the candidate's priority compares to the preemptor's priority.
-For example &quot;LessThan&quot; means that only workloads with lower priority will be allowed as preemption candidates.
-The comparison is made using effective priority (accounting for priority boost if enabled).
-If nil, no relative priority check is enforced.</p>
-<p>TODO(#13396): replace with the <code>priority</code> field of the KEP
-(PreemptionConfigPriorityConstraint, carrying an explicit Base/Boosted mode) once the
-priority boost semantics are settled.</p>
+   <p>priority defines the requirements for the priority of candidates.
+Workloads not matching those requirements will not be considered as preemption candidates.
+If nil, no priority requirements are enforced.</p>
 </td>
 </tr>
 </tbody>
@@ -2936,6 +2932,60 @@ No selectors result in an empty candidate set, thereby disallowing any preemptio
 </tr>
 </tbody>
 </table>
+
+## `PreemptionConfigPriorityConstraint`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigPriorityConstraint}
+    
+
+**Appears in:**
+
+- [PreemptionConfigPreemptionCandidateSelector](#kueue-x-k8s-io-v1beta2-PreemptionConfigPreemptionCandidateSelector)
+
+
+<p>PreemptionConfigPriorityConstraint defines the requirements for the priority of preemption candidates.</p>
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>mode</code> <B>[Required]</B><br/>
+<a href="#kueue-x-k8s-io-v1beta2-PreemptionConfigPriorityMode"><code>PreemptionConfigPriorityMode</code></a>
+</td>
+<td>
+   <p>mode specifies whether priority comparison uses base or boosted (effective) priority.</p>
+</td>
+</tr>
+<tr><td><code>comparison</code> <B>[Required]</B><br/>
+<a href="#kueue-x-k8s-io-v1beta2-NumericComparison"><code>NumericComparison</code></a>
+</td>
+<td>
+   <p>comparison defines how the candidate's priority compares to the preemptor's priority.
+For example, &quot;LessThan&quot; means that only workloads with lower
+priority will be allowed as preemption candidates.</p>
+</td>
+</tr>
+</tbody>
+</table>
+
+## `PreemptionConfigPriorityMode`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigPriorityMode}
+    
+(Alias of `string`)
+
+**Appears in:**
+
+- [PreemptionConfigPriorityConstraint](#kueue-x-k8s-io-v1beta2-PreemptionConfigPriorityConstraint)
+
+
+<p>PreemptionConfigPriorityMode defines whether base or boosted (effective) priority is used when comparing candidates against the preemptor.
+Possible values are:</p>
+<ul>
+<li>&quot;Base&quot;: uses the raw priority value as assigned in the Workload resource (<code>spec.priority</code>) for both the candidate and preemptor, ignoring any priority boost.</li>
+<li>&quot;Boosted&quot;: uses the effective priority value, adjusted by the priority boost mechanism (if enabled), for both the candidate and preemptor.</li>
+</ul>
+
+
+
 
 ## `PreemptionConfigSpec`     {#kueue-x-k8s-io-v1beta2-PreemptionConfigSpec}
     

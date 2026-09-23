@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -431,18 +430,21 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1", "b1"},
 		},
-		"RelativeWorkloadPriority filters candidates with higher priority": {
+		"Priority filters candidates with higher priority": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:             "relative-priority-rule",
+							Name:             "priority rule",
 							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									Scope:                    kueue.WithinClusterQueue,
-									RelativeWorkloadPriority: ptr.To(kueue.LessThan),
+									Scope: kueue.WithinClusterQueue,
+									Priority: &kueue.PreemptionConfigPriorityConstraint{
+										Mode:       kueue.Base,
+										Comparison: kueue.LessThan,
+									},
 								},
 							},
 						},

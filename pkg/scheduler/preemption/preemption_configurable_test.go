@@ -420,7 +420,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 			targetCQ:      "a",
 			wantPreempted: sets.New[string](),
 		},
-		"RelativeWorkloadPriority: only candidates with lower priority are preempted": {
+		"Priority: only candidates with lower priority are preempted": {
 			clusterQueues: baseCQs,
 			config: kueue.PreemptionConfig{
 				ObjectMeta: metav1.ObjectMeta{
@@ -429,12 +429,15 @@ func TestConfigurablePreemptions(t *testing.T) {
 				Spec: kueue.PreemptionConfigSpec{
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:             "relative-priority-rule",
+							Name:             "priority-rule",
 							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									Scope:                    kueue.WithinClusterQueue,
-									RelativeWorkloadPriority: ptr.To(kueue.LessThan),
+									Scope: kueue.WithinClusterQueue,
+									Priority: &kueue.PreemptionConfigPriorityConstraint{
+										Mode:       kueue.Base,
+										Comparison: kueue.LessThan,
+									},
 								},
 							},
 						},
@@ -455,7 +458,7 @@ func TestConfigurablePreemptions(t *testing.T) {
 			targetCQ:      "a",
 			wantPreempted: sets.New("/a1"),
 		},
-		"RelativeWorkloadPriority with priority boost annotation modifies preemption ordering": {
+		"Priority with priority boost annotation in Boosted mode modifies preemption ordering": {
 			clusterQueues: baseCQs,
 			config: kueue.PreemptionConfig{
 				ObjectMeta: metav1.ObjectMeta{
@@ -468,8 +471,11 @@ func TestConfigurablePreemptions(t *testing.T) {
 							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
-									Scope:                    kueue.WithinClusterQueue,
-									RelativeWorkloadPriority: ptr.To(kueue.LessThan),
+									Scope: kueue.WithinClusterQueue,
+									Priority: &kueue.PreemptionConfigPriorityConstraint{
+										Mode:       kueue.Boosted,
+										Comparison: kueue.LessThan,
+									},
 								},
 							},
 						},
@@ -490,6 +496,45 @@ func TestConfigurablePreemptions(t *testing.T) {
 				Obj(),
 			targetCQ:      "a",
 			wantPreempted: sets.New("/a1"),
+		},
+		"Priority with priority boost annotation in Base mode ignores boost": {
+			clusterQueues: baseCQs,
+			config: kueue.PreemptionConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: defaultConfigName,
+				},
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
+						{
+							Name:             "base-priority-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
+								{
+									Scope: kueue.WithinClusterQueue,
+									Priority: &kueue.PreemptionConfigPriorityConstraint{
+										Mode:       kueue.Base,
+										Comparison: kueue.LessThan,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").
+					Priority(100).
+					Annotation("kueue.x-k8s.io/priority-boost", "-60").
+					SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").
+					Priority(60).
+					SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			incoming: unitWl.Clone().Name("a_incoming").
+				Priority(70).
+				Obj(),
+			targetCQ:      "a",
+			wantPreempted: sets.New("/a2"),
 		},
 		"candidates from both classical and configurable preemption algorithms are merged": {
 			clusterQueues: []*kueue.ClusterQueue{

@@ -262,15 +262,40 @@ type PreemptionConfigPreemptionCandidateSelector struct {
 	// +optional
 	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
 
-	// relativeWorkloadPriority defines how the candidate's priority compares to the preemptor's priority.
-	// For example "LessThan" means that only workloads with lower priority will be allowed as preemption candidates.
-	// The comparison is made using effective priority (accounting for priority boost if enabled).
-	// If nil, no relative priority check is enforced.
-	//
-	// TODO(#13396): replace with the `priority` field of the KEP
-	// (PreemptionConfigPriorityConstraint, carrying an explicit Base/Boosted mode) once the
-	// priority boost semantics are settled.
+	// priority defines the requirements for the priority of candidates.
+	// Workloads not matching those requirements will not be considered as preemption candidates.
+	// If nil, no priority requirements are enforced.
 	//
 	// +optional
-	RelativeWorkloadPriority *NumericComparison `json:"relativeWorkloadPriority,omitempty"`
+	Priority *PreemptionConfigPriorityConstraint `json:"priority,omitempty"`
 }
+
+// PreemptionConfigPriorityConstraint defines the requirements for the priority of preemption candidates.
+type PreemptionConfigPriorityConstraint struct {
+	// mode specifies whether priority comparison uses base or boosted (effective) priority.
+	//
+	// +kubebuilder:validation:Required
+	Mode PreemptionConfigPriorityMode `json:"mode"`
+
+	// comparison defines how the candidate's priority compares to the preemptor's priority.
+	// For example, "LessThan" means that only workloads with lower
+	// priority will be allowed as preemption candidates.
+	//
+	// +kubebuilder:validation:Required
+	Comparison NumericComparison `json:"comparison"`
+}
+
+// PreemptionConfigPriorityMode defines whether base or boosted (effective) priority is used when comparing candidates against the preemptor.
+// Possible values are:
+// - "Base": uses the raw priority value as assigned in the Workload resource (`spec.priority`) for both the candidate and preemptor, ignoring any priority boost.
+// - "Boosted": uses the effective priority value, adjusted by the priority boost mechanism (if enabled), for both the candidate and preemptor.
+//
+// +kubebuilder:validation:Enum=Base;Boosted
+type PreemptionConfigPriorityMode string
+
+const (
+	// Base uses the raw priority value as assigned in the Workload resource (`spec.priority`) for both the candidate and preemptor, ignoring any priority boost.
+	Base PreemptionConfigPriorityMode = "Base"
+	// Boosted uses the effective priority value, adjusted by the priority boost mechanism (if enabled), for both the candidate and preemptor.
+	Boosted PreemptionConfigPriorityMode = "Boosted"
+)

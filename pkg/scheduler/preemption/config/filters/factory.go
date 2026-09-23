@@ -50,7 +50,10 @@ func NewCandidateFilters(
 		return CandidateFilters{}, true
 	}
 	wlNumericFilters := buildNumericLabelFilters(log, selector.NumericLabels, preemptor)
-	wlPriorityFilters := buildPriorityFilters(log, selector, preemptor)
+	wlPriorityFilter, ok := buildPriorityFilter(log, selector.Priority, preemptor)
+	if !ok {
+		return CandidateFilters{}, true
+	}
 
 	var cqFilters []ClusterQueueFilter
 	cqFilters = append(cqFilters, cqScopeFilters...)
@@ -64,7 +67,9 @@ func NewCandidateFilters(
 		wlFilters = append(wlFilters, wlLabelFilter)
 	}
 	wlFilters = append(wlFilters, wlNumericFilters...)
-	wlFilters = append(wlFilters, wlPriorityFilters...)
+	if wlPriorityFilter != nil {
+		wlFilters = append(wlFilters, wlPriorityFilter)
+	}
 
 	return CandidateFilters{
 		CQFilters: cqFilters,
@@ -136,19 +141,15 @@ func buildWorkloadLabelFilter(
 	return NewWorkloadLabelFilter(ls), true
 }
 
-func buildPriorityFilters(
+func buildPriorityFilter(
 	log logr.Logger,
-	selector *kueue.PreemptionConfigPreemptionCandidateSelector,
+	priority *kueue.PreemptionConfigPriorityConstraint,
 	preemptor *workload.Info,
-) []WorkloadFilter {
-	if selector == nil {
-		return nil
+) (WorkloadFilter, bool) {
+	if priority == nil {
+		return nil, true
 	}
-	var filters []WorkloadFilter
-	if selector.RelativeWorkloadPriority != nil {
-		filters = append(filters, NewRelativeWorkloadPriorityFilter(log, *selector.RelativeWorkloadPriority, preemptor))
-	}
-	return filters
+	return NewPriorityFilter(log, *priority, preemptor)
 }
 
 func buildClusterQueueLabelFilter(
