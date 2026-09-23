@@ -16,6 +16,11 @@ limitations under the License.
 
 package common
 
+// ConfigurablePreemptionReason is reported for targets selected by the
+// ConfigurablePreemption rules. Targets selected by classical or Fair Sharing
+// preemption retain the reasons of those respective algorithms.
+const ConfigurablePreemptionReason = "ConfigurablePreemption"
+
 // PreemptionPossibility represents the result
 // of a preemption simulation.
 type PreemptionPossibility int

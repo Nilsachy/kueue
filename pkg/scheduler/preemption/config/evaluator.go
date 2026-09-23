@@ -18,9 +18,9 @@ package config
 
 import (
 	"context"
+	"slices"
 
 	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -36,7 +36,9 @@ import (
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
-type preemptionEvaluator struct {
+// PreemptionEvaluator selects the preemption candidates of a PreemptionConfig, for one
+// trigger at a time.
+type PreemptionEvaluator struct {
 	ctx    context.Context
 	log    logr.Logger
 	clock  clock.Clock
@@ -50,8 +52,8 @@ func NewPreemptionEvaluator(
 	clock clock.Clock,
 	config kueue.PreemptionConfig,
 	reader client.Reader,
-) *preemptionEvaluator {
-	return &preemptionEvaluator{
+) *PreemptionEvaluator {
+	return &PreemptionEvaluator{
 		ctx:    ctx,
 		log:    log,
 		clock:  clock,
@@ -60,20 +62,39 @@ func NewPreemptionEvaluator(
 	}
 }
 
-func (p *preemptionEvaluator) Candidates(
+// HasRulesFor returns whether any rule of the PreemptionConfig is activated by one of
+// the given triggers. It only inspects the configuration, never the snapshot, and is
+// therefore cheap enough to guard the candidate evaluation.
+func (p *PreemptionEvaluator) HasRulesFor(triggers ...kueue.PreemptionConfigActivationTrigger) bool {
+	for _, rule := range p.config.Spec.Rules {
+		if slices.Contains(triggers, rule.ActivationPolicy.Trigger) {
+			return true
+		}
+	}
+	return false
+}
+
+// Candidates returns the workloads selected as preemption candidates by the rules of the
+// PreemptionConfig activated by the given trigger, deduplicated across the rules and
+// selectors of the trigger.
+func (p *PreemptionEvaluator) Candidates(
 	snapshot *schdcache.Snapshot,
 	preemptor *workload.Info,
 	flavorsNeedPreemption sets.Set[resources.FlavorResource],
+	trigger kueue.PreemptionConfigActivationTrigger,
 ) ([]*workload.Info, error) {
 	var candidates []*workload.Info
+	// Several rules, or several selectors of a rule, can select the same workload.
 	seen := sets.New[types.UID]()
 	for _, rule := range p.config.Spec.Rules {
-		isActive, err := p.isActiveTrigger(rule, preemptor)
+		if rule.ActivationPolicy.Trigger != trigger {
+			continue
+		}
+		matches, err := workloadMatchesSelector(rule.PreemptorSelector, preemptor)
 		if err != nil {
 			return nil, err
 		}
-
-		if !isActive {
+		if !matches {
 			continue
 		}
 
@@ -119,35 +140,17 @@ func matchesWorkload(filter *filters.CandidateFilters, wl *workload.Info) bool {
 	return true
 }
 
-func (p *preemptionEvaluator) isActiveTrigger(rule kueue.PreemptionConfigPreemptionRule, wlInfo *workload.Info) (bool, error) {
-	condition := meta.FindStatusCondition(wlInfo.Obj.Status.Conditions, string(rule.ActivationPolicy.Trigger))
-	if condition == nil || condition.Status == metav1.ConditionFalse {
-		return false, nil
-	}
-
-	if rule.PreemptorSelector == nil {
-		// An unset selector accepts all the preemptors. Note that this differs from
-		// LabelSelectorAsSelector(nil), which matches nothing.
+// workloadMatchesSelector returns whether the labels of the workload match the
+// selector. A nil selector accepts every workload, which differs from
+// LabelSelectorAsSelector(nil), matching none.
+func workloadMatchesSelector(selector *metav1.LabelSelector, wlInfo *workload.Info) (bool, error) {
+	if selector == nil {
 		return true, nil
 	}
-	selector, err := metav1.LabelSelectorAsSelector(rule.PreemptorSelector)
+	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
 		return false, err
 	}
 
-	return selector.Matches(labels.Set(wlInfo.Obj.Labels)), nil
-}
-
-func (p *preemptionEvaluator) IsAnyTriggerActive(wlInfo *workload.Info) (bool, error) {
-	for _, rule := range p.config.Spec.Rules {
-		isActive, err := p.isActiveTrigger(rule, wlInfo)
-		if err != nil {
-			return false, err
-		}
-
-		if isActive {
-			return true, nil
-		}
-	}
-	return false, nil
+	return labelSelector.Matches(labels.Set(wlInfo.Obj.Labels)), nil
 }

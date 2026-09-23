@@ -58,19 +58,6 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 
 	unitWl := *utiltestingapi.MakeWorkload("unit", "").Request(corev1.ResourceCPU, "1")
 
-	insufficientQuotaCond := metav1.Condition{
-		Type:   string(kueue.InsufficientQuota),
-		Status: metav1.ConditionTrue,
-	}
-	alwaysCond := metav1.Condition{
-		Type:   string(kueue.Always),
-		Status: metav1.ConditionTrue,
-	}
-	quotaFeasibleAndInsufficientTopologyCond := metav1.Condition{
-		Type:   string(kueue.QuotaFeasibleAndInsufficientTopology),
-		Status: metav1.ConditionTrue,
-	}
-
 	clientReader := utiltesting.NewFakeClient(
 		utiltestingapi.MakeWorkloadPriorityClass("critical-tier").Label("tier", "critical").Obj(),
 		utiltestingapi.MakeWorkloadPriorityClass("batch-tier").Label("tier", "batch").Obj(),
@@ -83,6 +70,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 		admitted       []kueue.Workload
 		preemptorWl    *kueue.Workload
 		preemptorCq    kueue.ClusterQueueReference
+		trigger        kueue.PreemptionConfigActivationTrigger
 		client         client.Reader
 		wantCandidates []string
 		wantError      string
@@ -98,18 +86,18 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{},
 		},
-		"no candidates for workload not matching a trigger": {
+		"no candidates for rule without selectors": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "test",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 						},
 					},
 				},
@@ -137,7 +125,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 									},
 								},
 							},
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 						},
 					},
 				},
@@ -146,7 +134,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl: unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
+			preemptorWl: unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq: "a",
 			wantError:   "\"invalid\" is not a valid label selector operator",
 		},
@@ -162,7 +150,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "test",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
 									Scope: kueue.WithinCohortTree,
@@ -176,36 +164,11 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1", "a2"},
 		},
-		"selects candidates for InsufficientQuota trigger": {
-			clusterQueues: baseCqs,
-			config: kueue.PreemptionConfig{
-				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionConfigPreemptionRule{
-						{
-							Name:             "test",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
-							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
-								{
-									Scope: kueue.WithinCohortTree,
-								},
-							},
-						},
-					},
-				},
-			},
-			admitted: []kueue.Workload{
-				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
-				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
-			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
-			preemptorCq:    "a",
-			wantCandidates: []string{"a1", "a2"},
-		},
-		"selects candidates for Always trigger": {
+		"selects candidates for the Always trigger": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
@@ -226,11 +189,37 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(alwaysCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1", "a2"},
 		},
-		"selects candidates for QuotaFeasibleAndInsufficientTopology trigger": {
+		"selects candidates for the InsufficientQuota trigger": {
+			clusterQueues: baseCqs,
+			config: kueue.PreemptionConfig{
+				Spec: kueue.PreemptionConfigSpec{
+					Rules: []kueue.PreemptionConfigPreemptionRule{
+						{
+							Name:             "test",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
+								{
+									Scope: kueue.WithinCohortTree,
+								},
+							},
+						},
+					},
+				},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
+			preemptorCq:    "a",
+			trigger:        kueue.InsufficientQuota,
+			wantCandidates: []string{"a1", "a2"},
+		},
+		"selects candidates for the QuotaFeasibleAndInsufficientTopology trigger": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
@@ -251,8 +240,9 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(quotaFeasibleAndInsufficientTopologyCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
+			trigger:        kueue.QuotaFeasibleAndInsufficientTopology,
 			wantCandidates: []string{"a1", "a2"},
 		},
 		"rule with matching preemptor labels selector is triggered for matching workload": {
@@ -262,7 +252,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "test",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.QuotaFeasibleAndInsufficientTopology},
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							PreemptorSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"active": "true"},
 							},
@@ -279,7 +269,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Label("active", "true").Condition(quotaFeasibleAndInsufficientTopologyCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Label("active", "true").Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1", "a2"},
 		},
@@ -290,7 +280,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "test",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.QuotaFeasibleAndInsufficientTopology},
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							PreemptorSelector: &metav1.LabelSelector{
 								MatchLabels: map[string]string{"active": "true"},
 							},
@@ -302,27 +292,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(quotaFeasibleAndInsufficientTopologyCond).Obj(),
-			preemptorCq:    "a",
-			wantCandidates: []string{},
-		},
-		"rule does not apply because of different condition on preemptor's workload": {
-			clusterQueues: baseCqs,
-			config: kueue.PreemptionConfig{
-				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionConfigPreemptionRule{
-						{
-							Name:             "test",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.QuotaFeasibleAndInsufficientTopology},
-						},
-					},
-				},
-			},
-			admitted: []kueue.Workload{
-				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
-				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
-			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(alwaysCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{},
 		},
@@ -348,7 +318,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "test",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.QuotaFeasibleAndInsufficientTopology},
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
 									Scope: kueue.AnyClusterQueue,
@@ -363,18 +333,18 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
 				*unitWl.Clone().Name("c1").SimpleReserveQuota("c", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(quotaFeasibleAndInsufficientTopologyCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1", "b1", "c1"},
 		},
-		"returns candidates based on selectors from matched trigger": {
+		"returns candidates grouped by the trigger of the rule selecting them": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:             "topology rule",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.QuotaFeasibleAndInsufficientTopology},
+							Name:             "same-cluster-queue-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
 									Scope: kueue.WithinClusterQueue,
@@ -382,7 +352,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 							},
 						},
 						{
-							Name:             "quota rule",
+							Name:             "cohort-rule",
 							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
@@ -397,8 +367,9 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(quotaFeasibleAndInsufficientTopologyCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
+			trigger:        kueue.Always,
 			wantCandidates: []string{"a1"},
 		},
 		"returns candidates which use preemptable resource": {
@@ -407,8 +378,8 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				Spec: kueue.PreemptionConfigSpec{
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:             "topology rule",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.QuotaFeasibleAndInsufficientTopology},
+							Name:             "topology-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
 									Scope: kueue.WithinCohortTree,
@@ -422,18 +393,18 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "other-flavor", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(quotaFeasibleAndInsufficientTopologyCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1"},
 		},
-		"returns non repeating candidates even when same candidates matched by different trigger rules": {
+		"returns non repeating candidates even when the same candidates are matched by several rules of a trigger": {
 			clusterQueues: baseCqs,
 			config: kueue.PreemptionConfig{
 				Spec: kueue.PreemptionConfigSpec{
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:             "first rule",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.QuotaFeasibleAndInsufficientTopology},
+							Name:             "first-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
 									Scope: kueue.WithinClusterQueue,
@@ -441,8 +412,8 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 							},
 						},
 						{
-							Name:             "second rule",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.QuotaFeasibleAndInsufficientTopology},
+							Name:             "second-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
 									Scope: kueue.WithinCohortTree,
@@ -456,7 +427,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(quotaFeasibleAndInsufficientTopologyCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1", "b1"},
 		},
@@ -466,8 +437,8 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				Spec: kueue.PreemptionConfigSpec{
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
-							Name:             "relative-priority rule",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							Name:             "relative-priority-rule",
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
 									Scope:                    kueue.WithinClusterQueue,
@@ -482,7 +453,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").Priority(50).SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("a2").Priority(150).SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Priority(100).Condition(insufficientQuotaCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Priority(100).Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1"},
 		},
@@ -516,8 +487,9 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a3").
 					SimpleReserveQuota("a", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
+			trigger:        kueue.InsufficientQuota,
 			wantCandidates: []string{"a1"},
 		},
 		"ClusterQueueSelector filters candidates by matching ClusterQueue labels": {
@@ -557,8 +529,9 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
+			trigger:        kueue.InsufficientQuota,
 			wantCandidates: []string{"a1"},
 		},
 		"multi-selector deduplication": {
@@ -568,7 +541,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 					Rules: []kueue.PreemptionConfigPreemptionRule{
 						{
 							Name:             "rule-1",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
 									Scope: kueue.WithinClusterQueue,
@@ -580,7 +553,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 						},
 						{
 							Name:             "rule-2",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 							CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 								{
 									Scope: kueue.WithinCohortTree,
@@ -594,7 +567,7 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				*unitWl.Clone().Name("a1-same-cq").Priority(10).SimpleReserveQuota("a", "default", now).Obj(),
 				*unitWl.Clone().Name("b1-sibling-cq").Priority(20).SimpleReserveQuota("b", "default", now).Obj(),
 			},
-			preemptorWl:    unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
+			preemptorWl:    unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq:    "a",
 			wantCandidates: []string{"a1-same-cq", "b1-sibling-cq"},
 		},
@@ -637,8 +610,12 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			wlInfo := workload.NewInfo(tc.preemptorWl)
 			wlInfo.ClusterQueue = tc.preemptorCq
 
+			trigger := tc.trigger
+			if trigger == "" {
+				trigger = kueue.Always
+			}
 			frsNeedPreemption := sets.New(resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU})
-			candidates, err := evaluator.Candidates(snapshot, wlInfo, frsNeedPreemption)
+			candidates, err := evaluator.Candidates(snapshot, wlInfo, frsNeedPreemption, trigger)
 			if err != nil || tc.wantError != "" {
 				gotError := ""
 				if err != nil {
@@ -654,89 +631,9 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 			gotCandidates := slices.Sorted(slices.Values(utilslices.Map(candidates, func(wlInfo **workload.Info) string {
 				return (*wlInfo).Obj.Name
 			})))
-
-			if diff := cmp.Diff(slices.Sorted(slices.Values(tc.wantCandidates)), gotCandidates, cmpopts.EquateEmpty()); diff != "" {
+			wantCandidates := slices.Sorted(slices.Values(tc.wantCandidates))
+			if diff := cmp.Diff(wantCandidates, gotCandidates, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Selected candidates (-want,+got):\n%s", diff)
-			}
-		})
-	}
-}
-
-func Test_preemptionEvaluator_IsAnyTriggerActive(t *testing.T) {
-	unitWl := *utiltestingapi.MakeWorkload("unit", "").Request(corev1.ResourceCPU, "1")
-	insufficientQuotaCond := metav1.Condition{
-		Type:   string(kueue.InsufficientQuota),
-		Status: metav1.ConditionTrue,
-	}
-
-	tests := map[string]struct {
-		config   kueue.PreemptionConfig
-		workload *kueue.Workload
-		want     bool
-		wantErr  bool
-	}{
-		"empty config": {
-			config: kueue.PreemptionConfig{
-				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionConfigPreemptionRule{},
-				},
-			},
-			workload: unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
-			want:     false,
-		},
-		"active trigger": {
-			config: kueue.PreemptionConfig{
-				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionConfigPreemptionRule{
-						{
-							Name:             "test",
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
-						},
-					},
-				},
-			},
-			workload: unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
-			want:     true,
-		},
-		"invalid labels configuration": {
-			config: kueue.PreemptionConfig{
-				Spec: kueue.PreemptionConfigSpec{
-					Rules: []kueue.PreemptionConfigPreemptionRule{
-						{
-							Name: "test",
-							PreemptorSelector: &metav1.LabelSelector{
-								MatchExpressions: []metav1.LabelSelectorRequirement{
-									{
-										Key:      "test",
-										Operator: "invalid",
-									},
-								},
-							},
-							ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
-						},
-					},
-				},
-			},
-			workload: unitWl.Clone().Name("a-incoming").Condition(insufficientQuotaCond).Obj(),
-			wantErr:  true,
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			ctx, log := utiltesting.ContextWithLog(t)
-			p := NewPreemptionEvaluator(ctx, log, clock.RealClock{}, tc.config, nil)
-
-			wlInfo := workload.NewInfo(tc.workload)
-			wlInfo.ClusterQueue = "test-cq"
-
-			got, gotErr := p.IsAnyTriggerActive(wlInfo)
-			if (gotErr != nil) != tc.wantErr {
-				t.Errorf("IsAnyTriggerActive() error = %v, want error = %v", gotErr != nil, tc.wantErr)
-				return
-			}
-			if got != tc.want {
-				t.Errorf("IsAnyTriggerActive() = %v, want %v", got, tc.want)
 			}
 		})
 	}

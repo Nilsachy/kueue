@@ -53,7 +53,7 @@ var _ = ginkgo.Describe("Configuration Preemptions", ginkgo.Label("feature:confi
 			Rules: []kueue.PreemptionConfigPreemptionRule{
 				{
 					Name:             "test-rule-one",
-					ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.InsufficientQuota},
+					ActivationPolicy: kueue.PreemptionConfigActivationPolicy{Trigger: kueue.Always},
 					CandidateSelectors: []kueue.PreemptionConfigPreemptionCandidateSelector{
 						{
 							Scope: kueue.WithinClusterQueue,
