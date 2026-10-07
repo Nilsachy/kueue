@@ -376,6 +376,7 @@ Assuming workloads are roughly evenly distributed across ClusterQueues (approxim
 | Algorithm                              | Per-Step Selection Time     | Total Selection Time (for $m$ victims) | Overall Algorithm Time   | Scalability Bottleneck                                                        |
 | -------------------------------------- | --------------------------- | -------------------------------------- | ------------------------ | ----------------------------------------------------------------------------- |
 | **Naive Linear Filtering**             | $O(n)$                      | $O(m \cdot n)$                         | $O(m \cdot n)$           | High per-step scan overhead when $n$ is large.                                |
+
 | **Naive Dynamic Re-sorting**           | $O(n \log n)$               | $O(m \cdot n \log n)$                  | $O(m \cdot n \log n)$    | Severe throughput degradation on frequent evictions.                          |
 | **Proposed Per-(Selector, CQ) Queues** | $O(c \cdot s) \approx O(c)$ | $O(m \cdot c)$                         | **`O(n log n + m · c)`** | Scales with number of ClusterQueues $c$, independent of $n$ during selection. |
 
