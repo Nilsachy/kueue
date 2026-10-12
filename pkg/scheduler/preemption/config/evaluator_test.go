@@ -17,6 +17,7 @@ limitations under the License.
 package config
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -29,9 +30,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/utils/clock"
+	"k8s.io/component-base/featuregate"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -540,17 +542,17 @@ func TestPreemptionEvaluatorCandidates(t *testing.T) {
 				t.Fatalf("unexpected error while building snapshot: %v", err)
 			}
 
-			evaluator := NewPreemptionEvaluator(ctx, log, clock.RealClock{}, tc.config, candidatesByName)
-
 			wlInfo := workload.NewInfo(log, tc.preemptorWl)
 			wlInfo.ClusterQueue = tc.preemptorCq
+
+			evaluator := NewPreemptionEvaluator(ctx, log, tc.config, nil, wlInfo, candidatesByName)
 
 			trigger := tc.trigger
 			if trigger == "" {
 				trigger = kueuealpha.Always
 			}
 			frsNeedPreemption := sets.New(resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU})
-			candidates, err := evaluator.candidatesFor(snapshot, wlInfo, frsNeedPreemption, trigger)
+			candidates, err := evaluator.candidatesFor(snapshot, frsNeedPreemption, trigger)
 			if len(tc.wantErrs) > 0 {
 				if err == nil {
 					t.Fatalf("candidatesFor() expected error, got nil")
@@ -742,10 +744,10 @@ func TestPreemptionEvaluatorSelectorIndexes(t *testing.T) {
 				t.Fatalf("unexpected error while building snapshot: %v", err)
 			}
 
-			evaluator := NewPreemptionEvaluator(ctx, log, clock.RealClock{}, tc.config, candidatesByName)
-
 			wlInfo := workload.NewInfo(log, tc.preemptorWl)
 			wlInfo.ClusterQueue = tc.preemptorCq
+
+			evaluator := NewPreemptionEvaluator(ctx, log, tc.config, nil, wlInfo, candidatesByName)
 
 			trigger := tc.trigger
 			if trigger == "" {
@@ -753,7 +755,7 @@ func TestPreemptionEvaluatorSelectorIndexes(t *testing.T) {
 			}
 
 			frsNeedPreemption := sets.New(resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU})
-			candidates, err := evaluator.candidatesFor(snapshot, wlInfo, frsNeedPreemption, trigger)
+			candidates, err := evaluator.candidatesFor(snapshot, frsNeedPreemption, trigger)
 			if err != nil {
 				t.Errorf("candidatesFor() error: %v", err)
 				return
@@ -949,12 +951,12 @@ func TestPreemptionEvaluatorFindCandidates(t *testing.T) {
 				t.Fatalf("unexpected error while building snapshot: %v", err)
 			}
 
-			var evaluator *PreemptionEvaluator
-			if tc.config != nil {
-				evaluator = NewPreemptionEvaluator(ctx, log, clock.RealClock{}, *tc.config, candidatesByName)
-			}
 			preemptor := workload.NewInfo(log, tc.preemptor)
 			preemptor.ClusterQueue = "a"
+			var evaluator *PreemptionEvaluator
+			if tc.config != nil {
+				evaluator = NewPreemptionEvaluator(ctx, log, *tc.config, nil, preemptor, candidatesByName)
+			}
 			requestedCPU := preemptor.TotalRequests[0].Requests.ResourceValue(corev1.ResourceCPU)
 			quotaFits := func() bool {
 				return snapshot.ClusterQueue("a").Available(fr).Cmp(requestedCPU) >= 0
@@ -963,7 +965,7 @@ func TestPreemptionEvaluatorFindCandidates(t *testing.T) {
 			// When
 			// The yield interrupts FindCandidates once the preemptor fits.
 			var gotTargets []string
-			gotInterrupted := evaluator.FindCandidates(snapshot, preemptor, sets.New(fr), quotaFits, func(target *policy.Target) bool {
+			gotInterrupted := evaluator.FindCandidates(snapshot, sets.New(fr), quotaFits, func(target *policy.Target) bool {
 				gotTargets = append(gotTargets, string(workload.Key(target.WorkloadInfo.Obj)))
 				return tc.neverFits || !quotaFits()
 			})
@@ -974,6 +976,93 @@ func TestPreemptionEvaluatorFindCandidates(t *testing.T) {
 			}
 			if diff := cmp.Diff(tc.wantTargets, gotTargets, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("FindCandidates() targets (-want,+got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestNewEvaluatorForPreemptionConfigConsumedLimits(t *testing.T) {
+	now := time.Now()
+	clusterQueue := utiltestingapi.MakeClusterQueue("a").
+		ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+			Resource(corev1.ResourceCPU, "1").Obj()).
+		Obj()
+	fr := resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU}
+	preemptionConfig := utiltestingalpha.MakePreemptionConfig("test").
+		Rule("within-cluster-queue-rule", kueuealpha.Always,
+			utiltestingalpha.MakeCandidateSelector(kueuealpha.WithinClusterQueue).Obj(),
+		).Obj()
+	admitted := utiltestingapi.MakeWorkload("a1", "").UID("a1").
+		Request(corev1.ResourceCPU, "1").
+		SimpleReserveQuota("a", "default", now).
+		Obj()
+
+	cases := map[string]struct {
+		enableLimits bool
+		listErr      error
+		want         map[string]policy.ConsumedLimits
+	}{
+		"limits are not consumed when the ConfigurablePreemptionLimits feature is disabled": {
+			want: map[string]policy.ConsumedLimits{
+				"/a1": nil,
+			},
+		},
+		"limits with different scopes are consumed when the ConfigurablePreemptionLimits feature is enabled": {
+			enableLimits: true,
+			want: map[string]policy.ConsumedLimits{
+				"/a1": {"global": "Global", "per-preempted-cq": "a"},
+			},
+		},
+		"no candidates are yielded when the PreemptionLimits cannot be listed": {
+			enableLimits: true,
+			listErr:      errors.New("simulated List error"),
+			want:         map[string]policy.ConsumedLimits{},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+				features.ConfigurablePreemptions:      true,
+				features.ConfigurablePreemptionLimits: tc.enableLimits,
+			})
+			ctx, log := utiltesting.ContextWithLog(t)
+			cl := utiltesting.NewClientBuilder().
+				WithObjects(
+					preemptionConfig,
+					utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).Obj(),
+					utiltestingalpha.MakePreemptionLimit("per-preempted-cq", kueuealpha.PreemptedCQLimitScope).Obj(),
+				).
+				WithLists(&kueue.WorkloadList{Items: []kueue.Workload{*admitted}}).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if _, ok := list.(*kueuealpha.PreemptionLimitList); ok && tc.listErr != nil {
+							return tc.listErr
+						}
+						return c.List(ctx, list, opts...)
+					},
+				}).
+				Build()
+			cqCache := schdcache.New(cl)
+			cqCache.AddOrUpdateResourceFlavor(log, utiltestingapi.MakeResourceFlavor("default").Obj())
+			if err := cqCache.AddClusterQueue(ctx, clusterQueue); err != nil {
+				t.Fatalf("Couldn't add ClusterQueue to cache: %v", err)
+			}
+			snapshot, err := cqCache.Snapshot(ctx)
+			if err != nil {
+				t.Fatalf("unexpected error while building snapshot: %v", err)
+			}
+			preemptor := workload.NewInfo(log, utiltestingapi.MakeWorkload("a_incoming", "").Request(corev1.ResourceCPU, "1").Obj())
+			preemptor.ClusterQueue = "a"
+			evaluator := NewEvaluatorForPreemptionConfig(ctx, log, cl, preemptionConfig.Name, preemptor, candidatesByName)
+
+			got := map[string]policy.ConsumedLimits{}
+			evaluator.FindCandidates(snapshot, sets.New(fr), func() bool { return false }, func(target *policy.Target) bool {
+				got[string(workload.Key(target.WorkloadInfo.Obj))] = target.ConfigurablePreemptionReasonData.ConsumedLimits
+				return true
+			})
+
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("Unexpected consumed limits (-want,+got):\n%s", diff)
 			}
 		})
 	}
