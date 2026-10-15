@@ -54,6 +54,10 @@ func scopeValue(scope kueuealpha.PreemptionLimitScope, preemptor, target *worklo
 	}
 }
 
+// pruneGracePeriod delays pruning past the window, so that readers whose
+// "now" lags slightly behind still find every event they count.
+const pruneGracePeriod = time.Minute
+
 // events holds preemption timestamps in ascending order.
 type events []time.Time
 
@@ -65,6 +69,15 @@ func (e events) insert(ts time.Time) events {
 		i--
 	}
 	return slices.Insert(e, i, ts)
+}
+
+// pruneBefore drops the events older than cutoff by reslicing, so the kept
+// events are not copied. The dropped events stay in the backing array until a
+// later insert grows it into a new one, or the bucket is deleted, only then
+// memory is cleaned.
+func (e events) pruneBefore(cutoff time.Time) events {
+	i, _ := slices.BinarySearchFunc(e, cutoff, time.Time.Compare) // first event >= cutoff
+	return e[i:]
 }
 
 // PreemptionLimitTracker records the timestamps of confirmed configurable preemptions for
@@ -94,4 +107,32 @@ func (t *PreemptionLimitTracker) Record(ts time.Time, consumedLimits policy.Cons
 		}
 		scopes[scopeValue] = scopes[scopeValue].insert(ts)
 	}
+}
+
+// Prune drops the events of limit recorded before now minus its window and
+// pruneGracePeriod, and forgets the scope values (and the limit) left without events.
+func (t *PreemptionLimitTracker) Prune(now time.Time, limit *kueuealpha.PreemptionLimit) {
+	ref := policy.PreemptionLimitReference(limit.Name)
+	window := time.Duration(limit.Spec.LimitWindowSeconds) * time.Second
+	cutoff := now.Add(-window - pruneGracePeriod)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	scopes := t.events[ref]
+	for scopeValue, e := range scopes {
+		if e = e.pruneBefore(cutoff); len(e) == 0 {
+			delete(scopes, scopeValue)
+		} else {
+			scopes[scopeValue] = e
+		}
+	}
+	if len(scopes) == 0 {
+		delete(t.events, ref)
+	}
+}
+
+// Forget drops all the events of limit.
+func (t *PreemptionLimitTracker) Forget(limit policy.PreemptionLimitReference) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.events, limit)
 }
