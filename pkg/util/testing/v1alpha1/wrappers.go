@@ -428,8 +428,14 @@ func (pl *PreemptionLimitWrapper) ConfigSelector(selector *metav1.LabelSelector)
 	return pl
 }
 
-// ClusterQueueSelector sets the selector of the ClusterQueues the limit applies to.
-func (pl *PreemptionLimitWrapper) ClusterQueueSelector(selector *metav1.LabelSelector) *PreemptionLimitWrapper {
-	pl.Spec.ClusterQueueSelector = selector
+// PreemptorClusterQueueSelector sets the selector of the preempting ClusterQueues the limit applies to.
+func (pl *PreemptionLimitWrapper) PreemptorClusterQueueSelector(selector *metav1.LabelSelector) *PreemptionLimitWrapper {
+	pl.Spec.PreemptorClusterQueueSelector = selector
+	return pl
+}
+
+// PreemptedClusterQueueSelector sets the selector of the preempted ClusterQueues the limit applies to.
+func (pl *PreemptionLimitWrapper) PreemptedClusterQueueSelector(selector *metav1.LabelSelector) *PreemptionLimitWrapper {
+	pl.Spec.PreemptedClusterQueueSelector = selector
 	return pl
 }

@@ -1130,7 +1130,7 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 		"no candidates are yielded when a PreemptionLimit has an invalid selector": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
 				*utiltestingalpha.MakePreemptionLimit("invalid", kueuealpha.GlobalPreemptionLimitScope).Limit(10).LimitWindowSeconds(windowSeconds).
-					ClusterQueueSelector(&metav1.LabelSelector{
+					PreemptorClusterQueueSelector(&metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "tier", Operator: "invalid"}},
 					}).Obj(),
 			},

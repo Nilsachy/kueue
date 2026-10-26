@@ -25,7 +25,7 @@ package v1alpha1
 type PreemptionLimitCountApplyConfiguration struct {
 	// name identifies the scoped entity.
 	// For Global scope it is "Global".
-	// For PreemptingClusterQueue and PreemptedClusterQueue scopes it is the ClusterQueue name.
+	// For PreemptorClusterQueue and PreemptedClusterQueue scopes it is the ClusterQueue name.
 	// For PreemptedWorkload scope it is "<namespace>/<workload-name>".
 	//
 	Name *string `json:"name,omitempty"`

@@ -41,7 +41,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	expired := now.Add(-time.Hour)
 	errTest := errors.New("test error")
-	limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptingCQLimitScope).
+	limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptorCQLimitScope).
 		LimitWindowSeconds(60).
 		Obj()
 	// recorded holds the preemption events of the tracker, by timestamp.

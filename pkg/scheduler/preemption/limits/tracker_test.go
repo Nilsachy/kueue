@@ -32,7 +32,7 @@ import (
 
 func TestPreemptionLimitTrackerCounts(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	perCQ := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptingCQLimitScope).LimitWindowSeconds(60).Obj()
+	perCQ := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).LimitWindowSeconds(60).Obj()
 	cutoff := now.Add(-60 * time.Second)
 
 	cases := map[string]struct {
@@ -205,7 +205,7 @@ func TestPreemptionLimitTrackerPrune(t *testing.T) {
 	cutoff := now.Add(-window - pruneGracePeriod)
 	expired := cutoff.Add(-time.Nanosecond)
 	withinGracePeriod := now.Add(-window - pruneGracePeriod/2)
-	limit := utiltestingalpha.MakePreemptionLimit(prunedLimit, kueuealpha.PreemptingCQLimitScope).LimitWindowSeconds(windowSeconds).Obj()
+	limit := utiltestingalpha.MakePreemptionLimit(prunedLimit, kueuealpha.PreemptorCQLimitScope).LimitWindowSeconds(windowSeconds).Obj()
 
 	cases := map[string]struct {
 		events map[policy.PreemptionLimitReference]map[policy.PreemptionLimitScopeValue]events
@@ -279,7 +279,7 @@ func TestPreemptionLimitTrackerPruneConcurrent(t *testing.T) {
 	const prunedLimit, otherLimit = "per-cq", "global"
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	window := windowSeconds * time.Second
-	limit := utiltestingalpha.MakePreemptionLimit(prunedLimit, kueuealpha.PreemptingCQLimitScope).LimitWindowSeconds(windowSeconds).Obj()
+	limit := utiltestingalpha.MakePreemptionLimit(prunedLimit, kueuealpha.PreemptorCQLimitScope).LimitWindowSeconds(windowSeconds).Obj()
 	consumed := policy.ConsumedLimits{prunedLimit: "cq-a", otherLimit: "Global"}
 	// Every recorded event is already expired, so the prunes keep deleting the
 	// pruned limit while the records keep recreating it.
