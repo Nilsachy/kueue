@@ -391,9 +391,11 @@ type PreemptionLimitWrapper struct {
 }
 
 // MakePreemptionLimit creates a PreemptionLimit wrapper with the given scope.
+// Its UID defaults to the name suffixed with "-uid".
 func MakePreemptionLimit(name string, scope kueuealpha.PreemptionLimitScope) *PreemptionLimitWrapper {
 	return &PreemptionLimitWrapper{
 		Name: name,
+		UID:  types.UID(name + "-uid"),
 		Spec: kueuealpha.PreemptionLimitSpec{
 			Scope: scope,
 		},
@@ -431,11 +433,5 @@ func (pl *PreemptionLimitWrapper) ConfigSelector(selector *metav1.LabelSelector)
 // ClusterQueueSelector sets the selector of the ClusterQueues the limit applies to.
 func (pl *PreemptionLimitWrapper) ClusterQueueSelector(selector *metav1.LabelSelector) *PreemptionLimitWrapper {
 	pl.Spec.ClusterQueueSelector = selector
-	return pl
-}
-
-// UID sets the UID of the PreemptionLimit.
-func (pl *PreemptionLimitWrapper) UID(uid types.UID) *PreemptionLimitWrapper {
-	pl.ObjectMeta.UID = uid
 	return pl
 }

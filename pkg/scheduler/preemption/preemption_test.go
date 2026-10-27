@@ -4837,8 +4837,8 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 	// Only the PreemptionLimits synced by the PreemptionLimitReconciler are tracked.
 	newTracker := func() *limits.PreemptionLimitTracker {
 		tracker := limits.NewPreemptionLimitTracker()
-		tracker.Sync(now, utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).UID("global-uid").Obj())
-		tracker.Sync(now, utiltestingalpha.MakePreemptionLimit("per-preempted-workload", kueuealpha.PreemptedWorkloadLimitScope).UID("per-preempted-workload-uid").Obj())
+		tracker.Sync(now, utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).Obj())
+		tracker.Sync(now, utiltestingalpha.MakePreemptionLimit("per-preempted-workload", kueuealpha.PreemptedWorkloadLimitScope).Obj())
 		return tracker
 	}
 	evictionErr := errors.New("simulated eviction error")

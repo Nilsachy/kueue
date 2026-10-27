@@ -42,8 +42,8 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	expired := now.Add(-time.Hour)
 	errTest := errors.New("test error")
-	limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptingCQLimitScope).UID("uid").LimitWindowSeconds(60).Obj()
-	otherLimit := utiltestingalpha.MakePreemptionLimit("other-limit", kueuealpha.GlobalPreemptionLimitScope).UID("other-uid").LimitWindowSeconds(60).Obj()
+	limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptingCQLimitScope).LimitWindowSeconds(60).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("other-limit", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).Obj()
 	consumed := func(l *kueuealpha.PreemptionLimit, v policy.PreemptionLimitScopeValue) policy.ConsumedLimit {
 		return policy.ConsumedLimit{UID: l.UID, Scope: l.Spec.Scope, ScopeValue: v}
 	}

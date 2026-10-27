@@ -37,9 +37,9 @@ import (
 func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	global := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		UID("global-uid").Limit(3).LimitWindowSeconds(60)
+		Limit(3).LimitWindowSeconds(60)
 	perCQ := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptedCQLimitScope).
-		UID("per-cq-uid").Limit(1).LimitWindowSeconds(60)
+		Limit(1).LimitWindowSeconds(60)
 	globalConsumed := consumedLimit("global-uid", kueuealpha.GlobalPreemptionLimitScope, "Global")
 	perCQConsumed := consumedLimit("per-cq-uid", kueuealpha.PreemptedCQLimitScope, "preempted-cq")
 	twoRecordedGlobalEvents := trackedLimits{

@@ -88,7 +88,7 @@ func TestPreemptionLimiterConsumedLimits(t *testing.T) {
 	targetCQ := &schdcache.ClusterQueueSnapshot{Name: "preempted-cq", Labels: map[string]string{"side": "preempted"}}
 	preemptor := &workload.Info{Obj: utiltestingapi.MakeWorkload("preemptor", "ns").Obj(), ClusterQueue: "preempting-cq"}
 	target := &workload.Info{Obj: utiltestingapi.MakeWorkload("target", "ns").UID("target").Obj(), ClusterQueue: "preempted-cq"}
-	globalLimit := *utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).UID("global-uid").LimitWindowSeconds(60).Obj()
+	globalLimit := *utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).Obj()
 
 	cases := map[string]struct {
 		preemptionLimits []kueuealpha.PreemptionLimit
@@ -103,7 +103,7 @@ func TestPreemptionLimiterConsumedLimits(t *testing.T) {
 		"limits matching the ClusterQueues are consumed together, the others are not": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
 				globalLimit,
-				*utiltestingalpha.MakePreemptionLimit("preempted-workload", kueuealpha.PreemptedWorkloadLimitScope).UID("preempted-workload-uid").LimitWindowSeconds(60).Obj(),
+				*utiltestingalpha.MakePreemptionLimit("preempted-workload", kueuealpha.PreemptedWorkloadLimitScope).LimitWindowSeconds(60).Obj(),
 				*utiltestingalpha.MakePreemptionLimit("other-cqs", kueuealpha.PreemptedCQLimitScope).LimitWindowSeconds(60).
 					ClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"side": "other"}}).Obj(),
 			},
@@ -153,9 +153,9 @@ func TestPreemptionLimiterConsumedLimits(t *testing.T) {
 func TestPreemptionLimiterAllowance(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	perCQ := *utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptedCQLimitScope).
-		UID("uid").Limit(3).LimitWindowSeconds(60).Obj()
+		Limit(3).LimitWindowSeconds(60).Obj()
 	trackedPerCQ := func(events scopeEvents) trackedLimits {
-		return trackedLimits{"per-cq": trackedLimit("uid", kueuealpha.PreemptedCQLimitScope, events)}
+		return trackedLimits{"per-cq": trackedLimit("per-cq-uid", kueuealpha.PreemptedCQLimitScope, events)}
 	}
 
 	cases := map[string]struct {
@@ -181,14 +181,14 @@ func TestPreemptionLimiterAllowance(t *testing.T) {
 			limits: trackedPerCQ(scopeEvents{"cq-a": {now.Add(-50 * time.Second), now}}),
 			changeTracker: func(tracker *PreemptionLimitTracker) {
 				// Drops all the events, as a prune with a shrunk window would.
-				tracker.Sync(now.Add(time.Hour), utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptedCQLimitScope).UID("uid").LimitWindowSeconds(1).Obj())
+				tracker.Sync(now.Add(time.Hour), utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptedCQLimitScope).LimitWindowSeconds(1).Obj())
 			},
 			want: 1,
 		},
 		"allowance doesn't change when the tracker records preemptions after the limiter is created": {
 			limits: trackedPerCQ(nil),
 			changeTracker: func(tracker *PreemptionLimitTracker) {
-				tracker.Record(now, policy.ConsumedLimits{"per-cq": consumedLimit("uid", kueuealpha.PreemptedCQLimitScope, "cq-a")})
+				tracker.Record(now, policy.ConsumedLimits{"per-cq": consumedLimit("per-cq-uid", kueuealpha.PreemptedCQLimitScope, "cq-a")})
 			},
 			want: 3,
 		},
