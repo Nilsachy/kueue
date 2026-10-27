@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
@@ -99,6 +100,28 @@ func TestPreemptionLimitTrackerCounts(t *testing.T) {
 			},
 			asked: []*kueuealpha.PreemptionLimit{perCQLimit},
 		},
+		"limit tracked with other selectors is not counted": {
+			limits: trackedLimits{
+				"per-cq": withSelectors(trackedLimit("per-cq-uid", perCQ, scopeEvents{"cq-a": {now}}), selector("tier", "gold"), nil, nil),
+			},
+			asked: []*kueuealpha.PreemptionLimit{perCQLimit},
+		},
+		"limit tracked with the same selectors is counted": {
+			limits: trackedLimits{
+				"per-cq": withSelectors(trackedLimit("per-cq-uid", perCQ, scopeEvents{"cq-a": {now}}),
+					selector("tier", "gold"), selector("side", "preemptor"), selector("side", "preempted")),
+			},
+			asked: []*kueuealpha.PreemptionLimit{
+				utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).LimitWindowSeconds(60).
+					ConfigSelector(selector("tier", "gold")).
+					PreemptorClusterQueueSelector(selector("side", "preemptor")).
+					PreemptedClusterQueueSelector(selector("side", "preempted")).
+					Obj(),
+			},
+			want: preemptionCounts{
+				"per-cq": {"cq-a": 1},
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -135,6 +158,19 @@ func trackedLimit(uid types.UID, scope kueuealpha.PreemptionLimitScope, events s
 		events = scopeEvents{}
 	}
 	return &limitState{uid: uid, scope: scope, events: events}
+}
+
+// withSelectors sets the selectors s was tracked with.
+func withSelectors(s *limitState, config, preemptorClusterQueue, preemptedClusterQueue *metav1.LabelSelector) *limitState {
+	s.configSelector = config
+	s.preemptorClusterQueueSelector = preemptorClusterQueue
+	s.preemptedClusterQueueSelector = preemptedClusterQueue
+	return s
+}
+
+// selector returns a LabelSelector matching the label key=value.
+func selector(key, value string) *metav1.LabelSelector {
+	return &metav1.LabelSelector{MatchLabels: map[string]string{key: value}}
 }
 
 func consumedLimit(uid types.UID, scope kueuealpha.PreemptionLimitScope, scopeValue policy.PreemptionLimitScopeValue) policy.ConsumedLimit {
@@ -387,6 +423,62 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 		"limit recreated with the same name resets the events": {
 			limits: trackedLimits{
 				syncedLimit: trackedLimit("old-uid", perCQ, scopeEvents{"cq-a": {now}}),
+			},
+			want: trackedLimits{
+				syncedLimit: trackedLimit("per-cq-uid", perCQ, nil),
+			},
+		},
+		"untracked limit starts being tracked with its selectors": {
+			updatedLimit: utiltestingalpha.MakePreemptionLimit(syncedLimit, perCQ).LimitWindowSeconds(windowSeconds).
+				ConfigSelector(selector("tier", "gold")).
+				PreemptorClusterQueueSelector(selector("side", "preemptor")).
+				PreemptedClusterQueueSelector(selector("side", "preempted")).
+				Obj(),
+			want: trackedLimits{
+				syncedLimit: withSelectors(trackedLimit("per-cq-uid", perCQ, nil),
+					selector("tier", "gold"), selector("side", "preemptor"), selector("side", "preempted")),
+			},
+		},
+		"unchanged selectors keep the events": {
+			limits: trackedLimits{
+				syncedLimit: withSelectors(trackedLimit("per-cq-uid", perCQ, scopeEvents{"cq-a": {now}}),
+					selector("tier", "gold"), selector("side", "preemptor"), selector("side", "preempted")),
+			},
+			updatedLimit: utiltestingalpha.MakePreemptionLimit(syncedLimit, perCQ).LimitWindowSeconds(windowSeconds).
+				ConfigSelector(selector("tier", "gold")).
+				PreemptorClusterQueueSelector(selector("side", "preemptor")).
+				PreemptedClusterQueueSelector(selector("side", "preempted")).
+				Obj(),
+			want: trackedLimits{
+				syncedLimit: withSelectors(trackedLimit("per-cq-uid", perCQ, scopeEvents{"cq-a": {now}}),
+					selector("tier", "gold"), selector("side", "preemptor"), selector("side", "preempted")),
+			},
+		},
+		"config selector change resets the events": {
+			limits: trackedLimits{
+				syncedLimit: trackedLimit("per-cq-uid", perCQ, scopeEvents{"cq-a": {now}}),
+			},
+			updatedLimit: utiltestingalpha.MakePreemptionLimit(syncedLimit, perCQ).LimitWindowSeconds(windowSeconds).
+				ConfigSelector(selector("tier", "gold")).
+				Obj(),
+			want: trackedLimits{
+				syncedLimit: withSelectors(trackedLimit("per-cq-uid", perCQ, nil), selector("tier", "gold"), nil, nil),
+			},
+		},
+		"preemptor ClusterQueue selector change resets the events": {
+			limits: trackedLimits{
+				syncedLimit: withSelectors(trackedLimit("per-cq-uid", perCQ, scopeEvents{"cq-a": {now}}), nil, selector("side", "preemptor"), nil),
+			},
+			updatedLimit: utiltestingalpha.MakePreemptionLimit(syncedLimit, perCQ).LimitWindowSeconds(windowSeconds).
+				PreemptorClusterQueueSelector(selector("side", "other")).
+				Obj(),
+			want: trackedLimits{
+				syncedLimit: withSelectors(trackedLimit("per-cq-uid", perCQ, nil), nil, selector("side", "other"), nil),
+			},
+		},
+		"preempted ClusterQueue selector removal resets the events": {
+			limits: trackedLimits{
+				syncedLimit: withSelectors(trackedLimit("per-cq-uid", perCQ, scopeEvents{"cq-a": {now}}), nil, nil, selector("side", "preempted")),
 			},
 			want: trackedLimits{
 				syncedLimit: trackedLimit("per-cq-uid", perCQ, nil),
