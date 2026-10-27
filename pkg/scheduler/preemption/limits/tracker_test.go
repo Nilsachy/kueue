@@ -117,7 +117,7 @@ func TestPreemptionLimitTrackerCounts(t *testing.T) {
 // Scopes of the PreemptionLimits used across the tracker tests.
 const (
 	global = kueuealpha.GlobalPreemptionLimitScope
-	perCQ  = kueuealpha.PreemptingCQLimitScope
+	perCQ  = kueuealpha.PreemptorCQLimitScope
 )
 
 type scopeEvents = map[policy.PreemptionLimitScopeValue]events

@@ -35,16 +35,16 @@ type PreemptionLimitSpecApplyConfiguration struct {
 	// If not set, it applies to all PreemptionConfigs.
 	//
 	ConfigSelector *v1.LabelSelectorApplyConfiguration `json:"configSelector,omitempty"`
-	// clusterQueueSelector selects ClusterQueues to which this limit applies.
-	// If not set, it applies to all ClusterQueues under the configured scope.
+	// preemptorClusterQueueSelector selects ClusterQueues of preempting workloads to which this limit applies.
+	// If not set, this limit applies to preempting workloads from all ClusterQueues.
 	//
-	ClusterQueueSelector *v1.LabelSelectorApplyConfiguration `json:"clusterQueueSelector,omitempty"`
-	// ruleNames restricts the limit to specific rule names within matching PreemptionConfigs.
-	// If not set, it applies to all rules.
+	PreemptorClusterQueueSelector *v1.LabelSelectorApplyConfiguration `json:"preemptorClusterQueueSelector,omitempty"`
+	// preemptedClusterQueueSelector selects ClusterQueues of preempted workloads to which this limit applies.
+	// If not set, this limit applies to preempted workloads from all ClusterQueues.
 	//
-	RuleNames []string `json:"ruleNames,omitempty"`
+	PreemptedClusterQueueSelector *v1.LabelSelectorApplyConfiguration `json:"preemptedClusterQueueSelector,omitempty"`
 	// limit defines how many preemption events can occur within the given time window.
-	// An event is defined as a confirmed (preemptor, preemptee) eviction pair.
+	// An event is defined as a confirmed (preemptor, preempted) eviction pair.
 	// Setting limit to 0 blocks all preemptions under this limit's scope.
 	//
 	Limit *int32 `json:"limit,omitempty"`
@@ -76,21 +76,19 @@ func (b *PreemptionLimitSpecApplyConfiguration) WithConfigSelector(value *v1.Lab
 	return b
 }
 
-// WithClusterQueueSelector sets the ClusterQueueSelector field in the declarative configuration to the given value
+// WithPreemptorClusterQueueSelector sets the PreemptorClusterQueueSelector field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the ClusterQueueSelector field is set to the value of the last call.
-func (b *PreemptionLimitSpecApplyConfiguration) WithClusterQueueSelector(value *v1.LabelSelectorApplyConfiguration) *PreemptionLimitSpecApplyConfiguration {
-	b.ClusterQueueSelector = value
+// If called multiple times, the PreemptorClusterQueueSelector field is set to the value of the last call.
+func (b *PreemptionLimitSpecApplyConfiguration) WithPreemptorClusterQueueSelector(value *v1.LabelSelectorApplyConfiguration) *PreemptionLimitSpecApplyConfiguration {
+	b.PreemptorClusterQueueSelector = value
 	return b
 }
 
-// WithRuleNames adds the given value to the RuleNames field in the declarative configuration
-// and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, values provided by each call will be appended to the RuleNames field.
-func (b *PreemptionLimitSpecApplyConfiguration) WithRuleNames(values ...string) *PreemptionLimitSpecApplyConfiguration {
-	for i := range values {
-		b.RuleNames = append(b.RuleNames, values[i])
-	}
+// WithPreemptedClusterQueueSelector sets the PreemptedClusterQueueSelector field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PreemptedClusterQueueSelector field is set to the value of the last call.
+func (b *PreemptionLimitSpecApplyConfiguration) WithPreemptedClusterQueueSelector(value *v1.LabelSelectorApplyConfiguration) *PreemptionLimitSpecApplyConfiguration {
+	b.PreemptedClusterQueueSelector = value
 	return b
 }
 
