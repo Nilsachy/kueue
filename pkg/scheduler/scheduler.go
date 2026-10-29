@@ -350,7 +350,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 	startTime := s.clock.Now()
 	log.V(2).Info("Obtained heads", "headCount", len(heads), "waitDuration", startTime.Sub(cycleStartTime))
 
-	// 2. Take a snapshot of the cache.
+	// 2. Take a snapshot of the cache and the PreemptionLimits.
 	var snapshotOpts []schdcache.SnapshotOption
 	if afs.Enabled(s.admissionFairSharing) {
 		snapshotOpts = append(snapshotOpts, schdcache.WithAfsUsageLedger(s.queues.AfsUsageLedger))
@@ -363,6 +363,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 		return wait.SlowDown
 	}
 	logSnapshotIfVerbose(log, snapshot)
+	s.preemptor.SnapshotPreemptionLimits(ctx)
 	log.V(2).Info("Snapshot taken", "duration", s.clock.Since(phaseStartTime))
 
 	// 3. Calculate requirements (resource flavors, borrowing) for admitting workloads.

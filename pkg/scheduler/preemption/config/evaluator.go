@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -84,16 +83,15 @@ func NewPreemptionEvaluator(
 }
 
 // NewEvaluatorForPreemptionConfig returns the PreemptionEvaluator of the given preemptor for
-// the PreemptionConfig with the given name. It returns nil if the PreemptionConfig cannot be
-// read, or if ConfigurablePreemptionLimits is enabled and the PreemptionLimits cannot be
-// listed or are invalid.
+// the PreemptionConfig with the given name, within the given limitsSnapshot. It returns nil if
+// the PreemptionConfig cannot be read, or if ConfigurablePreemptionLimits is enabled and
+// limitsSnapshot is nil or a PreemptionLimit in it is invalid.
 func NewEvaluatorForPreemptionConfig(
 	ctx context.Context,
 	log logr.Logger,
 	cl client.Client,
-	preemptionLimitTracker *limits.PreemptionLimitTracker,
+	limitsSnapshot *limits.PreemptionLimitsSnapshot,
 	preemptionExpectations *expectations.Store,
-	now time.Time,
 	preemptionConfigName string,
 	preemptor *workload.Info,
 	candidatesOrdering func(a, b *workload.Info) int,
@@ -106,13 +104,11 @@ func NewEvaluatorForPreemptionConfig(
 	var preemptionLimiter *limits.PreemptionLimiter
 	if features.Enabled(features.ConfigurablePreemptionLimits) {
 		// Fail closed so preemptions cannot exceed unreadable or invalid limits.
-		preemptionLimitList := &kueuealpha.PreemptionLimitList{}
-		if err := cl.List(ctx, preemptionLimitList); err != nil {
-			log.Error(err, "Failed to list PreemptionLimits, skipping configurable preemptions", "preemptionConfigName", preemptionConfigName)
+		if limitsSnapshot == nil {
 			return nil
 		}
 		var err error
-		preemptionLimiter, err = limits.NewPreemptionLimiter(log, preemptionLimitList.Items, preemptionConfig, preemptionLimitTracker, preemptionExpectations, now)
+		preemptionLimiter, err = limits.NewPreemptionLimiter(log, limitsSnapshot, preemptionConfig, preemptionExpectations)
 		if err != nil {
 			log.Error(err, "Invalid PreemptionLimit, skipping configurable preemptions", "preemptionConfigName", preemptionConfigName)
 			return nil

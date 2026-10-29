@@ -129,8 +129,8 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			if tc.events != nil {
 				tracker.events = tc.events
 			}
-			limiter, err := NewPreemptionLimiter(logr.Discard(), tc.preemptionLimits, utiltestingalpha.MakePreemptionConfig("config").Obj(),
-				tracker, preemptexpectations.New(), now)
+			limiter, err := NewPreemptionLimiter(logr.Discard(), tracker.Snapshot(now, tc.preemptionLimits), utiltestingalpha.MakePreemptionConfig("config").Obj(),
+				preemptexpectations.New())
 			if err != nil {
 				t.Fatalf("NewPreemptionLimiter() unexpected error: %v", err)
 			}

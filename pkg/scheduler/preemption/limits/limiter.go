@@ -17,8 +17,6 @@ limitations under the License.
 package limits
 
 import (
-	"time"
-
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -30,52 +28,40 @@ import (
 	workloadevict "sigs.k8s.io/kueue/pkg/workload/evict"
 )
 
-// PreemptionLimiter enforces the PreemptionLimits for a PreemptionConfig
-// during a single scheduling attempt.
-//
-// It captures a point-in-time snapshot of recorded preemptions and limits, so
-// the scheduling attempt sees a consistent state even if limits or the tracker
-// change concurrently. The caller must not modify the passed PreemptionLimits.
+// PreemptionLimiter enforces the PreemptionLimits of a snapshot that apply to
+// a PreemptionConfig, during a single scheduling attempt.
 //
 // A nil PreemptionLimiter imposes no limits.
 type PreemptionLimiter struct {
 	log          logr.Logger
 	matchers     map[policy.PreemptionLimitReference]*preemptionLimitMatcher
 	expectations *expectations.Store
-	// recorded holds the preemptions recorded within the window of each limit
-	// when the limiter was created.
-	recorded preemptionCounts
+	snapshot     *PreemptionLimitsSnapshot
 }
 
-// NewPreemptionLimiter returns a PreemptionLimiter for the PreemptionLimits that
-// apply to config, with windows ending at now. tracker and
-// preemptionExpectations must not be nil.
+// NewPreemptionLimiter returns a PreemptionLimiter for the PreemptionLimits of
+// snapshot that apply to config. snapshot and preemptionExpectations must not be nil.
 func NewPreemptionLimiter(
 	log logr.Logger,
-	preemptionLimits []kueuealpha.PreemptionLimit,
+	snapshot *PreemptionLimitsSnapshot,
 	config *kueuealpha.PreemptionConfig,
-	tracker *PreemptionLimitTracker,
 	preemptionExpectations *expectations.Store,
-	now time.Time,
 ) (*PreemptionLimiter, error) {
 	matchers := make(map[policy.PreemptionLimitReference]*preemptionLimitMatcher)
-	var applyingLimits []*kueuealpha.PreemptionLimit
-	for i := range preemptionLimits {
-		limit := &preemptionLimits[i]
+	for _, limit := range snapshot.limits {
 		matcher, err := newPreemptionLimitMatcher(limit, config)
 		if err != nil {
 			return nil, err
 		}
 		if matcher != nil {
 			matchers[policy.PreemptionLimitReference(limit.Name)] = matcher
-			applyingLimits = append(applyingLimits, limit)
 		}
 	}
 	return &PreemptionLimiter{
 		log:          log,
 		matchers:     matchers,
 		expectations: preemptionExpectations,
-		recorded:     tracker.Counts(now, applyingLimits),
+		snapshot:     snapshot,
 	}, nil
 }
 
@@ -107,5 +93,5 @@ func (l *PreemptionLimiter) preemptionInProgress(target *workload.Info) bool {
 
 // allowance returns the limit minus the preemptions recorded within its window.
 func (l *PreemptionLimiter) allowance(limit policy.PreemptionLimitReference, scopeValue policy.PreemptionLimitScopeValue) int32 {
-	return l.matchers[limit].limit.Spec.Limit - l.recorded[limit][scopeValue]
+	return l.matchers[limit].limit.Spec.Limit - l.snapshot.recorded[limit][scopeValue]
 }

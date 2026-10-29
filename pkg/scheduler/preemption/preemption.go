@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	config "sigs.k8s.io/kueue/apis/config/v1beta2"
+	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/controller/constants"
@@ -76,6 +77,8 @@ type Preemptor struct {
 	customLabels           *metrics.CustomLabels
 	preemptionExpectations *expectations.Store
 	preemptionLimitTracker *limits.PreemptionLimitTracker
+	// limitsSnapshot holds the PreemptionLimits enforced in the current scheduling cycle.
+	limitsSnapshot *limits.PreemptionLimitsSnapshot
 }
 
 // PreemptionStrategy represents a singular set of ordered potential preemption candidates.
@@ -218,6 +221,22 @@ func (p *Preemptor) buildContext(
 	}
 }
 
+// SnapshotPreemptionLimits takes the snapshot of the PreemptionLimits enforced in the
+// current scheduling cycle. If they can't be listed, the cycle skips configurable
+// preemptions.
+func (p *Preemptor) SnapshotPreemptionLimits(ctx context.Context) {
+	p.limitsSnapshot = nil
+	if !features.Enabled(features.ConfigurablePreemptionLimits) {
+		return
+	}
+	preemptionLimitList := &kueuealpha.PreemptionLimitList{}
+	if err := p.client.List(ctx, preemptionLimitList); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list PreemptionLimits, skipping configurable preemptions in this scheduling cycle")
+		return
+	}
+	p.limitsSnapshot = p.preemptionLimitTracker.Snapshot(p.clock.Now(), preemptionLimitList.Items)
+}
+
 // Resolved once per attempt: both algorithms evaluate several triggers, and the
 // PreemptionConfig must not be re-read for each of them.
 // Returns nil if the ConfigurablePreemptions feature is disabled, or the ClusterQueue
@@ -226,7 +245,7 @@ func (p *Preemptor) newConfigurableEvaluator(ctx context.Context, log logr.Logge
 	if !features.Enabled(features.ConfigurablePreemptions) || cq == nil || cq.PreemptionConfigName == nil {
 		return nil
 	}
-	return configurable.NewEvaluatorForPreemptionConfig(ctx, log, p.client, p.preemptionLimitTracker, p.preemptionExpectations, p.clock.Now(),
+	return configurable.NewEvaluatorForPreemptionConfig(ctx, log, p.client, p.limitsSnapshot, p.preemptionExpectations,
 		*cq.PreemptionConfigName, preemptor, p.candidatesOrdering(log, cq.Name))
 }
 
@@ -288,6 +307,8 @@ func (p *Preemptor) IssuePreemptions(
 	ctx, cancel := context.WithCancel(ctx)
 	var successfullyPreempted atomic.Int64
 	var preemptionErrors atomic.Int64
+	// recorded marks the targets whose preemption counts against PreemptionLimits.
+	recorded := make([]bool, len(targets))
 	defer cancel()
 	workqueue.ParallelizeUntil(ctx, parallelPreemptions, len(targets), func(i int) {
 		target := targets[i]
@@ -330,6 +351,7 @@ func (p *Preemptor) IssuePreemptions(
 		}
 		if features.Enabled(features.ConfigurablePreemptionLimits) && target.ConfigurablePreemptionReasonData != nil {
 			p.preemptionLimitTracker.Record(p.clock.Now(), target.ConfigurablePreemptionReasonData.ConsumedLimits)
+			recorded[i] = true
 		}
 		preemptorEffPri, preemptorBase, preemptorBoost := priorityInfo(log, preemptor.Obj)
 		targetEffPri, targetBase, targetBoost := priorityInfo(log, target.WorkloadInfo.Obj)
@@ -348,6 +370,13 @@ func (p *Preemptor) IssuePreemptions(
 		workloadevict.ReportPreemption(preemptor.ClusterQueue, target.Reason, target.WorkloadInfo.ClusterQueue, p.roleTracker, p.customLabels)
 		successfullyPreempted.Add(1)
 	})
+	// limitsSnapshot is not synchronized (scheduling is single-threaded), so update it
+	// after ParallelizeUntil finishes.
+	for i, target := range targets {
+		if recorded[i] {
+			p.limitsSnapshot.Record(target.ConfigurablePreemptionReasonData.ConsumedLimits)
+		}
+	}
 	return int(successfullyPreempted.Load()), int(preemptionErrors.Load()), errCh.ReceiveError()
 }
 

@@ -17,7 +17,6 @@ limitations under the License.
 package config
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -33,7 +32,6 @@ import (
 	"k8s.io/component-base/featuregate"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -1015,7 +1013,7 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 
 	cases := map[string]struct {
 		disableLimits    bool
-		listErr          error
+		noSnapshot       bool
 		preemptionLimits []kueuealpha.PreemptionLimit
 		admitted         []kueue.Workload
 		// unobservedEvictions are the names of the admitted workloads whose eviction
@@ -1119,8 +1117,8 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 				"/a2": nil,
 			},
 		},
-		"no candidates are yielded when the PreemptionLimits cannot be listed": {
-			listErr:          errors.New("simulated List error"),
+		"no candidates are yielded without a snapshot of the PreemptionLimits": {
+			noSnapshot:       true,
 			preemptionLimits: []kueuealpha.PreemptionLimit{*globalLimit.Clone().Limit(10).Obj()},
 			admitted: []kueue.Workload{
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
@@ -1153,18 +1151,7 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 			}
 			cl := utiltesting.NewClientBuilder().
 				WithObjects(preemptionConfig).
-				WithLists(
-					&kueuealpha.PreemptionLimitList{Items: tc.preemptionLimits},
-					&kueue.WorkloadList{Items: tc.admitted},
-				).
-				WithInterceptorFuncs(interceptor.Funcs{
-					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-						if _, ok := list.(*kueuealpha.PreemptionLimitList); ok && tc.listErr != nil {
-							return tc.listErr
-						}
-						return c.List(ctx, list, opts...)
-					},
-				}).
+				WithLists(&kueue.WorkloadList{Items: tc.admitted}).
 				Build()
 			cqCache := schdcache.New(cl)
 			cqCache.AddOrUpdateResourceFlavor(log, utiltestingapi.MakeResourceFlavor("default").Obj())
@@ -1173,14 +1160,18 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 					t.Fatalf("Couldn't add ClusterQueue to cache: %v", err)
 				}
 			}
-			tracker := limits.NewPreemptionLimitTracker()
+			// The scheduling cycle has no snapshot if it failed to list the PreemptionLimits.
+			var preemptionLimits *limits.PreemptionLimitsSnapshot
+			if !tc.noSnapshot {
+				preemptionLimits = limits.NewPreemptionLimitTracker().Snapshot(now, tc.preemptionLimits)
+			}
 			preemptionExpectations := preemptexpectations.New()
 			for _, name := range tc.unobservedEvictions {
 				preemptionExpectations.ExpectUIDs(log, types.NamespacedName{Name: name}, []types.UID{types.UID(name)})
 			}
 			preemptor := workload.NewInfo(log, unitWl.Clone().Name("a_incoming").Obj())
 			preemptor.ClusterQueue = "a"
-			evaluator := NewEvaluatorForPreemptionConfig(ctx, log, cl, tracker, preemptionExpectations, now, preemptionConfig.Name, preemptor, candidatesByName)
+			evaluator := NewEvaluatorForPreemptionConfig(ctx, log, cl, preemptionLimits, preemptionExpectations, preemptionConfig.Name, preemptor, candidatesByName)
 			// findCandidates returns the consumed limits of each candidate yielded on a
 			// fresh snapshot, as the yielded candidates are removed from the snapshot.
 			findCandidates := func() map[string]policy.ConsumedLimits {
