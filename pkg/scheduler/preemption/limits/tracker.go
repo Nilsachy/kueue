@@ -101,9 +101,9 @@ func windowStart(now time.Time, limit *kueuealpha.PreemptionLimit) time.Time {
 	return now.Add(-time.Duration(limit.Spec.LimitWindowSeconds) * time.Second)
 }
 
-// counts returns a consistent snapshot of the preemptions recorded for limits
+// Counts returns a consistent snapshot of the preemptions recorded for limits
 // within their windows [windowStart, now]. Scope values with 0 events are omitted.
-func (t *PreemptionLimitTracker) counts(now time.Time, limits []*kueuealpha.PreemptionLimit) preemptionCounts {
+func (t *PreemptionLimitTracker) Counts(now time.Time, limits []*kueuealpha.PreemptionLimit) preemptionCounts {
 	counts := make(preemptionCounts, len(limits))
 	t.mu.RLock()
 	defer t.mu.RUnlock()

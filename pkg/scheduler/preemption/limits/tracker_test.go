@@ -91,7 +91,7 @@ func TestPreemptionLimitTrackerCounts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			tracker := NewPreemptionLimitTracker()
 			tracker.events = tc.events
-			got := tracker.counts(now, tc.limits)
+			got := tracker.Counts(now, tc.limits)
 			if diff := cmp.Diff(tc.want, got, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Unexpected counts (-want,+got):\n%s", diff)
 			}

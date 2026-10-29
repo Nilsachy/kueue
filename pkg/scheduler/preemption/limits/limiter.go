@@ -75,7 +75,7 @@ func NewPreemptionLimiter(
 		log:          log,
 		matchers:     matchers,
 		expectations: preemptionExpectations,
-		recorded:     tracker.counts(now, applyingLimits),
+		recorded:     tracker.Counts(now, applyingLimits),
 	}, nil
 }
 
