@@ -40,8 +40,8 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 		Limit(3).LimitWindowSeconds(60)
 	perCQ := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptedCQLimitScope).
 		Limit(1).LimitWindowSeconds(60)
-	globalConsumed := consumedLimit("global-uid", kueuealpha.GlobalPreemptionLimitScope, "Global")
-	perCQConsumed := consumedLimit("per-cq-uid", kueuealpha.PreemptedCQLimitScope, "preempted-cq")
+	globalConsumed := consumedLimit("global-uid", "Global")
+	perCQConsumed := consumedLimit("per-cq-uid", "preempted-cq")
 	twoRecordedGlobalEvents := trackedLimits{
 		"global": trackedLimit("global-uid", kueuealpha.GlobalPreemptionLimitScope, scopeEvents{"Global": {now.Add(-2 * time.Minute), now.Add(-30 * time.Second), now}}),
 	}

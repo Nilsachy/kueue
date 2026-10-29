@@ -73,9 +73,10 @@ func (e events) pruneBefore(cutoff time.Time) events {
 
 // limitState holds the preemption events of a single PreemptionLimit, by
 // scope value, along with the UID, scope and selectors of the PreemptionLimit
-// they count for.
+// they count for, and its generation when they were last reset.
 type limitState struct {
 	uid                           types.UID
+	resetGeneration               int64
 	scope                         kueuealpha.PreemptionLimitScope
 	configSelector                *metav1.LabelSelector
 	preemptorClusterQueueSelector *metav1.LabelSelector
@@ -87,6 +88,7 @@ type limitState struct {
 func newLimitState(limit *kueuealpha.PreemptionLimit) *limitState {
 	return &limitState{
 		uid:                           limit.UID,
+		resetGeneration:               limit.Generation,
 		scope:                         limit.Spec.Scope,
 		configSelector:                limit.Spec.ConfigSelector.DeepCopy(),
 		preemptorClusterQueueSelector: limit.Spec.PreemptorClusterQueueSelector.DeepCopy(),
@@ -121,18 +123,17 @@ func NewPreemptionLimitTracker() *PreemptionLimitTracker {
 }
 
 // Record records a preemption at ts for every PreemptionLimit and scope value
-// pair in consumedLimits. Pairs resolved against a PreemptionLimit not tracked
-// with the same UID and scope (see Sync) are skipped, so that late records
-// neither resurrect a deleted PreemptionLimit nor count against a recreated or
-// rescoped one. As a tradeoff, preemptions before the first Sync of a new
-// PreemptionLimit are lost. Selectors are not checked, so a preemption resolved
-// before a selector change but recorded after the reset still counts.
+// pair in consumedLimits. Pairs resolved against another UID, or a generation
+// older than the last reset (see Sync), are skipped, so that late records
+// neither resurrect a deleted PreemptionLimit nor count against a recreated one
+// or one whose scope or selectors changed. As a tradeoff, preemptions before
+// the first Sync of a new PreemptionLimit are lost.
 func (t *PreemptionLimitTracker) Record(ts time.Time, consumedLimits policy.ConsumedLimits) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for limit, consumed := range consumedLimits {
 		state, found := t.limits[limit]
-		if !found || state.uid != consumed.UID || state.scope != consumed.Scope {
+		if !found || state.uid != consumed.UID || consumed.Generation < state.resetGeneration {
 			continue
 		}
 		state.events[consumed.ScopeValue] = state.events[consumed.ScopeValue].insert(ts)
@@ -168,9 +169,9 @@ func (t *PreemptionLimitTracker) counts(now time.Time, limits []*kueuealpha.Pree
 }
 
 // Sync starts tracking limit, or resets its events if it was recreated or its
-// scope or selectors changed. Otherwise, it prunes the events older than the
-// window plus pruneGracePeriod; events pruned under a shorter window are not
-// restored.
+// scope or selectors changed, saving its generation as the last reset.
+// Otherwise, it prunes the events older than the window plus pruneGracePeriod;
+// events pruned under a shorter window are not restored.
 func (t *PreemptionLimitTracker) Sync(now time.Time, limit *kueuealpha.PreemptionLimit) {
 	ref := policy.PreemptionLimitReference(limit.Name)
 	t.mu.Lock()

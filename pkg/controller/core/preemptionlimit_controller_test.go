@@ -45,7 +45,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 	limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptorCQLimitScope).LimitWindowSeconds(60).Obj()
 	otherLimit := utiltestingalpha.MakePreemptionLimit("other-limit", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).Obj()
 	consumed := func(l *kueuealpha.PreemptionLimit, v policy.PreemptionLimitScopeValue) policy.ConsumedLimit {
-		return policy.ConsumedLimit{UID: l.UID, Scope: l.Spec.Scope, ScopeValue: v}
+		return policy.ConsumedLimit{UID: l.UID, Generation: l.Generation, ScopeValue: v}
 	}
 	// recorded holds the preemption events of the tracker, by timestamp.
 	type recorded map[time.Time]policy.ConsumedLimits

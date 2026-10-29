@@ -108,8 +108,8 @@ func TestPreemptionLimiterConsumedLimits(t *testing.T) {
 					PreemptedClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"side": "other"}}).Obj(),
 			},
 			want: policy.ConsumedLimits{
-				"global":             consumedLimit("global-uid", kueuealpha.GlobalPreemptionLimitScope, "Global"),
-				"preempted-workload": consumedLimit("preempted-workload-uid", kueuealpha.PreemptedWorkloadLimitScope, "ns/target"),
+				"global":             consumedLimit("global-uid", "Global"),
+				"preempted-workload": consumedLimit("preempted-workload-uid", "ns/target"),
 			},
 		},
 		"evicted target consumes nothing": {
@@ -188,7 +188,7 @@ func TestPreemptionLimiterAllowance(t *testing.T) {
 		"allowance doesn't change when the tracker records preemptions after the limiter is created": {
 			limits: trackedPerCQ(nil),
 			changeTracker: func(tracker *PreemptionLimitTracker) {
-				tracker.Record(now, policy.ConsumedLimits{"per-cq": consumedLimit("per-cq-uid", kueuealpha.PreemptedCQLimitScope, "cq-a")})
+				tracker.Record(now, policy.ConsumedLimits{"per-cq": consumedLimit("per-cq-uid", "cq-a")})
 			},
 			want: 3,
 		},

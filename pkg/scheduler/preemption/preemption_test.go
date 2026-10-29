@@ -4827,8 +4827,8 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 			now,
 		)
 	consumedLimits := policy.ConsumedLimits{
-		"global":                 {UID: "global-uid", Scope: kueuealpha.GlobalPreemptionLimitScope, ScopeValue: "Global"},
-		"per-preempted-workload": {UID: "per-preempted-workload-uid", Scope: kueuealpha.PreemptedWorkloadLimitScope, ScopeValue: "default/victim"},
+		"global":                 {UID: "global-uid", ScopeValue: "Global"},
+		"per-preempted-workload": {UID: "per-preempted-workload-uid", ScopeValue: "default/victim"},
 	}
 	configurableReasonData := &policy.ConfigurablePreemptionReasonData{
 		ConfigName:     "config",

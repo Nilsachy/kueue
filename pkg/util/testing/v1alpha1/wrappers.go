@@ -441,3 +441,9 @@ func (pl *PreemptionLimitWrapper) PreemptedClusterQueueSelector(selector *metav1
 	pl.Spec.PreemptedClusterQueueSelector = selector
 	return pl
 }
+
+// Generation sets the generation of the PreemptionLimit.
+func (pl *PreemptionLimitWrapper) Generation(generation int64) *PreemptionLimitWrapper {
+	pl.ObjectMeta.Generation = generation
+	return pl
+}

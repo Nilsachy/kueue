@@ -93,7 +93,7 @@ func (l *PreemptionLimiter) consumedLimits(
 		if matcher.matchesClusterQueues(preemptorCQ, targetCQ) {
 			consumedLimits[ref] = policy.ConsumedLimit{
 				UID:        matcher.limit.UID,
-				Scope:      matcher.limit.Spec.Scope,
+				Generation: matcher.limit.Generation,
 				ScopeValue: matcher.scopeValue(preemptor, target),
 			}
 		}

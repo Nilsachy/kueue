@@ -22,7 +22,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/util/logging"
@@ -66,10 +65,11 @@ type PreemptionLimitScopeValue string
 // ConsumedLimit is the scope value of a PreemptionLimit consumed by a
 // preemption.
 type ConsumedLimit struct {
-	// UID and Scope identify the PreemptionLimit ScopeValue was resolved
-	// against, so it is not recorded once recreated or rescoped.
+	// UID and Generation identify the PreemptionLimit ScopeValue was resolved
+	// against, so it is not recorded once recreated, or once its scope or
+	// selectors changed.
 	UID        types.UID
-	Scope      kueuealpha.PreemptionLimitScope
+	Generation int64
 	ScopeValue PreemptionLimitScopeValue
 }
 
