@@ -1012,9 +1012,9 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 		LimitWindowSeconds(windowSeconds)
 	perPreemptedCQLimit := utiltestingalpha.MakePreemptionLimit("per-preempted-cq", kueuealpha.PreemptedCQLimitScope).
 		LimitWindowSeconds(windowSeconds)
-	globalConsumed := policy.ConsumedLimit{UID: "global-uid", ScopeValue: "Global"}
+	globalConsumed := policy.NewConsumedLimit(globalLimit.Obj(), "Global")
 	perPreemptedCQConsumed := func(cq policy.PreemptionLimitScopeValue) policy.ConsumedLimit {
-		return policy.ConsumedLimit{UID: "per-preempted-cq-uid", ScopeValue: cq}
+		return policy.NewConsumedLimit(perPreemptedCQLimit.Obj(), cq)
 	}
 
 	cases := map[string]struct {

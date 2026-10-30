@@ -4826,9 +4826,11 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 				Obj(),
 			now,
 		)
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).Obj()
+	perPreemptedWorkloadLimit := utiltestingalpha.MakePreemptionLimit("per-preempted-workload", kueuealpha.PreemptedWorkloadLimitScope).Obj()
 	consumedLimits := policy.ConsumedLimits{
-		"global":                 {UID: "global-uid", ScopeValue: "Global"},
-		"per-preempted-workload": {UID: "per-preempted-workload-uid", ScopeValue: "default/victim"},
+		"global":                 policy.NewConsumedLimit(globalLimit, "Global"),
+		"per-preempted-workload": policy.NewConsumedLimit(perPreemptedWorkloadLimit, "default/victim"),
 	}
 	configurableReasonData := &policy.ConfigurablePreemptionReasonData{
 		ConfigName:     "config",
@@ -4837,8 +4839,8 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 	// Only the PreemptionLimits synced by the PreemptionLimitReconciler are tracked.
 	newTracker := func() *limits.PreemptionLimitTracker {
 		tracker := limits.NewPreemptionLimitTracker()
-		tracker.Sync(now, utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).Obj())
-		tracker.Sync(now, utiltestingalpha.MakePreemptionLimit("per-preempted-workload", kueuealpha.PreemptedWorkloadLimitScope).Obj())
+		tracker.Sync(now, globalLimit)
+		tracker.Sync(now, perPreemptedWorkloadLimit)
 		return tracker
 	}
 	evictionErr := errors.New("simulated eviction error")

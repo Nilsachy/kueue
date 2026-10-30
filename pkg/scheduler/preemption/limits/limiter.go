@@ -91,11 +91,7 @@ func (l *PreemptionLimiter) consumedLimits(
 	consumedLimits := make(policy.ConsumedLimits)
 	for ref, matcher := range l.matchers {
 		if matcher.matchesClusterQueues(preemptorCQ, targetCQ) {
-			consumedLimits[ref] = policy.ConsumedLimit{
-				UID:        matcher.limit.UID,
-				Generation: matcher.limit.Generation,
-				ScopeValue: matcher.scopeValue(preemptor, target),
-			}
+			consumedLimits[ref] = policy.NewConsumedLimit(matcher.limit, matcher.scopeValue(preemptor, target))
 		}
 	}
 	return consumedLimits

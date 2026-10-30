@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/util/logging"
@@ -71,6 +72,11 @@ type ConsumedLimit struct {
 	UID        types.UID
 	Generation int64
 	ScopeValue PreemptionLimitScopeValue
+}
+
+// NewConsumedLimit returns the scopeValue of limit consumed by a preemption.
+func NewConsumedLimit(limit *kueuealpha.PreemptionLimit, scopeValue PreemptionLimitScopeValue) ConsumedLimit {
+	return ConsumedLimit{UID: limit.UID, Generation: limit.Generation, ScopeValue: scopeValue}
 }
 
 // ConsumedLimits maps each PreemptionLimit to the limit consumed by a preemption.

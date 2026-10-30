@@ -41,14 +41,11 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 	errTest := errors.New("test error")
 	limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptorCQLimitScope).Generation(1).LimitWindowSeconds(60).Obj()
 	otherLimit := utiltestingalpha.MakePreemptionLimit("other-limit", kueuealpha.GlobalPreemptionLimitScope).Generation(1).LimitWindowSeconds(60).Obj()
-	consumed := func(l *kueuealpha.PreemptionLimit, v policy.PreemptionLimitScopeValue) policy.ConsumedLimit {
-		return policy.ConsumedLimit{UID: l.UID, Generation: l.Generation, ScopeValue: v}
-	}
 	// recorded holds the preemptions recorded before "limit" is reconciled, by timestamp.
 	recorded := map[time.Time]policy.ConsumedLimits{
-		now.Add(-time.Hour):        {"limit": consumed(limit, "cq-a"), "other-limit": consumed(otherLimit, "Global")},
-		now.Add(-30 * time.Second): {"limit": consumed(limit, "cq-a")},
-		now:                        {"limit": consumed(limit, "cq-b"), "other-limit": consumed(otherLimit, "Global")},
+		now.Add(-time.Hour):        {"limit": policy.NewConsumedLimit(limit, "cq-a"), "other-limit": policy.NewConsumedLimit(otherLimit, "Global")},
+		now.Add(-30 * time.Second): {"limit": policy.NewConsumedLimit(limit, "cq-a")},
+		now:                        {"limit": policy.NewConsumedLimit(limit, "cq-b"), "other-limit": policy.NewConsumedLimit(otherLimit, "Global")},
 	}
 
 	cases := map[string]struct {
