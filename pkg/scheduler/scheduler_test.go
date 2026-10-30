@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	config "sigs.k8s.io/kueue/apis/config/v1beta2"
+	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
@@ -51,10 +52,12 @@ import (
 	"sigs.k8s.io/kueue/pkg/scheduler/flavorassigner"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption"
 	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
+	"sigs.k8s.io/kueue/pkg/scheduler/preemption/limits"
 	"sigs.k8s.io/kueue/pkg/util/limitrange"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/util/routine"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
+	utiltestingalpha "sigs.k8s.io/kueue/pkg/util/testing/v1alpha1"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 	"sigs.k8s.io/kueue/pkg/workload"
 	"sigs.k8s.io/kueue/pkg/workloadslicing"
@@ -274,6 +277,9 @@ func runScheduleTestCases(t *testing.T, cfg scheduleTestConfig, cases map[string
 					}
 					if tc.refillBudget != nil {
 						schedulerOpts = append(schedulerOpts, WithRefillBudget(*tc.refillBudget))
+					}
+					if fg[features.ConfigurablePreemptionLimits] {
+						schedulerOpts = append(schedulerOpts, WithPreemptionLimitTracker(limits.NewPreemptionLimitTracker()))
 					}
 					scheduler := New(qManager, cqCache, cl, recorder, schedulerOpts...)
 					wg := sync.WaitGroup{}
@@ -2286,6 +2292,169 @@ func TestSchedule(t *testing.T) {
 				"eng-alpha/use-all": *utiltestingapi.MakeAdmission("other-alpha").
 					PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
 						Assignment(corev1.ResourceCPU, "on-demand", "100").
+						Obj()).
+					Obj(),
+			},
+		},
+		"configurable preemption within a PreemptionLimit is issued": {
+			featureGates: map[featuregate.Feature]bool{
+				features.ConfigurablePreemptions:      true,
+				features.ConfigurablePreemptionLimits: true,
+			},
+			additionalClusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("limited-cq").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").Resource(corev1.ResourceCPU, "1").Obj()).
+					Annotation(kueuealpha.PreemptionConfigNameAnnotation, "limited-config").
+					Obj(),
+				*utiltestingapi.MakeClusterQueue("blocked-cq").
+					Label("preemption", "blocked").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").Resource(corev1.ResourceCPU, "1").Obj()).
+					Annotation(kueuealpha.PreemptionConfigNameAnnotation, "limited-config").
+					Obj(),
+			},
+			additionalLocalQueues: []kueue.LocalQueue{
+				*utiltestingapi.MakeLocalQueue("limited-lq", "sales").ClusterQueue("limited-cq").Obj(),
+				*utiltestingapi.MakeLocalQueue("blocked-lq", "sales").ClusterQueue("blocked-cq").Obj(),
+			},
+			objects: []client.Object{
+				utiltestingalpha.MakePreemptionConfig("limited-config").
+					Rule("within-cq", kueuealpha.Always, kueuealpha.PreemptionConfigPreemptionCandidateSelector{Scope: kueuealpha.WithinClusterQueue}).
+					Obj(),
+				utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).Limit(1).LimitWindowSeconds(60).Obj(),
+				utiltestingalpha.MakePreemptionLimit("blocked", kueuealpha.GlobalPreemptionLimitScope).
+					PreemptorClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"preemption": "blocked"}}).
+					Limit(0).
+					LimitWindowSeconds(60).
+					Obj(),
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("new", "sales").
+					Queue("limited-lq").
+					Request(corev1.ResourceCPU, "1").
+					Obj(),
+				*utiltestingapi.MakeWorkload("victim", "sales").
+					Request(corev1.ResourceCPU, "1").
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("limited-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "1").
+							Obj()).
+						Obj(), now).
+					Obj(),
+				*utiltestingapi.MakeWorkload("blocked", "sales").
+					Queue("blocked-lq").
+					Request(corev1.ResourceCPU, "1").
+					Obj(),
+				*utiltestingapi.MakeWorkload("blocked-victim", "sales").
+					Request(corev1.ResourceCPU, "1").
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("blocked-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "1").
+							Obj()).
+						Obj(), now).
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("blocked", "sales").
+					Queue("blocked-lq").
+					Request(corev1.ResourceCPU, "1").
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 1 more needed",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
+						Message:            "The workload has no reservation",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "main",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					}).
+					Obj(),
+				*utiltestingapi.MakeWorkload("blocked-victim", "sales").
+					Request(corev1.ResourceCPU, "1").
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("blocked-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "1").
+							Obj()).
+						Obj(), now).
+					Obj(),
+				*utiltestingapi.MakeWorkload("new", "sales").
+					Queue("limited-lq").
+					Request(corev1.ResourceCPU, "1").
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForPreemptedWorkloads,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 1 more needed. Pending the preemption of 1 workload(s)",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
+						Message:            "The workload has no reservation",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "main",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					}).
+					Obj(),
+				*utiltestingapi.MakeWorkload("victim", "sales").
+					Request(corev1.ResourceCPU, "1").
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("limited-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "default", "1").
+							Obj()).
+						Obj(), now).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadEvicted,
+						Status:             metav1.ConditionTrue,
+						Reason:             kueue.WorkloadEvictedByPreemption,
+						Message:            "Preempted by sales/new because of preemption config limited-config rule within-cq/0",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadPreempted,
+						Status:             metav1.ConditionTrue,
+						Reason:             kueue.ConfigurablePreemptionReason,
+						Message:            "Preempted by sales/new because of preemption config limited-config rule within-cq/0",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					SchedulingStatsEviction(kueue.WorkloadSchedulingStatsEviction{
+						Reason:          kueue.WorkloadEvictedByPreemption,
+						UnderlyingCause: "limited-config",
+						Count:           1,
+					}).
+					Obj(),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				// Preemptor is not admitted in this cycle; it waits for the victim's eviction to complete.
+				"limited-cq": {"sales/new"},
+			},
+			wantInadmissibleLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"blocked-cq": {"sales/blocked"},
+			},
+			wantAssignments: map[workload.Reference]kueue.Admission{
+				// Removal from cache for the preempted workload is deferred until we receive Workload updates.
+				"sales/victim": *utiltestingapi.MakeAdmission("limited-cq").
+					PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+						Assignment(corev1.ResourceCPU, "default", "1").
+						Obj()).
+					Obj(),
+				"sales/blocked-victim": *utiltestingapi.MakeAdmission("blocked-cq").
+					PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+						Assignment(corev1.ResourceCPU, "default", "1").
 						Obj()).
 					Obj(),
 			},

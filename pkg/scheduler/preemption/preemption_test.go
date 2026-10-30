@@ -4937,6 +4937,7 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 				ConfigurablePreemptionReasonData: tc.reasonData,
 			}}
 
+			preemptor.SnapshotPreemptionLimits(ctx)
 			_, _, err = preemptor.IssuePreemptions(ctx, cqCache, preemptorInfo, targets, snapshot.ClusterQueue("standalone"))
 			if diff := cmp.Diff(tc.evictionErr, err, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("Unexpected IssuePreemptions() error (-want,+got):\n%s", diff)
@@ -4958,6 +4959,15 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 				cmpopts.IgnoreTypes(sync.RWMutex{}),
 			); diff != "" {
 				t.Errorf("Unexpected recorded preemptions (-want,+got):\n%s", diff)
+			}
+			// The snapshot is updated with the same preemptions as the tracker.
+			var wantSnapshot *limits.PreemptionLimitsSnapshot
+			if !tc.disableLimits {
+				wantSnapshot = limits.NewPreemptionLimitTracker().Snapshot(now, nil)
+				wantSnapshot.Record(tc.wantRecorded)
+			}
+			if diff := cmp.Diff(wantSnapshot, preemptor.limitsSnapshot, cmp.AllowUnexported(limits.PreemptionLimitsSnapshot{})); diff != "" {
+				t.Errorf("Unexpected limits snapshot (-want,+got):\n%s", diff)
 			}
 		})
 	}
@@ -5383,6 +5393,65 @@ func TestPreemptionWithPodsQuota(t *testing.T) {
 			slices.Sort(got)
 			if diff := cmp.Diff([]string{"va", "vb"}, got); diff != "" {
 				t.Errorf("Unexpected targets (-want,+got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestSnapshotPreemptionLimits(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	global := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).Limit(1).LimitWindowSeconds(60).Obj()
+
+	cases := map[string]struct {
+		disableLimits bool
+		listErr       error
+		wantSnapshot  bool
+	}{
+		"snapshot holds the listed PreemptionLimits and the preemptions recorded within their windows": {
+			wantSnapshot: true,
+		},
+		"no snapshot when the PreemptionLimits can't be listed": {
+			listErr: errors.New("simulated List error"),
+		},
+		"no snapshot when the ConfigurablePreemptionLimits feature is disabled": {
+			disableLimits: true,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+				features.ConfigurablePreemptions:      true,
+				features.ConfigurablePreemptionLimits: !tc.disableLimits,
+			})
+			ctx, _ := utiltesting.ContextWithLog(t)
+			cl := utiltesting.NewClientBuilder().
+				WithObjects(global).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if tc.listErr != nil {
+							return tc.listErr
+						}
+						return c.List(ctx, list, opts...)
+					},
+				}).
+				Build()
+			tracker := limits.NewPreemptionLimitTracker()
+			tracker.Sync(now, global)
+			tracker.Record(now.Add(-30*time.Second), policy.ConsumedLimits{"global": policy.NewConsumedLimit(global, "Global")})
+			preemptor := New(cl, workload.Ordering{}, &utiltesting.EventRecorder{}, nil, false, clocktesting.NewFakeClock(now), nil, preemptexpectations.New(), nil, tracker)
+			// Left over from the previous scheduling cycle.
+			preemptor.limitsSnapshot = &limits.PreemptionLimitsSnapshot{}
+
+			preemptor.SnapshotPreemptionLimits(ctx)
+
+			var want *limits.PreemptionLimitsSnapshot
+			if tc.wantSnapshot {
+				want = tracker.Snapshot(now, []kueuealpha.PreemptionLimit{*global})
+			}
+			if diff := cmp.Diff(want, preemptor.limitsSnapshot,
+				cmp.AllowUnexported(limits.PreemptionLimitsSnapshot{}),
+			); diff != "" {
+				t.Errorf("Unexpected PreemptionLimits snapshot (-want,+got):\n%s", diff)
 			}
 		})
 	}

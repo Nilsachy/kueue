@@ -145,6 +145,16 @@ func windowStart(now time.Time, limit *kueuealpha.PreemptionLimit) time.Time {
 	return now.Add(-time.Duration(limit.Spec.LimitWindowSeconds) * time.Second)
 }
 
+// Snapshot returns a snapshot of preemptionLimits with the preemptions recorded
+// within their windows ending at now. The caller must not modify preemptionLimits.
+func (t *PreemptionLimitTracker) Snapshot(now time.Time, preemptionLimits []kueuealpha.PreemptionLimit) *PreemptionLimitsSnapshot {
+	limits := make([]*kueuealpha.PreemptionLimit, len(preemptionLimits))
+	for i := range preemptionLimits {
+		limits[i] = &preemptionLimits[i]
+	}
+	return &PreemptionLimitsSnapshot{limits: limits, recorded: t.counts(now, limits)}
+}
+
 // counts returns a consistent snapshot of the preemptions recorded for limits
 // within their windows [windowStart, now]. Scope values with 0 events are omitted,
 // as are limits not tracked with the same UID, scope and selectors (see Sync).
