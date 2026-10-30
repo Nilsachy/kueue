@@ -63,8 +63,18 @@ func NewPreemptionLimitReconciler(
 
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=preemptionlimits,verbs=get;list;watch
 
-// Reconcile syncs the PreemptionLimit into the tracker every
-// preemptionLimitPruneInterval, and forgets it once deleted.
+// Reconcile keeps the in-memory preemption events of the PreemptionLimit (see
+// PreemptionLimitTracker) consistent with its current spec. Whenever the
+// PreemptionLimit changes, and every preemptionLimitPruneInterval, it syncs it
+// into the tracker, which:
+//   - starts tracking a new PreemptionLimit, as preemptions are only recorded
+//     for tracked ones;
+//   - resets the events of a PreemptionLimit that was recreated, or whose scope
+//     or selectors changed, as they no longer count for it;
+//   - otherwise keeps the events (e.g. on a limit or window change), and prunes
+//     the ones that fell out of the window.
+//
+// Once the PreemptionLimit is deleted, it forgets all its events.
 func (r *PreemptionLimitReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var limit kueuealpha.PreemptionLimit
 	if err := r.client.Get(ctx, req.NamespacedName, &limit); err != nil {

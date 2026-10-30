@@ -137,6 +137,39 @@ func TestPreemptionLimitTrackerCounts(t *testing.T) {
 	}
 }
 
+func TestPreemptionLimitTrackerCountsOfLimit(t *testing.T) {
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).LimitWindowSeconds(60).Obj()
+
+	cases := map[string]struct {
+		limits trackedLimits
+		want   map[policy.PreemptionLimitScopeValue]int32
+	}{
+		"only the counts of the given limit are returned": {
+			limits: trackedLimits{
+				"per-cq": trackedLimit("per-cq-uid", perCQ, scopeEvents{"cq-a": {now.Add(-time.Hour), now}, "cq-b": {now}}),
+				"global": trackedLimit("global-uid", global, scopeEvents{"Global": {now}}),
+			},
+			want: map[policy.PreemptionLimitScopeValue]int32{"cq-a": 1, "cq-b": 1},
+		},
+		"untracked limit has no counts": {
+			limits: trackedLimits{
+				"global": trackedLimit("global-uid", global, scopeEvents{"Global": {now}}),
+			},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tracker := NewPreemptionLimitTracker()
+			tracker.limits = tc.limits
+			got := tracker.Counts(now, perCQLimit)
+			if diff := cmp.Diff(tc.want, got, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("Unexpected counts (-want,+got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // Scopes of the PreemptionLimits used across the tracker tests.
 const (
 	global = kueuealpha.GlobalPreemptionLimitScope

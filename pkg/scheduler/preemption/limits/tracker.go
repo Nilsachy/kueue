@@ -168,6 +168,14 @@ func (t *PreemptionLimitTracker) counts(now time.Time, limits []*kueuealpha.Pree
 	return counts
 }
 
+// Counts returns the number of preemptions recorded for limit within its
+// window [windowStart, now], by scope value. Scope values with 0 events are
+// omitted, and a limit not tracked with the same UID, scope and selectors
+// (see Sync) has no counts.
+func (t *PreemptionLimitTracker) Counts(now time.Time, limit *kueuealpha.PreemptionLimit) map[policy.PreemptionLimitScopeValue]int32 {
+	return t.counts(now, []*kueuealpha.PreemptionLimit{limit})[policy.PreemptionLimitReference(limit.Name)]
+}
+
 // Sync starts tracking limit, or resets its events if it was recreated or its
 // scope or selectors changed, saving its generation as the last reset.
 // Otherwise, it prunes the events older than the window plus pruneGracePeriod;
