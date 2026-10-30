@@ -18,12 +18,12 @@ package limits
 
 import (
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
@@ -71,41 +71,58 @@ func (e events) pruneBefore(cutoff time.Time) events {
 	return e[i:]
 }
 
-// limitState holds the preemption events of a single PreemptionLimit, by
-// scope value, along with the UID, scope and selectors of the PreemptionLimit
-// they count for, and its generation when they were last reset.
+// limitState tracks preemption events grouped by scope value for a single
+// PreemptionLimit, alongside the PreemptionLimit they count for and its
+// generation when they were last reset.
 type limitState struct {
-	uid                           types.UID
-	resetGeneration               int64
-	scope                         kueuealpha.PreemptionLimitScope
-	configSelector                *metav1.LabelSelector
-	preemptorClusterQueueSelector *metav1.LabelSelector
-	preemptedClusterQueueSelector *metav1.LabelSelector
-	events                        map[policy.PreemptionLimitScopeValue]events
+	// limit is the PreemptionLimit as last synced. It is replaced, never
+	// modified, so that snapshots can share it.
+	limit              *kueuealpha.PreemptionLimit
+	resetGeneration    int64
+	eventsByScopeValue map[policy.PreemptionLimitScopeValue]events
 }
 
 // newLimitState returns the state of limit, without events.
 func newLimitState(limit *kueuealpha.PreemptionLimit) *limitState {
 	return &limitState{
-		uid:                           limit.UID,
-		resetGeneration:               limit.Generation,
-		scope:                         limit.Spec.Scope,
-		configSelector:                limit.Spec.ConfigSelector.DeepCopy(),
-		preemptorClusterQueueSelector: limit.Spec.PreemptorClusterQueueSelector.DeepCopy(),
-		preemptedClusterQueueSelector: limit.Spec.PreemptedClusterQueueSelector.DeepCopy(),
-		events:                        make(map[policy.PreemptionLimitScopeValue]events),
+		limit:              trackedCopy(limit),
+		resetGeneration:    limit.Generation,
+		eventsByScopeValue: make(map[policy.PreemptionLimitScopeValue]events),
 	}
 }
 
-// countsFor reports whether the events of s count for limit, i.e. whether
-// limit has the same UID, scope and selectors as the PreemptionLimit s was
-// tracked with.
-func (s *limitState) countsFor(limit *kueuealpha.PreemptionLimit) bool {
-	return s.uid == limit.UID &&
-		s.scope == limit.Spec.Scope &&
-		equality.Semantic.DeepEqual(s.configSelector, limit.Spec.ConfigSelector) &&
-		equality.Semantic.DeepEqual(s.preemptorClusterQueueSelector, limit.Spec.PreemptorClusterQueueSelector) &&
-		equality.Semantic.DeepEqual(s.preemptedClusterQueueSelector, limit.Spec.PreemptedClusterQueueSelector)
+// trackedCopy returns a copy of the parts of limit the tracker relies on,
+// leaving out the status and the other metadata.
+func trackedCopy(limit *kueuealpha.PreemptionLimit) *kueuealpha.PreemptionLimit {
+	return &kueuealpha.PreemptionLimit{
+		ObjectMeta: metav1.ObjectMeta{Name: limit.Name, UID: limit.UID, Generation: limit.Generation},
+		Spec:       *limit.Spec.DeepCopy(),
+	}
+}
+
+// isCompatibleWith reports whether the tracked state can continue to be used
+// for limit, i.e. whether limit has the same UID, scope, and selectors that
+// this state was initialized with.
+func (ls *limitState) isCompatibleWith(limit *kueuealpha.PreemptionLimit) bool {
+	return ls.limit.UID == limit.UID &&
+		ls.limit.Spec.Scope == limit.Spec.Scope &&
+		equality.Semantic.DeepEqual(ls.limit.Spec.ConfigSelector, limit.Spec.ConfigSelector) &&
+		equality.Semantic.DeepEqual(ls.limit.Spec.PreemptorClusterQueueSelector, limit.Spec.PreemptorClusterQueueSelector) &&
+		equality.Semantic.DeepEqual(ls.limit.Spec.PreemptedClusterQueueSelector, limit.Spec.PreemptedClusterQueueSelector)
+}
+
+// counts returns the number of events within the window of the tracked
+// PreemptionLimit ending at now, by scope value. Scope values with 0 events
+// are omitted.
+func (ls *limitState) counts(now time.Time) map[policy.PreemptionLimitScopeValue]int32 {
+	counts := make(map[policy.PreemptionLimitScopeValue]int32)
+	cutoff := windowStart(now, ls.limit)
+	for scopeValue, e := range ls.eventsByScopeValue {
+		if count := e.countSince(cutoff); count > 0 {
+			counts[scopeValue] = int32(count)
+		}
+	}
+	return counts
 }
 
 // PreemptionLimitTracker records the timestamps of confirmed configurable preemptions for
@@ -123,20 +140,20 @@ func NewPreemptionLimitTracker() *PreemptionLimitTracker {
 }
 
 // Record records a preemption at ts for every PreemptionLimit and scope value
-// pair in consumedLimits. Pairs resolved against another UID, or a generation
-// older than the last reset (see Sync), are skipped, so that late records
-// neither resurrect a deleted PreemptionLimit nor count against a recreated one
-// or one whose scope or selectors changed. As a tradeoff, preemptions before
-// the first Sync of a new PreemptionLimit are lost.
+// pair in consumedLimits. Pairs that are stale for the tracked PreemptionLimit
+// (see ConsumedLimit.IsStaleFor) are skipped, so that late records neither
+// resurrect a deleted PreemptionLimit nor count against a recreated one or one
+// whose scope or selectors changed. As a tradeoff, preemptions before the
+// first Sync of a new PreemptionLimit are lost.
 func (t *PreemptionLimitTracker) Record(ts time.Time, consumedLimits policy.ConsumedLimits) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for limit, consumed := range consumedLimits {
-		state, found := t.limits[limit]
-		if !found || state.uid != consumed.UID || consumed.Generation < state.resetGeneration {
+		ls, found := t.limits[limit]
+		if !found || consumed.IsStaleFor(ls.limit.UID, ls.resetGeneration) {
 			continue
 		}
-		state.events[consumed.ScopeValue] = state.events[consumed.ScopeValue].insert(ts)
+		ls.eventsByScopeValue[consumed.ScopeValue] = ls.eventsByScopeValue[consumed.ScopeValue].insert(ts)
 	}
 }
 
@@ -145,66 +162,64 @@ func windowStart(now time.Time, limit *kueuealpha.PreemptionLimit) time.Time {
 	return now.Add(-time.Duration(limit.Spec.LimitWindowSeconds) * time.Second)
 }
 
-// Snapshot returns a snapshot of preemptionLimits with the preemptions recorded
-// within their windows ending at now. The caller must not modify preemptionLimits.
-func (t *PreemptionLimitTracker) Snapshot(now time.Time, preemptionLimits []kueuealpha.PreemptionLimit) *PreemptionLimitsSnapshot {
-	limits := make([]*kueuealpha.PreemptionLimit, len(preemptionLimits))
-	for i := range preemptionLimits {
-		limits[i] = &preemptionLimits[i]
-	}
-	return &PreemptionLimitsSnapshot{limits: limits, recorded: t.counts(now, limits)}
-}
-
-// counts returns a consistent snapshot of the preemptions recorded for limits
-// within their windows [windowStart, now]. Scope values with 0 events are omitted,
-// as are limits not tracked with the same UID, scope and selectors (see Sync).
-func (t *PreemptionLimitTracker) counts(now time.Time, limits []*kueuealpha.PreemptionLimit) preemptionCounts {
-	counts := make(preemptionCounts, len(limits))
+// Snapshot returns a snapshot of the tracked PreemptionLimits, as last synced,
+// with the preemptions recorded within their windows ending at now. As it is
+// taken from the tracker only, the PreemptionLimits are always consistent with
+// their preemptions, including while an update is not synced yet.
+func (t *PreemptionLimitTracker) Snapshot(now time.Time) *PreemptionLimitsSnapshot {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	for _, limit := range limits {
-		ref := policy.PreemptionLimitReference(limit.Name)
-		state, found := t.limits[ref]
-		if !found || !state.countsFor(limit) {
-			continue
-		}
-		cutoff := windowStart(now, limit)
-		for scopeValue, e := range state.events {
-			if count := e.countSince(cutoff); count > 0 {
-				counts.add(ref, scopeValue, int32(count))
-			}
+	snapshot := &PreemptionLimitsSnapshot{
+		limits:   make([]*kueuealpha.PreemptionLimit, 0, len(t.limits)),
+		recorded: make(preemptionCounts, len(t.limits)),
+	}
+	for ref, ls := range t.limits {
+		snapshot.limits = append(snapshot.limits, ls.limit)
+		if counts := ls.counts(now); len(counts) > 0 {
+			snapshot.recorded[ref] = counts
 		}
 	}
-	return counts
+	// Sorted, so that errors are deterministic.
+	slices.SortFunc(snapshot.limits, func(a, b *kueuealpha.PreemptionLimit) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return snapshot
 }
 
 // Counts returns the number of preemptions recorded for limit within its
-// window [windowStart, now], by scope value. Scope values with 0 events are
-// omitted, and a limit not tracked with the same UID, scope and selectors
-// (see Sync) has no counts.
-func (t *PreemptionLimitTracker) Counts(now time.Time, limit *kueuealpha.PreemptionLimit) map[policy.PreemptionLimitScopeValue]int32 {
-	return t.counts(now, []*kueuealpha.PreemptionLimit{limit})[policy.PreemptionLimitReference(limit.Name)]
+// window ending at now, by scope value. Scope values with 0 events are
+// omitted, and an untracked limit has no counts.
+func (t *PreemptionLimitTracker) Counts(now time.Time, limit policy.PreemptionLimitReference) map[policy.PreemptionLimitScopeValue]int32 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	ls, found := t.limits[limit]
+	if !found {
+		return nil
+	}
+	return ls.counts(now)
 }
 
 // Sync starts tracking limit, or resets its events if it was recreated or its
 // scope or selectors changed, saving its generation as the last reset.
-// Otherwise, it prunes the events older than the window plus pruneGracePeriod;
+// Otherwise, it takes the new spec into account (e.g. a limit or window
+// change), and prunes the events older than the window plus pruneGracePeriod;
 // events pruned under a shorter window are not restored.
 func (t *PreemptionLimitTracker) Sync(now time.Time, limit *kueuealpha.PreemptionLimit) {
 	ref := policy.PreemptionLimitReference(limit.Name)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	state, found := t.limits[ref]
-	if !found || !state.countsFor(limit) {
+	ls, found := t.limits[ref]
+	if !found || !ls.isCompatibleWith(limit) {
 		t.limits[ref] = newLimitState(limit)
 		return
 	}
-	cutoff := windowStart(now, limit).Add(-pruneGracePeriod)
-	for scopeValue, e := range state.events {
+	ls.limit = trackedCopy(limit)
+	cutoff := windowStart(now, ls.limit).Add(-pruneGracePeriod)
+	for scopeValue, e := range ls.eventsByScopeValue {
 		if e = e.pruneBefore(cutoff); len(e) == 0 {
-			delete(state.events, scopeValue)
+			delete(ls.eventsByScopeValue, scopeValue)
 		} else {
-			state.events[scopeValue] = e
+			ls.eventsByScopeValue[scopeValue] = e
 		}
 	}
 }

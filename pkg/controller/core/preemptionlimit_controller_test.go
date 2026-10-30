@@ -214,16 +214,11 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			if diff := cmp.Diff(tc.wantResult, gotResult); diff != "" {
 				t.Errorf("Unexpected Reconcile() result (-want,+got):\n%s", diff)
 			}
-			// A deleted limit is counted as last seen, to check that its events are gone.
-			countedLimit := limit
-			if tc.limit != nil {
-				countedLimit = tc.limit
-			}
-			if diff := cmp.Diff(tc.wantCounts, tracker.Counts(now, countedLimit), cmpopts.EquateEmpty()); diff != "" {
+			if diff := cmp.Diff(tc.wantCounts, tracker.Counts(now, "limit"), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Unexpected counts of the reconciled limit (-want,+got):\n%s", diff)
 			}
 			wantOtherCounts := map[policy.PreemptionLimitScopeValue]int32{"Global": 1}
-			if diff := cmp.Diff(wantOtherCounts, tracker.Counts(now, otherLimit)); diff != "" {
+			if diff := cmp.Diff(wantOtherCounts, tracker.Counts(now, "other-limit")); diff != "" {
 				t.Errorf("Unexpected counts of the other limit (-want,+got):\n%s", diff)
 			}
 			if tc.wantLimitStatus != nil {

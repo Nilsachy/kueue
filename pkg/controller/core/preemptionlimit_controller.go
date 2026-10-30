@@ -111,7 +111,7 @@ func (r *PreemptionLimitReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 func (r *PreemptionLimitReconciler) preemptionLimitStatus(now time.Time, limit *kueuealpha.PreemptionLimit) kueuealpha.PreemptionLimitStatus {
-	counts := r.tracker.Counts(now, limit)
+	counts := r.tracker.Counts(now, policy.PreemptionLimitReference(limit.Name))
 
 	lastUpdateTime := metav1.NewTime(now)
 	status := kueuealpha.PreemptionLimitStatus{

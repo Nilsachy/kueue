@@ -1164,10 +1164,15 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 					t.Fatalf("Couldn't add ClusterQueue to cache: %v", err)
 				}
 			}
-			// The scheduling cycle has no snapshot if it failed to list the PreemptionLimits.
+			// The scheduling cycle has no snapshot if it was taken while the
+			// ConfigurablePreemptionLimits feature was disabled.
 			var preemptionLimits *limits.PreemptionLimitsSnapshot
 			if !tc.noSnapshot {
-				preemptionLimits = limits.NewPreemptionLimitTracker().Snapshot(now, tc.preemptionLimits)
+				tracker := limits.NewPreemptionLimitTracker()
+				for i := range tc.preemptionLimits {
+					tracker.Sync(now, &tc.preemptionLimits[i])
+				}
+				preemptionLimits = tracker.Snapshot(now)
 			}
 			preemptionExpectations := preemptexpectations.New()
 			for _, name := range tc.unobservedEvictions {
@@ -1198,7 +1203,7 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 			}
 
 			// Then
-			if diff := cmp.Diff(tc.want, got); diff != "" {
+			if diff := cmp.Diff(tc.want, got, cmp.AllowUnexported(policy.ConsumedLimit{})); diff != "" {
 				t.Errorf("Unexpected consumed limits (-want,+got):\n%s", diff)
 			}
 		})

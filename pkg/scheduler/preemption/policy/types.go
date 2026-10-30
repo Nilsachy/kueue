@@ -66,17 +66,23 @@ type PreemptionLimitScopeValue string
 // ConsumedLimit is the scope value of a PreemptionLimit consumed by a
 // preemption.
 type ConsumedLimit struct {
-	// UID and Generation identify the PreemptionLimit ScopeValue was resolved
-	// against, so it is not recorded once recreated, or once its scope or
-	// selectors changed.
-	UID        types.UID
-	Generation int64
 	ScopeValue PreemptionLimitScopeValue
+	// uid and generation identify the version of the PreemptionLimit
+	// ScopeValue was resolved against (see IsStaleFor).
+	uid        types.UID
+	generation int64
 }
 
 // NewConsumedLimit returns the scopeValue of limit consumed by a preemption.
 func NewConsumedLimit(limit *kueuealpha.PreemptionLimit, scopeValue PreemptionLimitScopeValue) ConsumedLimit {
-	return ConsumedLimit{UID: limit.UID, Generation: limit.Generation, ScopeValue: scopeValue}
+	return ConsumedLimit{ScopeValue: scopeValue, uid: limit.UID, generation: limit.Generation}
+}
+
+// IsStaleFor reports whether c was resolved against another PreemptionLimit
+// than the one with uid, or against a generation older than minGeneration,
+// so it no longer counts for the events tracked for that PreemptionLimit.
+func (c ConsumedLimit) IsStaleFor(uid types.UID, minGeneration int64) bool {
+	return c.uid != uid || c.generation < minGeneration
 }
 
 // ConsumedLimits maps each PreemptionLimit to the limit consumed by a preemption.
