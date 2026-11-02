@@ -121,6 +121,14 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 				},
 			},
 		},
+		"scope change resets the events": {
+			limit:      utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptedCQLimitScope).Generation(2).Limit(10).LimitWindowSeconds(60).Obj(),
+			recorded:   seeded,
+			wantResult: reconcile.Result{RequeueAfter: time.Minute},
+			wantLimitStatus: &kueuealpha.PreemptionLimitStatus{
+				LastUpdateTime: lastUpdateTime,
+			},
+		},
 		"no events within the window produce empty status counts": {
 			limit:      limit,
 			recorded:   recorded{now.Add(-time.Hour): limitConsumed("cq-a")},
