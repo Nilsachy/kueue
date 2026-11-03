@@ -48,13 +48,13 @@ func NewPreemptionLimiter(
 	preemptionExpectations *expectations.Store,
 ) (*PreemptionLimiter, error) {
 	matchers := make(map[policy.PreemptionLimitReference]*preemptionLimitMatcher)
-	for _, limit := range snapshot.limits {
+	for ref, limit := range snapshot.limitByName {
 		matcher, err := newPreemptionLimitMatcher(limit, config)
 		if err != nil {
 			return nil, err
 		}
 		if matcher != nil {
-			matchers[policy.PreemptionLimitReference(limit.Name)] = matcher
+			matchers[ref] = matcher
 		}
 	}
 	return &PreemptionLimiter{
@@ -89,9 +89,4 @@ func (l *PreemptionLimiter) consumedLimits(
 func (l *PreemptionLimiter) preemptionInProgress(target *workload.Info) bool {
 	return workloadevict.IsEvicted(target.Obj) ||
 		!l.expectations.Satisfied(l.log, client.ObjectKeyFromObject(target.Obj))
-}
-
-// allowance returns the limit minus the preemptions recorded within its window.
-func (l *PreemptionLimiter) allowance(limit policy.PreemptionLimitReference, scopeValue policy.PreemptionLimitScopeValue) int32 {
-	return l.matchers[limit].limit.Spec.Limit - l.snapshot.recorded[limit][scopeValue]
 }

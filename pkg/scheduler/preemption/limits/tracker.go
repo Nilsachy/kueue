@@ -18,7 +18,6 @@ package limits
 
 import (
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -170,19 +169,15 @@ func (t *PreemptionLimitTracker) Snapshot(now time.Time) *PreemptionLimitsSnapsh
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	snapshot := &PreemptionLimitsSnapshot{
-		limits:   make([]*kueuealpha.PreemptionLimit, 0, len(t.limits)),
-		recorded: make(preemptionCounts, len(t.limits)),
+		limitByName: make(map[policy.PreemptionLimitReference]*kueuealpha.PreemptionLimit, len(t.limits)),
+		recorded:    make(preemptionCounts, len(t.limits)),
 	}
 	for ref, ls := range t.limits {
-		snapshot.limits = append(snapshot.limits, ls.limit)
+		snapshot.limitByName[ref] = ls.limit
 		if counts := ls.counts(now); len(counts) > 0 {
 			snapshot.recorded[ref] = counts
 		}
 	}
-	// Sorted, so that errors are deterministic.
-	slices.SortFunc(snapshot.limits, func(a, b *kueuealpha.PreemptionLimit) int {
-		return strings.Compare(a.Name, b.Name)
-	})
 	return snapshot
 }
 

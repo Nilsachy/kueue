@@ -119,7 +119,7 @@ func TestPreemptionLimitTrackerSnapshot(t *testing.T) {
 			wantLimits:   []*kueuealpha.PreemptionLimit{perCQLimit},
 			wantRecorded: preemptionCounts{"per-cq": {"cq-a": 1, "cq-b": 2}},
 		},
-		"each limit counts within its own window, and limits are sorted by name": {
+		"each limit counts within its own window": {
 			limits: tracked(
 				trackedLimit(perCQLimit, scopeEvents{"cq-a": {now.Add(-30 * time.Minute)}}),
 				trackedLimit(globalLimit, scopeEvents{"Global": {now.Add(-2 * time.Hour), now.Add(-30 * time.Minute)}}),
@@ -135,11 +135,11 @@ func TestPreemptionLimitTrackerSnapshot(t *testing.T) {
 				tracker.limits = tc.limits
 			}
 			got := tracker.Snapshot(now)
-			wantLimits := make([]*kueuealpha.PreemptionLimit, 0, len(tc.wantLimits))
+			wantLimitByName := make(map[policy.PreemptionLimitReference]*kueuealpha.PreemptionLimit, len(tc.wantLimits))
 			for _, l := range tc.wantLimits {
-				wantLimits = append(wantLimits, trackedCopy(l))
+				wantLimitByName[policy.PreemptionLimitReference(l.Name)] = trackedCopy(l)
 			}
-			want := &PreemptionLimitsSnapshot{limits: wantLimits, recorded: tc.wantRecorded}
+			want := &PreemptionLimitsSnapshot{limitByName: wantLimitByName, recorded: tc.wantRecorded}
 			if diff := cmp.Diff(want, got, cmp.AllowUnexported(PreemptionLimitsSnapshot{}), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Unexpected snapshot (-want,+got):\n%s", diff)
 			}

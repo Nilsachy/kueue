@@ -540,7 +540,6 @@ func (s *Scheduler) processEntry(
 	// If the workload only fits because of other preemptions in this cycle,
 	// we must wait for those preemptions to complete.
 	if mode == flavorassigner.DeferredFit {
-		e.inadmissibleMsg = "Workload has overlapping preemption targets with another workload, but will fit after these preemptions complete"
 		e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForPreemptedWorkloads
 		e.requeueReason = qcache.RequeueReasonPendingPreemption
 		// Clear FlavorScanState to force a full re-evaluation of all flavors in the next cycle.
@@ -868,6 +867,9 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 
 	needsTASRecompute := fitsCheck == schdcache.FitsCheckNoTAS && features.Enabled(features.TASRecomputeAssignmentWithinSchedulingCycle)
 	needsOverlapRecompute := preemptedWorkloads.HasAny(e.preemptionTargets) && features.Enabled(features.RecomputeAssignmentUponPreemptionTargetsOverlap)
+	// Overlapping targets stay on the overlap path to preserve flavor stickiness.
+	needsLimitsRecompute := features.Enabled(features.ConfigurablePreemptionLimits) &&
+		!preemptedWorkloads.HasAny(e.preemptionTargets) && !s.preemptor.WithinPreemptionLimits(e.preemptionTargets)
 
 	var revertRemoval func()
 	switch {
@@ -881,6 +883,10 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 		}
 		log.V(2).Info("Re-computing the assignment as preemption targets overlap")
 		revertRemoval = simulateOtherPreemptions(ctx, log, snapshot, preemptedWorkloads)
+	case needsLimitsRecompute:
+		// Recomputing may turn a refilled entry into a Fit on another flavor.
+		log.V(2).Info("Re-computing the assignment as preemption targets exceed remaining preemption limits")
+		revertRemoval = simulateOtherPreemptions(ctx, log, snapshot, preemptedWorkloads)
 	case needsTASRecompute:
 		log.V(2).Info("Re-computing the assignment as it doesn't fit for TAS")
 	default:
@@ -890,7 +896,11 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 	// Clear the flavor scan state so that we can start from the first flavor again and
 	// reach all flavors from the nomination.
 	e.FlavorScanState = nil
-	e.NominationMapping = e.readResourceToFlavorMapping()
+	// NominationMapping skips flavors that were not picked during nomination, so leave
+	// it unset on limits recompute to allow falling back to another flavor.
+	if !needsLimitsRecompute {
+		e.NominationMapping = e.readResourceToFlavorMapping()
+	}
 	newAssignment, newTargets := s.getAssignments(ctx, &e.Info, snapshot)
 	e.recordAssignment(newAssignment, newTargets)
 	if needsOverlapRecompute {
@@ -899,6 +909,17 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 		}
 		if e.assignment.RepresentativeMode() == flavorassigner.Fit {
 			e.assignment.SetRepresentativeMode(flavorassigner.DeferredFit)
+			e.inadmissibleMsg = "Workload has overlapping preemption targets with another workload, but will fit after these preemptions complete"
+		}
+	}
+	if needsLimitsRecompute {
+		revertRemoval()
+		// The recomputed Fit assumed earlier preemptions completed. Defer it unless the
+		// assignment already fits (quota and TAS capacity) while those victims still run.
+		if e.assignment.RepresentativeMode() == flavorassigner.Fit &&
+			e.checkFits(log, snapshot, cq, nil) != schdcache.FitsCheckOk {
+			e.assignment.SetRepresentativeMode(flavorassigner.DeferredFit)
+			e.inadmissibleMsg = "Workload's preemption targets exceed remaining preemption limits, but it will fit after earlier preemptions complete"
 		}
 	}
 	fitsCheck = e.checkFits(log, snapshot, cq, preemptedWorkloads)
