@@ -5413,7 +5413,18 @@ func TestSnapshotPreemptionLimits(t *testing.T) {
 			tracker := limits.NewPreemptionLimitTracker()
 			tracker.Sync(now, global)
 			tracker.Record(now.Add(-30*time.Second), policy.ConsumedLimits{"global": policy.NewConsumedLimit(global, "Global")})
-			preemptor := New(utiltesting.NewClientBuilder().Build(), workload.Ordering{}, &utiltesting.EventRecorder{}, nil, false, clocktesting.NewFakeClock(now), nil, preemptexpectations.New(), nil, tracker)
+			preemptor := New(
+				utiltesting.NewClientBuilder().Build(),
+				workload.Ordering{},
+				&utiltesting.EventRecorder{},
+				nil,
+				false,
+				clocktesting.NewFakeClock(now),
+				nil,
+				preemptexpectations.New(),
+				nil,
+				tracker,
+			)
 			// Left over from the previous scheduling cycle.
 			preemptor.limitsSnapshot = &limits.PreemptionLimitsSnapshot{}
 

@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
@@ -94,8 +93,8 @@ func newLimitState(limit *kueuealpha.PreemptionLimit) *limitState {
 // leaving out the status and the other metadata.
 func trackedCopy(limit *kueuealpha.PreemptionLimit) *kueuealpha.PreemptionLimit {
 	return &kueuealpha.PreemptionLimit{
-		ObjectMeta: metav1.ObjectMeta{Name: limit.Name, UID: limit.UID, Generation: limit.Generation},
-		Spec:       *limit.Spec.DeepCopy(),
+		Name: limit.Name, UID: limit.UID, Generation: limit.Generation,
+		Spec: *limit.Spec.DeepCopy(),
 	}
 }
 
