@@ -31,15 +31,7 @@ import (
 	utiltestingalpha "sigs.k8s.io/kueue/pkg/util/testing/v1alpha1"
 )
 
-// Scopes of the PreemptionLimits used across the tracker tests.
-const (
-	global = kueuealpha.GlobalPreemptionLimitScope
-	perCQ  = kueuealpha.PreemptorCQLimitScope
-)
-
-type scopeEvents = map[policy.PreemptionLimitScopeValue]events
-
-type trackedLimits = map[policy.PreemptionLimitReference]*limitState
+type trackedLimits = map[policy.PreemptionLimitReference]limitState
 
 var cmpTrackedLimits = []cmp.Option{
 	cmp.AllowUnexported(limitState{}),
@@ -47,7 +39,7 @@ var cmpTrackedLimits = []cmp.Option{
 }
 
 // trackedLimit returns the state of limit as synced, with the given events.
-func trackedLimit(limit *kueuealpha.PreemptionLimit, events scopeEvents) *limitState {
+func trackedLimit(limit *kueuealpha.PreemptionLimit, events ScopeEvents) limitState {
 	ls := newLimitState(limit)
 	if events != nil {
 		ls.eventsByScopeValue = events
@@ -56,7 +48,7 @@ func trackedLimit(limit *kueuealpha.PreemptionLimit, events scopeEvents) *limitS
 }
 
 // tracked returns the given states by the name of their PreemptionLimit.
-func tracked(states ...*limitState) trackedLimits {
+func tracked(states ...limitState) trackedLimits {
 	limits := make(trackedLimits, len(states))
 	for _, ls := range states {
 		limits[policy.PreemptionLimitReference(ls.limit.Name)] = ls
@@ -64,18 +56,9 @@ func tracked(states ...*limitState) trackedLimits {
 	return limits
 }
 
-// snapshotOf returns the snapshot at now of a tracker holding limits.
-func snapshotOf(now time.Time, limits trackedLimits) *PreemptionLimitsSnapshot {
-	tracker := NewPreemptionLimitTracker()
-	if limits != nil {
-		tracker.limits = limits
-	}
-	return tracker.Snapshot(now)
-}
-
 // withResetGeneration sets the generation of the PreemptionLimit when the
 // events of ls were last reset.
-func withResetGeneration(ls *limitState, generation int64) *limitState {
+func withResetGeneration(ls limitState, generation int64) limitState {
 	ls.resetGeneration = generation
 	return ls
 }
@@ -95,44 +78,46 @@ func selector(key, value string) *metav1.LabelSelector {
 func TestPreemptionLimitTrackerSnapshot(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	cutoff := now.Add(-60 * time.Second)
-	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).LimitWindowSeconds(60).Obj()
-	globalLimit := utiltestingalpha.MakePreemptionLimit("global", global).LimitWindowSeconds(3600).Obj()
+	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(1).LimitWindowSeconds(60).Obj()
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
+		Generation(1).LimitWindowSeconds(3600).Obj()
 
 	cases := map[string]struct {
-		limits       trackedLimits
-		wantLimits   []*kueuealpha.PreemptionLimit
-		wantRecorded preemptionCounts
+		initialLimits trackedLimits
+		wantLimits    []*kueuealpha.PreemptionLimit
+		wantRecorded  preemptionCounts
 	}{
 		"empty tracker gives an empty snapshot": {},
 		"events before the window are not counted": {
-			limits:       tracked(trackedLimit(perCQLimit, scopeEvents{"cq-a": {cutoff.Add(-time.Hour), cutoff.Add(-time.Nanosecond), cutoff.Add(time.Nanosecond), now}})),
-			wantLimits:   []*kueuealpha.PreemptionLimit{perCQLimit},
-			wantRecorded: preemptionCounts{"per-cq": {"cq-a": 2}},
+			initialLimits: tracked(trackedLimit(perCQLimit, ScopeEvents{"cq-a": {cutoff.Add(-time.Hour), cutoff.Add(-time.Nanosecond), cutoff.Add(time.Nanosecond), now}})),
+			wantLimits:    []*kueuealpha.PreemptionLimit{perCQLimit},
+			wantRecorded:  preemptionCounts{"per-cq": {"cq-a": 2}},
 		},
 		"event at the start of the window is counted": {
-			limits:       tracked(trackedLimit(perCQLimit, scopeEvents{"cq-a": {cutoff}})),
-			wantLimits:   []*kueuealpha.PreemptionLimit{perCQLimit},
-			wantRecorded: preemptionCounts{"per-cq": {"cq-a": 1}},
+			initialLimits: tracked(trackedLimit(perCQLimit, ScopeEvents{"cq-a": {cutoff}})),
+			wantLimits:    []*kueuealpha.PreemptionLimit{perCQLimit},
+			wantRecorded:  preemptionCounts{"per-cq": {"cq-a": 1}},
 		},
 		"every scope value of a limit is counted": {
-			limits:       tracked(trackedLimit(perCQLimit, scopeEvents{"cq-a": {now}, "cq-b": {now, now}})),
-			wantLimits:   []*kueuealpha.PreemptionLimit{perCQLimit},
-			wantRecorded: preemptionCounts{"per-cq": {"cq-a": 1, "cq-b": 2}},
+			initialLimits: tracked(trackedLimit(perCQLimit, ScopeEvents{"cq-a": {now}, "cq-b": {now, now}})),
+			wantLimits:    []*kueuealpha.PreemptionLimit{perCQLimit},
+			wantRecorded:  preemptionCounts{"per-cq": {"cq-a": 1, "cq-b": 2}},
 		},
 		"each limit counts within its own window": {
-			limits: tracked(
-				trackedLimit(perCQLimit, scopeEvents{"cq-a": {now.Add(-30 * time.Minute)}}),
-				trackedLimit(globalLimit, scopeEvents{"Global": {now.Add(-2 * time.Hour), now.Add(-30 * time.Minute)}}),
+			initialLimits: tracked(
+				trackedLimit(perCQLimit, ScopeEvents{"cq-a": {now.Add(-30 * time.Minute)}}),
+				trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {now.Add(-2 * time.Hour), now.Add(-30 * time.Minute)}}),
 			),
 			wantLimits:   []*kueuealpha.PreemptionLimit{globalLimit, perCQLimit},
-			wantRecorded: preemptionCounts{"global": {"Global": 1}},
+			wantRecorded: preemptionCounts{"global": {policy.GlobalScopeValue: 1}},
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			tracker := NewPreemptionLimitTracker()
-			if tc.limits != nil {
-				tracker.limits = tc.limits
+			if tc.initialLimits != nil {
+				tracker.limits = tc.initialLimits
 			}
 			got := tracker.Snapshot(now)
 			wantLimitByName := make(map[policy.PreemptionLimitReference]*kueuealpha.PreemptionLimit, len(tc.wantLimits))
@@ -149,28 +134,40 @@ func TestPreemptionLimitTrackerSnapshot(t *testing.T) {
 
 func TestPreemptionLimitTrackerCounts(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).LimitWindowSeconds(60).Obj()
-	globalLimit := utiltestingalpha.MakePreemptionLimit("global", global).LimitWindowSeconds(60).Obj()
+	cutoff := now.Add(-60 * time.Second)
+	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(1).LimitWindowSeconds(60).Obj()
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
+		Generation(1).LimitWindowSeconds(60).Obj()
 
 	cases := map[string]struct {
-		limits trackedLimits
-		want   map[policy.PreemptionLimitScopeValue]int32
+		initialLimits trackedLimits
+		want          policy.PreemptionLimitScopeCounts
 	}{
 		"only the counts of the given limit within its window are returned": {
-			limits: tracked(
-				trackedLimit(perCQLimit, scopeEvents{"cq-a": {now.Add(-time.Hour), now}, "cq-b": {now}}),
-				trackedLimit(globalLimit, scopeEvents{"Global": {now}}),
+			initialLimits: tracked(
+				trackedLimit(perCQLimit, ScopeEvents{
+					"cq-a": {cutoff.Add(-time.Hour), cutoff.Add(-time.Nanosecond), cutoff, now},
+					"cq-b": {now},
+				}),
+				trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {now}}),
 			),
-			want: map[policy.PreemptionLimitScopeValue]int32{"cq-a": 1, "cq-b": 1},
+			want: policy.PreemptionLimitScopeCounts{"cq-a": 2, "cq-b": 1},
+		},
+		"tracked limit without events has no counts": {
+			initialLimits: tracked(
+				trackedLimit(perCQLimit, nil),
+				trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {now}}),
+			),
 		},
 		"untracked limit has no counts": {
-			limits: tracked(trackedLimit(globalLimit, scopeEvents{"Global": {now}})),
+			initialLimits: tracked(trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {now}})),
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			tracker := NewPreemptionLimitTracker()
-			tracker.limits = tc.limits
+			tracker.limits = tc.initialLimits
 			got := tracker.Counts(now, policy.PreemptionLimitReference(perCQLimit.Name))
 			if diff := cmp.Diff(tc.want, got, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Unexpected counts (-want,+got):\n%s", diff)
@@ -183,106 +180,108 @@ func TestPreemptionLimitTrackerRecord(t *testing.T) {
 	t1 := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Second)
 	t3 := t2.Add(time.Second)
-	globalLimit := utiltestingalpha.MakePreemptionLimit("global", global).Obj()
-	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).Obj()
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
+		Generation(1).LimitWindowSeconds(60).Obj()
+	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(1).LimitWindowSeconds(60).Obj()
 	oldPerCQLimit := perCQLimit.DeepCopy()
 	oldPerCQLimit.UID = "old-uid"
 
 	cases := map[string]struct {
-		limits   trackedLimits
-		ts       time.Time
-		consumed policy.ConsumedLimits
-		want     trackedLimits
+		initialLimits trackedLimits
+		ts            time.Time
+		consumed      policy.ConsumedLimits
+		want          trackedLimits
 	}{
 		"nil consumed limits is a no-op": {
-			limits: tracked(trackedLimit(globalLimit, scopeEvents{"Global": {t1}})),
-			ts:     t2,
-			want:   tracked(trackedLimit(globalLimit, scopeEvents{"Global": {t1}})),
+			initialLimits: tracked(trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t1}})),
+			ts:            t2,
+			want:          tracked(trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t1}})),
 		},
 		"every consumed limit is recorded": {
-			limits: tracked(trackedLimit(globalLimit, nil), trackedLimit(perCQLimit, nil)),
-			ts:     t1,
+			initialLimits: tracked(trackedLimit(globalLimit, nil), trackedLimit(perCQLimit, nil)),
+			ts:            t1,
 			consumed: policy.ConsumedLimits{
-				"global": policy.NewConsumedLimit(globalLimit, "Global"),
+				"global": policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue),
 				"per-cq": policy.NewConsumedLimit(perCQLimit, "cq-a"),
 			},
 			want: tracked(
-				trackedLimit(globalLimit, scopeEvents{"Global": {t1}}),
-				trackedLimit(perCQLimit, scopeEvents{"cq-a": {t1}}),
+				trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t1}}),
+				trackedLimit(perCQLimit, ScopeEvents{"cq-a": {t1}}),
 			),
 		},
 		"untracked limit is skipped": {
-			limits: tracked(trackedLimit(globalLimit, nil)),
-			ts:     t1,
+			initialLimits: tracked(trackedLimit(globalLimit, nil)),
+			ts:            t1,
 			consumed: policy.ConsumedLimits{
-				"global": policy.NewConsumedLimit(globalLimit, "Global"),
+				"global": policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue),
 				"per-cq": policy.NewConsumedLimit(perCQLimit, "cq-a"),
 			},
-			want: tracked(trackedLimit(globalLimit, scopeEvents{"Global": {t1}})),
+			want: tracked(trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t1}})),
 		},
 		"limit resolved before it was recreated is skipped": {
-			limits: tracked(trackedLimit(globalLimit, nil), trackedLimit(perCQLimit, scopeEvents{"cq-a": {t1}})),
-			ts:     t2,
+			initialLimits: tracked(trackedLimit(globalLimit, nil), trackedLimit(perCQLimit, ScopeEvents{"cq-a": {t1}})),
+			ts:            t2,
 			consumed: policy.ConsumedLimits{
-				"global": policy.NewConsumedLimit(globalLimit, "Global"),
+				"global": policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue),
 				"per-cq": policy.NewConsumedLimit(oldPerCQLimit, "cq-a"),
 			},
 			want: tracked(
-				trackedLimit(globalLimit, scopeEvents{"Global": {t2}}),
-				trackedLimit(perCQLimit, scopeEvents{"cq-a": {t1}}),
+				trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t2}}),
+				trackedLimit(perCQLimit, ScopeEvents{"cq-a": {t1}}),
 			),
 		},
 		"limit resolved before its last reset is skipped": {
-			limits: tracked(trackedLimit(globalLimit, nil), trackedLimit(atGeneration(perCQLimit, 2), scopeEvents{"cq-a": {t1}})),
-			ts:     t2,
+			initialLimits: tracked(trackedLimit(globalLimit, nil), trackedLimit(atGeneration(perCQLimit, 2), ScopeEvents{"cq-a": {t1}})),
+			ts:            t2,
 			consumed: policy.ConsumedLimits{
-				"global": policy.NewConsumedLimit(globalLimit, "Global"),
-				"per-cq": policy.NewConsumedLimit(atGeneration(perCQLimit, 1), "cq-a"),
+				"global": policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue),
+				"per-cq": policy.NewConsumedLimit(perCQLimit, "cq-a"),
 			},
 			want: tracked(
-				trackedLimit(globalLimit, scopeEvents{"Global": {t2}}),
-				trackedLimit(atGeneration(perCQLimit, 2), scopeEvents{"cq-a": {t1}}),
+				trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t2}}),
+				trackedLimit(atGeneration(perCQLimit, 2), ScopeEvents{"cq-a": {t1}}),
 			),
 		},
 		"limit resolved at or after its last reset is recorded": {
-			limits: tracked(
+			initialLimits: tracked(
 				trackedLimit(atGeneration(globalLimit, 2), nil),
 				// Reset at generation 2, then updated at generation 3, e.g. by a window change.
 				withResetGeneration(trackedLimit(atGeneration(perCQLimit, 3), nil), 2),
 			),
 			ts: t1,
 			consumed: policy.ConsumedLimits{
-				"global": policy.NewConsumedLimit(atGeneration(globalLimit, 2), "Global"),
+				"global": policy.NewConsumedLimit(atGeneration(globalLimit, 2), policy.GlobalScopeValue),
 				"per-cq": policy.NewConsumedLimit(atGeneration(perCQLimit, 2), "cq-a"),
 			},
 			want: tracked(
-				trackedLimit(atGeneration(globalLimit, 2), scopeEvents{"Global": {t1}}),
-				withResetGeneration(trackedLimit(atGeneration(perCQLimit, 3), scopeEvents{"cq-a": {t1}}), 2),
+				trackedLimit(atGeneration(globalLimit, 2), ScopeEvents{policy.GlobalScopeValue: {t1}}),
+				withResetGeneration(trackedLimit(atGeneration(perCQLimit, 3), ScopeEvents{"cq-a": {t1}}), 2),
 			),
 		},
 		"new scope value of a recorded limit": {
-			limits:   tracked(trackedLimit(perCQLimit, scopeEvents{"cq-a": {t1}})),
-			ts:       t2,
-			consumed: policy.ConsumedLimits{"per-cq": policy.NewConsumedLimit(perCQLimit, "cq-b")},
-			want:     tracked(trackedLimit(perCQLimit, scopeEvents{"cq-a": {t1}, "cq-b": {t2}})),
+			initialLimits: tracked(trackedLimit(perCQLimit, ScopeEvents{"cq-a": {t1}})),
+			ts:            t2,
+			consumed:      policy.ConsumedLimits{"per-cq": policy.NewConsumedLimit(perCQLimit, "cq-b")},
+			want:          tracked(trackedLimit(perCQLimit, ScopeEvents{"cq-a": {t1}, "cq-b": {t2}})),
 		},
 		"later event is appended": {
-			limits:   tracked(trackedLimit(globalLimit, scopeEvents{"Global": {t1, t2}})),
-			ts:       t3,
-			consumed: policy.ConsumedLimits{"global": policy.NewConsumedLimit(globalLimit, "Global")},
-			want:     tracked(trackedLimit(globalLimit, scopeEvents{"Global": {t1, t2, t3}})),
+			initialLimits: tracked(trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t1, t2}})),
+			ts:            t3,
+			consumed:      policy.ConsumedLimits{"global": policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue)},
+			want:          tracked(trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t1, t2, t3}})),
 		},
 		"earlier event is inserted in order": {
-			limits:   tracked(trackedLimit(globalLimit, scopeEvents{"Global": {t1, t3}})),
-			ts:       t2,
-			consumed: policy.ConsumedLimits{"global": policy.NewConsumedLimit(globalLimit, "Global")},
-			want:     tracked(trackedLimit(globalLimit, scopeEvents{"Global": {t1, t2, t3}})),
+			initialLimits: tracked(trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t1, t3}})),
+			ts:            t2,
+			consumed:      policy.ConsumedLimits{"global": policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue)},
+			want:          tracked(trackedLimit(globalLimit, ScopeEvents{policy.GlobalScopeValue: {t1, t2, t3}})),
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			tracker := NewPreemptionLimitTracker()
-			tracker.limits = tc.limits
+			tracker.limits = tc.initialLimits
 			tracker.Record(tc.ts, tc.consumed)
 			if diff := cmp.Diff(tc.want, tracker.limits, cmpTrackedLimits...); diff != "" {
 				t.Errorf("Unexpected tracked limits (-want,+got):\n%s", diff)
@@ -294,11 +293,13 @@ func TestPreemptionLimitTrackerRecord(t *testing.T) {
 func TestPreemptionLimitTrackerRecordConcurrent(t *testing.T) {
 	const goroutines, recordsPerGoroutine = 10, 100
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	globalLimit := utiltestingalpha.MakePreemptionLimit("global", global).Obj()
-	consumed := policy.ConsumedLimits{"global": policy.NewConsumedLimit(globalLimit, "Global")}
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
+		Generation(1).LimitWindowSeconds(60).Obj()
+	globalRef := policy.PreemptionLimitReference(globalLimit.Name)
+	consumed := policy.ConsumedLimits{globalRef: policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue)}
 
 	tracker := NewPreemptionLimitTracker()
-	tracker.Sync(start, globalLimit)
+	tracker.Sync(globalLimit)
 	var wg sync.WaitGroup
 	for g := range goroutines {
 		wg.Go(func() {
@@ -309,7 +310,7 @@ func TestPreemptionLimitTrackerRecordConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	got := tracker.limits["global"].eventsByScopeValue["Global"]
+	got := tracker.limits[globalRef].eventsByScopeValue[policy.GlobalScopeValue]
 	if len(got) != goroutines*recordsPerGoroutine {
 		t.Errorf("Recorded %d events, want %d", len(got), goroutines*recordsPerGoroutine)
 	}
@@ -320,54 +321,39 @@ func TestPreemptionLimitTrackerRecordConcurrent(t *testing.T) {
 
 func TestPreemptionLimitTrackerSync(t *testing.T) {
 	const windowSeconds = 60
-	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	window := windowSeconds * time.Second
-	cutoff := now.Add(-window - pruneGracePeriod)
-	expired := cutoff.Add(-time.Nanosecond)
-	withinGracePeriod := now.Add(-window - pruneGracePeriod/2)
-	// prunedOnlyWithHalfWindow is kept with a window of windowSeconds, but pruned
-	// once the window is halved, as it is 1s older than the halved window's cutoff.
-	prunedOnlyWithHalfWindow := now.Add(-window/2 - pruneGracePeriod - time.Second)
-	limit := utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).LimitWindowSeconds(windowSeconds).Obj()
-	otherLimit := utiltestingalpha.MakePreemptionLimit("global", global).LimitWindowSeconds(windowSeconds).Obj()
+	t1 := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Second)
+	limit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
+		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
 	recreatedLimit := limit.DeepCopy()
 	recreatedLimit.UID = "old-uid"
-	withSelectors := func(l *kueuealpha.PreemptionLimit, config, preemptorClusterQueue, preemptedClusterQueue *metav1.LabelSelector) *kueuealpha.PreemptionLimit {
-		l = l.DeepCopy()
+	withSelectors := func(
+		l *kueuealpha.PreemptionLimit,
+		generation int64,
+		config, preemptorClusterQueue, preemptedClusterQueue *metav1.LabelSelector,
+	) *kueuealpha.PreemptionLimit {
+		l = atGeneration(l, generation)
 		l.Spec.ConfigSelector = config
 		l.Spec.PreemptorClusterQueueSelector = preemptorClusterQueue
 		l.Spec.PreemptedClusterQueueSelector = preemptedClusterQueue
 		return l
 	}
-	allSelectors := withSelectors(limit, selector("tier", "gold"), selector("side", "preemptor"), selector("side", "preempted"))
-	limitAndWindowIncreased := utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).Generation(2).Limit(10).LimitWindowSeconds(2 * windowSeconds).Obj()
-	windowHalved := utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).LimitWindowSeconds(windowSeconds / 2).Obj()
-	rescoped := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptedCQLimitScope).Generation(1).LimitWindowSeconds(windowSeconds).Obj()
+	allSelectors := withSelectors(limit, 1, selector("tier", "gold"), selector("side", "preemptor"), selector("side", "preempted"))
+	limitAndWindowIncreased := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(2).Limit(10).LimitWindowSeconds(2 * windowSeconds).Obj()
+	windowHalved := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(2).LimitWindowSeconds(windowSeconds / 2).Obj()
+	rescoped := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptedCQLimitScope).
+		Generation(2).LimitWindowSeconds(windowSeconds).Obj()
 
 	cases := map[string]struct {
-		// limits is the state of the tracker before Sync.
-		limits trackedLimits
+		initialLimits trackedLimits
 		// synced, if set, is passed to Sync instead of limit.
 		synced *kueuealpha.PreemptionLimit
-		// want is the state of the tracker after Sync.
-		want trackedLimits
+		want   trackedLimits
 	}{
-		"events before the cutoff are dropped, events at or after it are kept": {
-			limits: tracked(trackedLimit(limit, scopeEvents{"cq-a": {cutoff.Add(-time.Hour), expired, cutoff, now}})),
-			want:   tracked(trackedLimit(limit, scopeEvents{"cq-a": {cutoff, now}})),
-		},
-		"events within the grace period are kept": {
-			limits: tracked(trackedLimit(limit, scopeEvents{"cq-a": {withinGracePeriod}})),
-			want:   tracked(trackedLimit(limit, scopeEvents{"cq-a": {withinGracePeriod}})),
-		},
-		"scope value left without events is forgotten": {
-			limits: tracked(trackedLimit(limit, scopeEvents{"cq-a": {expired}, "cq-b": {now}})),
-			want:   tracked(trackedLimit(limit, scopeEvents{"cq-b": {now}})),
-		},
-		"limit left without events is still tracked": {
-			limits: tracked(trackedLimit(limit, scopeEvents{"cq-a": {expired}, "cq-b": {expired}})),
-			want:   tracked(trackedLimit(limit, nil)),
-		},
 		"untracked limit starts being tracked": {
 			want: tracked(trackedLimit(limit, nil)),
 		},
@@ -376,65 +362,67 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 			want:   tracked(trackedLimit(allSelectors, nil)),
 		},
 		"other limits are untouched": {
-			limits: tracked(
-				trackedLimit(limit, scopeEvents{"cq-a": {expired, now}}),
-				trackedLimit(otherLimit, scopeEvents{"Global": {expired}}),
+			initialLimits: tracked(
+				trackedLimit(limit, ScopeEvents{"cq-a": {t1}}),
+				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {t1}}),
 			),
+			synced: limitAndWindowIncreased,
 			want: tracked(
-				trackedLimit(limit, scopeEvents{"cq-a": {now}}),
-				trackedLimit(otherLimit, scopeEvents{"Global": {expired}}),
+				withResetGeneration(trackedLimit(limitAndWindowIncreased, ScopeEvents{"cq-a": {t1}}), 1),
+				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {t1}}),
 			),
 		},
 		"limit and window increase update the limit, and keep the events and the reset generation": {
-			limits: tracked(trackedLimit(atGeneration(limit, 1), scopeEvents{"cq-a": {expired, now}})),
-			synced: limitAndWindowIncreased,
-			want:   tracked(withResetGeneration(trackedLimit(limitAndWindowIncreased, scopeEvents{"cq-a": {expired, now}}), 1)),
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {t1, t2}})),
+			synced:        limitAndWindowIncreased,
+			want:          tracked(withResetGeneration(trackedLimit(limitAndWindowIncreased, ScopeEvents{"cq-a": {t1, t2}}), 1)),
 		},
-		"window decrease keeps the events within the new window": {
-			limits: tracked(trackedLimit(limit, scopeEvents{"cq-a": {prunedOnlyWithHalfWindow, now}})),
-			synced: windowHalved,
-			want:   tracked(trackedLimit(windowHalved, scopeEvents{"cq-a": {now}})),
+		"window decrease updates the limit, and keeps the events and the reset generation": {
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {t1, t2}})),
+			synced:        windowHalved,
+			want:          tracked(withResetGeneration(trackedLimit(windowHalved, ScopeEvents{"cq-a": {t1, t2}}), 1)),
 		},
 		"unchanged selectors keep the events": {
-			limits: tracked(trackedLimit(allSelectors, scopeEvents{"cq-a": {now}})),
-			synced: allSelectors,
-			want:   tracked(trackedLimit(allSelectors, scopeEvents{"cq-a": {now}})),
+			initialLimits: tracked(trackedLimit(allSelectors, ScopeEvents{"cq-a": {t1}})),
+			synced:        allSelectors,
+			want:          tracked(trackedLimit(allSelectors, ScopeEvents{"cq-a": {t1}})),
 		},
 		"limit recreated with the same name resets the events": {
-			limits: tracked(trackedLimit(recreatedLimit, scopeEvents{"cq-a": {now}})),
-			want:   tracked(trackedLimit(limit, nil)),
+			initialLimits: tracked(trackedLimit(recreatedLimit, ScopeEvents{"cq-a": {t1}})),
+			want:          tracked(trackedLimit(limit, nil)),
 		},
-		"scope change resets the events and the reset generation": {
-			limits: tracked(trackedLimit(limit, scopeEvents{"cq-a": {now}})),
-			synced: rescoped,
-			want:   tracked(trackedLimit(rescoped, nil)),
+		"scope change resets the events and updates the reset generation": {
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {t1}})),
+			synced:        rescoped,
+			want:          tracked(trackedLimit(rescoped, nil)),
 		},
 		"config selector change resets the events": {
-			limits: tracked(trackedLimit(limit, scopeEvents{"cq-a": {now}})),
-			synced: withSelectors(limit, selector("tier", "gold"), nil, nil),
-			want:   tracked(trackedLimit(withSelectors(limit, selector("tier", "gold"), nil, nil), nil)),
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {t1}})),
+			synced:        withSelectors(limit, 2, selector("tier", "gold"), nil, nil),
+			want:          tracked(trackedLimit(withSelectors(limit, 2, selector("tier", "gold"), nil, nil), nil)),
 		},
 		"preemptor ClusterQueue selector change resets the events": {
-			limits: tracked(trackedLimit(withSelectors(limit, nil, selector("side", "preemptor"), nil), scopeEvents{"cq-a": {now}})),
-			synced: withSelectors(limit, nil, selector("side", "other"), nil),
-			want:   tracked(trackedLimit(withSelectors(limit, nil, selector("side", "other"), nil), nil)),
+			initialLimits: tracked(trackedLimit(withSelectors(limit, 1, nil, selector("side", "preemptor"), nil), ScopeEvents{"cq-a": {t1}})),
+			synced:        withSelectors(limit, 2, nil, selector("side", "other"), nil),
+			want:          tracked(trackedLimit(withSelectors(limit, 2, nil, selector("side", "other"), nil), nil)),
 		},
-		"preempted ClusterQueue selector removal resets the events": {
-			limits: tracked(trackedLimit(withSelectors(limit, nil, nil, selector("side", "preempted")), scopeEvents{"cq-a": {now}})),
-			want:   tracked(trackedLimit(limit, nil)),
+		"preempted ClusterQueue selector change resets the events": {
+			initialLimits: tracked(trackedLimit(withSelectors(limit, 1, nil, nil, selector("side", "preempted")), ScopeEvents{"cq-a": {t1}})),
+			synced:        atGeneration(limit, 2),
+			want:          tracked(trackedLimit(atGeneration(limit, 2), nil)),
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			tracker := NewPreemptionLimitTracker()
-			if tc.limits != nil {
-				tracker.limits = tc.limits
+			if tc.initialLimits != nil {
+				tracker.limits = tc.initialLimits
 			}
 			synced := limit
 			if tc.synced != nil {
 				synced = tc.synced
 			}
-			tracker.Sync(now, synced)
+			tracker.Sync(synced)
 			if diff := cmp.Diff(tc.want, tracker.limits, cmpTrackedLimits...); diff != "" {
 				t.Errorf("Unexpected tracked limits (-want,+got):\n%s", diff)
 			}
@@ -442,36 +430,114 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 	}
 }
 
-func TestPreemptionLimitTrackerSyncConcurrent(t *testing.T) {
+func TestPreemptionLimitTrackerPrune(t *testing.T) {
+	const windowSeconds = 60
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	window := windowSeconds * time.Second
+	cutoff := now.Add(-window - pruneGracePeriod)
+	expired := cutoff.Add(-time.Nanosecond)
+	withinGracePeriod := now.Add(-window - pruneGracePeriod/2)
+	limit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
+		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
+	doubledWindowLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(2).LimitWindowSeconds(2 * windowSeconds).Obj()
+	halvedWindowLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(2).LimitWindowSeconds(windowSeconds / 2).Obj()
+	expiredWithDoubledWindow := now.Add(-2*window - pruneGracePeriod - time.Nanosecond)
+	expiredOnlyWithHalvedWindow := now.Add(-window/2 - pruneGracePeriod - time.Second)
+
+	cases := map[string]struct {
+		initialLimits trackedLimits
+		want          trackedLimits
+	}{
+		"events before the cutoff are dropped, events at or after it are kept": {
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {cutoff.Add(-time.Hour), expired, cutoff, now}})),
+			want:          tracked(trackedLimit(limit, ScopeEvents{"cq-a": {cutoff, now}})),
+		},
+		"events within the grace period are kept": {
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {withinGracePeriod}})),
+			want:          tracked(trackedLimit(limit, ScopeEvents{"cq-a": {withinGracePeriod}})),
+		},
+		"scope value left without events is forgotten": {
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {expired}, "cq-b": {now}})),
+			want:          tracked(trackedLimit(limit, ScopeEvents{"cq-b": {now}})),
+		},
+		"limit left without events is still tracked": {
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {expired}, "cq-b": {expired}})),
+			want:          tracked(trackedLimit(limit, nil)),
+		},
+		"other limits are untouched": {
+			initialLimits: tracked(
+				trackedLimit(limit, ScopeEvents{"cq-a": {expired, now}}),
+				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {expired}}),
+			),
+			want: tracked(
+				trackedLimit(limit, ScopeEvents{"cq-a": {now}}),
+				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {expired}}),
+			),
+		},
+		"untracked limit is a no-op": {
+			initialLimits: tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {expired}})),
+			want:          tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {expired}})),
+		},
+		"doubled window keeps events within the wider cutoff": {
+			initialLimits: tracked(trackedLimit(doubledWindowLimit, ScopeEvents{"cq-a": {expiredWithDoubledWindow, expired, now}})),
+			want:          tracked(trackedLimit(doubledWindowLimit, ScopeEvents{"cq-a": {expired, now}})),
+		},
+		"halved window drops events older than the shorter cutoff": {
+			initialLimits: tracked(trackedLimit(halvedWindowLimit, ScopeEvents{"cq-a": {expiredOnlyWithHalvedWindow, now}})),
+			want:          tracked(trackedLimit(halvedWindowLimit, ScopeEvents{"cq-a": {now}})),
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tracker := NewPreemptionLimitTracker()
+			tracker.limits = tc.initialLimits
+			tracker.Prune(now, policy.PreemptionLimitReference(limit.Name))
+			if diff := cmp.Diff(tc.want, tracker.limits, cmpTrackedLimits...); diff != "" {
+				t.Errorf("Unexpected tracked limits (-want,+got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestPreemptionLimitTrackerSyncAndPruneConcurrent(t *testing.T) {
 	const goroutines, recordsPerGoroutine = 10, 100
 	const records = goroutines * recordsPerGoroutine
 	const windowSeconds = 60
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	window := windowSeconds * time.Second
-	limit := utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).LimitWindowSeconds(windowSeconds).Obj()
-	otherLimit := utiltestingalpha.MakePreemptionLimit("global", global).Obj()
+	limit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
+		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
+	limitRef := policy.PreemptionLimitReference(limit.Name)
+	otherLimitRef := policy.PreemptionLimitReference(otherLimit.Name)
 	consumed := policy.ConsumedLimits{
-		"per-cq": policy.NewConsumedLimit(limit, "cq-a"),
-		"global": policy.NewConsumedLimit(otherLimit, "Global"),
+		limitRef:      policy.NewConsumedLimit(limit, "cq-a"),
+		otherLimitRef: policy.NewConsumedLimit(otherLimit, policy.GlobalScopeValue),
 	}
-	// Every recorded event is already expired, so the syncs keep pruning the
-	// synced limit while the records keep adding to it.
+	// Every recorded event is already expired, so Prune keeps dropping events from
+	// limit while Sync updates its state and Record keeps adding to it.
 	now := start.Add(records*time.Second + window + pruneGracePeriod)
 
 	tracker := NewPreemptionLimitTracker()
-	tracker.Sync(now, otherLimit)
+	tracker.Sync(otherLimit)
 	var wg sync.WaitGroup
 	for g := range goroutines {
 		wg.Go(func() {
 			for i := range recordsPerGoroutine {
-				tracker.Sync(now, limit)
+				tracker.Sync(limit)
+				tracker.Prune(now, limitRef)
 				tracker.Record(start.Add(time.Duration(g*recordsPerGoroutine+i)*time.Second), consumed)
 			}
 		})
 	}
 	wg.Wait()
 
-	got := tracker.limits["global"].eventsByScopeValue["Global"]
+	got := tracker.limits[otherLimitRef].eventsByScopeValue[policy.GlobalScopeValue]
 	if len(got) != records {
 		t.Errorf("Recorded %d events of the other limit, want %d", len(got), records)
 	}
@@ -482,29 +548,31 @@ func TestPreemptionLimitTrackerSyncConcurrent(t *testing.T) {
 
 func TestPreemptionLimitTrackerForget(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	forgottenLimit := utiltestingalpha.MakePreemptionLimit("per-cq", perCQ).Obj()
-	otherLimit := utiltestingalpha.MakePreemptionLimit("global", global).Obj()
+	forgottenLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
+		Generation(1).LimitWindowSeconds(60).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
+		Generation(1).LimitWindowSeconds(60).Obj()
 
 	cases := map[string]struct {
-		limits trackedLimits
-		want   trackedLimits
+		initialLimits trackedLimits
+		want          trackedLimits
 	}{
 		"only the given limit is forgotten": {
-			limits: tracked(
-				trackedLimit(forgottenLimit, scopeEvents{"cq-a": {now}, "cq-b": {now}}),
-				trackedLimit(otherLimit, scopeEvents{"Global": {now}}),
+			initialLimits: tracked(
+				trackedLimit(forgottenLimit, ScopeEvents{"cq-a": {now}, "cq-b": {now}}),
+				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}}),
 			),
-			want: tracked(trackedLimit(otherLimit, scopeEvents{"Global": {now}})),
+			want: tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}})),
 		},
 		"unknown limit is a no-op": {
-			limits: tracked(trackedLimit(otherLimit, scopeEvents{"Global": {now}})),
-			want:   tracked(trackedLimit(otherLimit, scopeEvents{"Global": {now}})),
+			initialLimits: tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}})),
+			want:          tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}})),
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			tracker := NewPreemptionLimitTracker()
-			tracker.limits = tc.limits
+			tracker.limits = tc.initialLimits
 			tracker.Forget(policy.PreemptionLimitReference(forgottenLimit.Name))
 			if diff := cmp.Diff(tc.want, tracker.limits, cmpTrackedLimits...); diff != "" {
 				t.Errorf("Unexpected tracked limits (-want,+got):\n%s", diff)

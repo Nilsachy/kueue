@@ -284,7 +284,7 @@ func runScheduleTestCases(t *testing.T, cfg scheduleTestConfig, cases map[string
 						tracker := limits.NewPreemptionLimitTracker()
 						for _, obj := range tc.objects {
 							if limit, ok := obj.(*kueuealpha.PreemptionLimit); ok {
-								tracker.Sync(cfg.fakeClock.Now(), limit)
+								tracker.Sync(limit)
 							}
 						}
 						schedulerOpts = append(schedulerOpts, WithPreemptionLimitTracker(tracker))

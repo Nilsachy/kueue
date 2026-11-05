@@ -71,19 +71,19 @@ func NewPreemptionLimitReconciler(
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=preemptionlimits,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=preemptionlimits/status,verbs=get;update;patch
 
-// Reconcile keeps the in-memory preemption events of the PreemptionLimit (see
-// PreemptionLimitTracker) consistent with its current spec, and reports them in
-// its status. Whenever the PreemptionLimit spec changes, and every
-// preemptionLimitPruneInterval, it syncs it into the tracker, which:
+// Reconcile keeps the in-memory state of the PreemptionLimit (see
+// PreemptionLimitTracker) consistent with its current spec, and reports active
+// counts in its status. Whenever the PreemptionLimit spec changes, and every
+// preemptionLimitPruneInterval, it syncs the PreemptionLimit into the tracker:
 //   - starts tracking a new PreemptionLimit, as preemptions are only recorded
 //     for tracked ones;
-//   - resets the events of a PreemptionLimit that was recreated, or whose scope
-//     or selectors changed, as they no longer count for it;
-//   - otherwise keeps the events (e.g. on a limit or window change), and prunes
-//     the ones that fell out of the window.
+//   - resets recorded events for a PreemptionLimit that was recreated or whose
+//     scope or selectors changed, as past events no longer count toward it;
+//   - otherwise keeps recorded events (e.g. on a limit or window change).
 //
-// It then updates the status with the preemptions counted within the window.
-// Once the PreemptionLimit is deleted, it forgets all its events.
+// It then prunes events that fell out of the window, and updates the status
+// with the preemptions counted within the window. Once the PreemptionLimit is
+// deleted, it forgets its tracked state and events.
 func (r *PreemptionLimitReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var limit kueuealpha.PreemptionLimit
 	if err := r.client.Get(ctx, req.NamespacedName, &limit); err != nil {
@@ -97,7 +97,8 @@ func (r *PreemptionLimitReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	now := r.clock.Now()
-	r.tracker.Sync(now, &limit)
+	r.tracker.Sync(&limit)
+	r.tracker.Prune(now, policy.PreemptionLimitReference(limit.Name))
 
 	limit.Status = r.preemptionLimitStatus(now, &limit)
 	if err := r.client.Status().Update(ctx, &limit); err != nil {

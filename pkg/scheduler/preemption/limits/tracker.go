@@ -33,12 +33,12 @@ const pruneGracePeriod = time.Minute
 
 // preemptionCounts holds a number of preemptions per PreemptionLimit and scope value.
 // A missing entry counts as 0.
-type preemptionCounts map[policy.PreemptionLimitReference]map[policy.PreemptionLimitScopeValue]int32
+type preemptionCounts map[policy.PreemptionLimitReference]policy.PreemptionLimitScopeCounts
 
 // add adds n preemptions for limit and scopeValue.
 func (c preemptionCounts) add(limit policy.PreemptionLimitReference, scopeValue policy.PreemptionLimitScopeValue, n int32) {
 	if c[limit] == nil {
-		c[limit] = make(map[policy.PreemptionLimitScopeValue]int32)
+		c[limit] = make(policy.PreemptionLimitScopeCounts)
 	}
 	c[limit][scopeValue] += n
 }
@@ -81,8 +81,8 @@ type limitState struct {
 }
 
 // newLimitState returns the state of limit, without events.
-func newLimitState(limit *kueuealpha.PreemptionLimit) *limitState {
-	return &limitState{
+func newLimitState(limit *kueuealpha.PreemptionLimit) limitState {
+	return limitState{
 		limit:              trackedCopy(limit),
 		resetGeneration:    limit.Generation,
 		eventsByScopeValue: make(map[policy.PreemptionLimitScopeValue]events),
@@ -101,7 +101,7 @@ func trackedCopy(limit *kueuealpha.PreemptionLimit) *kueuealpha.PreemptionLimit 
 // isCompatibleWith reports whether the tracked state can continue to be used
 // for limit, i.e. whether limit has the same UID, scope, and selectors that
 // this state was initialized with.
-func (ls *limitState) isCompatibleWith(limit *kueuealpha.PreemptionLimit) bool {
+func (ls limitState) isCompatibleWith(limit *kueuealpha.PreemptionLimit) bool {
 	return ls.limit.UID == limit.UID &&
 		ls.limit.Spec.Scope == limit.Spec.Scope &&
 		equality.Semantic.DeepEqual(ls.limit.Spec.ConfigSelector, limit.Spec.ConfigSelector) &&
@@ -112,8 +112,8 @@ func (ls *limitState) isCompatibleWith(limit *kueuealpha.PreemptionLimit) bool {
 // counts returns the number of events within the window of the tracked
 // PreemptionLimit ending at now, by scope value. Scope values with 0 events
 // are omitted.
-func (ls *limitState) counts(now time.Time) map[policy.PreemptionLimitScopeValue]int32 {
-	counts := make(map[policy.PreemptionLimitScopeValue]int32)
+func (ls limitState) counts(now time.Time) policy.PreemptionLimitScopeCounts {
+	counts := make(policy.PreemptionLimitScopeCounts)
 	cutoff := windowStart(now, ls.limit)
 	for scopeValue, e := range ls.eventsByScopeValue {
 		if count := e.countSince(cutoff); count > 0 {
@@ -127,13 +127,13 @@ func (ls *limitState) counts(now time.Time) map[policy.PreemptionLimitScopeValue
 // each PreemptionLimit and scope value. It is safe for concurrent use.
 type PreemptionLimitTracker struct {
 	mu     sync.RWMutex
-	limits map[policy.PreemptionLimitReference]*limitState
+	limits map[policy.PreemptionLimitReference]limitState
 }
 
 // NewPreemptionLimitTracker creates an empty PreemptionLimitTracker.
 func NewPreemptionLimitTracker() *PreemptionLimitTracker {
 	return &PreemptionLimitTracker{
-		limits: make(map[policy.PreemptionLimitReference]*limitState),
+		limits: make(map[policy.PreemptionLimitReference]limitState),
 	}
 }
 
@@ -148,10 +148,9 @@ func (t *PreemptionLimitTracker) Record(ts time.Time, consumedLimits policy.Cons
 	defer t.mu.Unlock()
 	for limit, consumed := range consumedLimits {
 		ls, found := t.limits[limit]
-		if !found || consumed.IsStaleFor(ls.limit.UID, ls.resetGeneration) {
-			continue
+		if found && !consumed.IsStaleFor(ls.limit.UID, ls.resetGeneration) {
+			ls.eventsByScopeValue[consumed.ScopeValue] = ls.eventsByScopeValue[consumed.ScopeValue].insert(ts)
 		}
-		ls.eventsByScopeValue[consumed.ScopeValue] = ls.eventsByScopeValue[consumed.ScopeValue].insert(ts)
 	}
 }
 
@@ -160,10 +159,11 @@ func windowStart(now time.Time, limit *kueuealpha.PreemptionLimit) time.Time {
 	return now.Add(-time.Duration(limit.Spec.LimitWindowSeconds) * time.Second)
 }
 
-// Snapshot returns a snapshot of the tracked PreemptionLimits, as last synced,
-// with the preemptions recorded within their windows ending at now. As it is
-// taken from the tracker only, the PreemptionLimits are always consistent with
-// their preemptions, including while an update is not synced yet.
+// Snapshot returns a point-in-time snapshot of the tracked PreemptionLimits
+// and their preemption counts within each limit's window ending at now.
+// Because both the PreemptionLimit specs and their recorded events are read
+// together from the tracker, a spec change only takes effect in snapshots once
+// Sync has applied it (along with any event reset).
 func (t *PreemptionLimitTracker) Snapshot(now time.Time) *PreemptionLimitsSnapshot {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -183,7 +183,7 @@ func (t *PreemptionLimitTracker) Snapshot(now time.Time) *PreemptionLimitsSnapsh
 // Counts returns the number of preemptions recorded for limit within its
 // window ending at now, by scope value. Scope values with 0 events are
 // omitted, and an untracked limit has no counts.
-func (t *PreemptionLimitTracker) Counts(now time.Time, limit policy.PreemptionLimitReference) map[policy.PreemptionLimitScopeValue]int32 {
+func (t *PreemptionLimitTracker) Counts(now time.Time, limit policy.PreemptionLimitReference) policy.PreemptionLimitScopeCounts {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	ls, found := t.limits[limit]
@@ -193,12 +193,14 @@ func (t *PreemptionLimitTracker) Counts(now time.Time, limit policy.PreemptionLi
 	return ls.counts(now)
 }
 
-// Sync starts tracking limit, or resets its events if it was recreated or its
-// scope or selectors changed, saving its generation as the last reset.
-// Otherwise, it takes the new spec into account (e.g. a limit or window
-// change), and prunes the events older than the window plus pruneGracePeriod;
-// events pruned under a shorter window are not restored.
-func (t *PreemptionLimitTracker) Sync(now time.Time, limit *kueuealpha.PreemptionLimit) {
+// Sync updates the tracker's in-memory representation of limit:
+//   - untracked limit: initializes tracking state with no recorded events;
+//   - recreated limit (new UID), or scope or selector change: updates the
+//     stored limit, clears recorded events, and records limit.Generation as
+//     the last reset generation;
+//   - limit or window change only: updates the stored limit while preserving
+//     recorded events and the last reset generation.
+func (t *PreemptionLimitTracker) Sync(limit *kueuealpha.PreemptionLimit) {
 	ref := policy.PreemptionLimitReference(limit.Name)
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -208,6 +210,19 @@ func (t *PreemptionLimitTracker) Sync(now time.Time, limit *kueuealpha.Preemptio
 		return
 	}
 	ls.limit = trackedCopy(limit)
+	t.limits[ref] = ls
+}
+
+// Prune drops recorded events of limit that are older than its window ending at
+// now plus pruneGracePeriod, and removes scope values left without events.
+// If limit is not tracked, Prune is a no-op.
+func (t *PreemptionLimitTracker) Prune(now time.Time, limit policy.PreemptionLimitReference) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	ls, found := t.limits[limit]
+	if !found {
+		return
+	}
 	cutoff := windowStart(now, ls.limit).Add(-pruneGracePeriod)
 	for scopeValue, e := range ls.eventsByScopeValue {
 		if e = e.pruneBefore(cutoff); len(e) == 0 {

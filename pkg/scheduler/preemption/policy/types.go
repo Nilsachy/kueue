@@ -63,6 +63,13 @@ type PreemptionLimitReference string
 // (e.g. "Global", a ClusterQueue name, or "<namespace>/<workload-name>").
 type PreemptionLimitScopeValue string
 
+// GlobalScopeValue is the scope value for a PreemptionLimit with GlobalPreemptionLimitScope.
+const GlobalScopeValue = PreemptionLimitScopeValue(kueuealpha.GlobalPreemptionLimitScope)
+
+// PreemptionLimitScopeCounts maps each scope value of a single PreemptionLimit
+// to its number of preemptions.
+type PreemptionLimitScopeCounts = map[PreemptionLimitScopeValue]int32
+
 // ConsumedLimit is the scope value of a PreemptionLimit consumed by a
 // preemption.
 type ConsumedLimit struct {
