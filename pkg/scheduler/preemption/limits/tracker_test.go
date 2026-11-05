@@ -321,8 +321,8 @@ func TestPreemptionLimitTrackerRecordConcurrent(t *testing.T) {
 
 func TestPreemptionLimitTrackerSync(t *testing.T) {
 	const windowSeconds = 60
-	t1 := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	t2 := t1.Add(time.Second)
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	expired := now.Add(-time.Hour)
 	limit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
 		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
 	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
@@ -363,51 +363,52 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 		},
 		"other limits are untouched": {
 			initialLimits: tracked(
-				trackedLimit(limit, ScopeEvents{"cq-a": {t1}}),
-				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {t1}}),
+				trackedLimit(limit, ScopeEvents{"cq-a": {now}}),
+				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}}),
 			),
 			synced: limitAndWindowIncreased,
 			want: tracked(
-				withResetGeneration(trackedLimit(limitAndWindowIncreased, ScopeEvents{"cq-a": {t1}}), 1),
-				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {t1}}),
+				withResetGeneration(trackedLimit(limitAndWindowIncreased, ScopeEvents{"cq-a": {now}}), 1),
+				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}}),
 			),
 		},
 		"limit and window increase update the limit, and keep the events and the reset generation": {
-			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {t1, t2}})),
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {expired, now}})),
 			synced:        limitAndWindowIncreased,
-			want:          tracked(withResetGeneration(trackedLimit(limitAndWindowIncreased, ScopeEvents{"cq-a": {t1, t2}}), 1)),
+			// The expired event is kept because the limit and window increased, and the reset generation is updated to the new limit's generation.
+			want: tracked(withResetGeneration(trackedLimit(limitAndWindowIncreased, ScopeEvents{"cq-a": {expired, now}}), 1)),
 		},
 		"window decrease updates the limit, and keeps the events and the reset generation": {
-			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {t1, t2}})),
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {expired, now}})),
 			synced:        windowHalved,
-			want:          tracked(withResetGeneration(trackedLimit(windowHalved, ScopeEvents{"cq-a": {t1, t2}}), 1)),
+			want:          tracked(withResetGeneration(trackedLimit(windowHalved, ScopeEvents{"cq-a": {expired, now}}), 1)),
 		},
 		"unchanged selectors keep the events": {
-			initialLimits: tracked(trackedLimit(allSelectors, ScopeEvents{"cq-a": {t1}})),
+			initialLimits: tracked(trackedLimit(allSelectors, ScopeEvents{"cq-a": {now}})),
 			synced:        allSelectors,
-			want:          tracked(trackedLimit(allSelectors, ScopeEvents{"cq-a": {t1}})),
+			want:          tracked(trackedLimit(allSelectors, ScopeEvents{"cq-a": {now}})),
 		},
 		"limit recreated with the same name resets the events": {
-			initialLimits: tracked(trackedLimit(recreatedLimit, ScopeEvents{"cq-a": {t1}})),
+			initialLimits: tracked(trackedLimit(recreatedLimit, ScopeEvents{"cq-a": {now}})),
 			want:          tracked(trackedLimit(limit, nil)),
 		},
 		"scope change resets the events and updates the reset generation": {
-			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {t1}})),
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {now}})),
 			synced:        rescoped,
 			want:          tracked(trackedLimit(rescoped, nil)),
 		},
 		"config selector change resets the events": {
-			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {t1}})),
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {now}})),
 			synced:        withSelectors(limit, 2, selector("tier", "gold"), nil, nil),
 			want:          tracked(trackedLimit(withSelectors(limit, 2, selector("tier", "gold"), nil, nil), nil)),
 		},
 		"preemptor ClusterQueue selector change resets the events": {
-			initialLimits: tracked(trackedLimit(withSelectors(limit, 1, nil, selector("side", "preemptor"), nil), ScopeEvents{"cq-a": {t1}})),
+			initialLimits: tracked(trackedLimit(withSelectors(limit, 1, nil, selector("side", "preemptor"), nil), ScopeEvents{"cq-a": {now}})),
 			synced:        withSelectors(limit, 2, nil, selector("side", "other"), nil),
 			want:          tracked(trackedLimit(withSelectors(limit, 2, nil, selector("side", "other"), nil), nil)),
 		},
 		"preempted ClusterQueue selector change resets the events": {
-			initialLimits: tracked(trackedLimit(withSelectors(limit, 1, nil, nil, selector("side", "preempted")), ScopeEvents{"cq-a": {t1}})),
+			initialLimits: tracked(trackedLimit(withSelectors(limit, 1, nil, nil, selector("side", "preempted")), ScopeEvents{"cq-a": {now}})),
 			synced:        atGeneration(limit, 2),
 			want:          tracked(trackedLimit(atGeneration(limit, 2), nil)),
 		},
@@ -446,6 +447,7 @@ func TestPreemptionLimitTrackerPrune(t *testing.T) {
 	halvedWindowLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
 		Generation(2).LimitWindowSeconds(windowSeconds / 2).Obj()
 	expiredWithDoubledWindow := now.Add(-2*window - pruneGracePeriod - time.Nanosecond)
+	withinDoubledWindow := cutoff.Add(-time.Second)
 	expiredOnlyWithHalvedWindow := now.Add(-window/2 - pruneGracePeriod - time.Second)
 
 	cases := map[string]struct {
@@ -483,8 +485,8 @@ func TestPreemptionLimitTrackerPrune(t *testing.T) {
 			want:          tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {expired}})),
 		},
 		"doubled window keeps events within the wider cutoff": {
-			initialLimits: tracked(trackedLimit(doubledWindowLimit, ScopeEvents{"cq-a": {expiredWithDoubledWindow, expired, now}})),
-			want:          tracked(trackedLimit(doubledWindowLimit, ScopeEvents{"cq-a": {expired, now}})),
+			initialLimits: tracked(trackedLimit(doubledWindowLimit, ScopeEvents{"cq-a": {expiredWithDoubledWindow, withinDoubledWindow, now}})),
+			want:          tracked(trackedLimit(doubledWindowLimit, ScopeEvents{"cq-a": {withinDoubledWindow, now}})),
 		},
 		"halved window drops events older than the shorter cutoff": {
 			initialLimits: tracked(trackedLimit(halvedWindowLimit, ScopeEvents{"cq-a": {expiredOnlyWithHalvedWindow, now}})),
