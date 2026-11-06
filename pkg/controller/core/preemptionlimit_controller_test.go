@@ -42,7 +42,8 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	lastUpdateTime := new(metav1.NewTime(now))
 	errTest := errors.New("test error")
-	limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptorCQLimitScope).Generation(1).Limit(10).LimitWindowSeconds(60).Obj()
+	limitBase := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptorCQLimitScope).Generation(1).Limit(10).LimitWindowSeconds(60)
+	limit := limitBase.Clone().Obj()
 	otherLimit := utiltestingalpha.MakePreemptionLimit("other-limit", kueuealpha.GlobalPreemptionLimitScope).Generation(1).LimitWindowSeconds(60).Obj()
 	// recorded holds the preemptions of "limit" recorded before it is
 	// reconciled, by timestamp.
@@ -109,7 +110,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			},
 		},
 		"limit and window change keep the events": {
-			limit:      utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptorCQLimitScope).Generation(2).Limit(20).LimitWindowSeconds(2 * 3600).Obj(),
+			limit:      limitBase.Clone().Generation(2).Limit(20).LimitWindowSeconds(2 * 3600).Obj(),
 			recorded:   seeded,
 			wantResult: reconcile.Result{RequeueAfter: preemptionLimitPruneInterval},
 			wantCounts: policy.PreemptionLimitScopeCounts{"cq-a": 2, "cq-b": 1},
@@ -122,7 +123,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			},
 		},
 		"scope change resets the events": {
-			limit:      utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptedCQLimitScope).Generation(2).Limit(10).LimitWindowSeconds(60).Obj(),
+			limit:      limitBase.Clone().Generation(2).Scope(kueuealpha.PreemptedCQLimitScope).Obj(),
 			recorded:   seeded,
 			wantResult: reconcile.Result{RequeueAfter: preemptionLimitPruneInterval},
 			wantLimitStatus: &kueuealpha.PreemptionLimitStatus{
@@ -130,11 +131,9 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			},
 		},
 		"selector change resets the events": {
-			limit: utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptorCQLimitScope).
+			limit: limitBase.Clone().
 				Generation(2).
 				ConfigSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"tier": "gold"}}).
-				Limit(10).
-				LimitWindowSeconds(60).
 				Obj(),
 			recorded:   seeded,
 			wantResult: reconcile.Result{RequeueAfter: preemptionLimitPruneInterval},

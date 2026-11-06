@@ -393,13 +393,13 @@ type PreemptionLimitWrapper struct {
 // MakePreemptionLimit creates a PreemptionLimit wrapper with the given scope.
 // Its UID defaults to the name suffixed with "-uid".
 func MakePreemptionLimit(name string, scope kueuealpha.PreemptionLimitScope) *PreemptionLimitWrapper {
-	return &PreemptionLimitWrapper{
+	w := &PreemptionLimitWrapper{
 		Name: name,
-		UID:  types.UID(name + "-uid"),
 		Spec: kueuealpha.PreemptionLimitSpec{
 			Scope: scope,
 		},
 	}
+	return w.UID(types.UID(name + "-uid"))
 }
 
 // Clone returns a deep copy of the PreemptionLimitWrapper.
@@ -410,6 +410,18 @@ func (pl *PreemptionLimitWrapper) Clone() *PreemptionLimitWrapper {
 // Obj returns the inner PreemptionLimit.
 func (pl *PreemptionLimitWrapper) Obj() *kueuealpha.PreemptionLimit {
 	return &pl.PreemptionLimit
+}
+
+// Scope sets the scope of the PreemptionLimit.
+func (pl *PreemptionLimitWrapper) Scope(scope kueuealpha.PreemptionLimitScope) *PreemptionLimitWrapper {
+	pl.Spec.Scope = scope
+	return pl
+}
+
+// UID sets the UID of the PreemptionLimit.
+func (pl *PreemptionLimitWrapper) UID(uid types.UID) *PreemptionLimitWrapper {
+	pl.PreemptionLimit.UID = uid
+	return pl
 }
 
 // Limit sets the number of preemptions allowed within the window.
