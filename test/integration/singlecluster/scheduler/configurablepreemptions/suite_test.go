@@ -69,7 +69,6 @@ func TestConfigurablePreemptions(t *testing.T) {
 
 var _ = ginkgo.BeforeSuite(func() {
 	features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.ConfigurablePreemptions, true)
-	features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.ConfigurablePreemptionLimits, true)
 	features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.TopologyAwareScheduling, true)
 	features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.PrioritizePreemptorWorkloads, true)
 
@@ -84,10 +83,6 @@ var _ = ginkgo.AfterSuite(func() {
 	fwk.Teardown()
 })
 
-var _ = ginkgo.BeforeEach(func() {
-	fwk.StartManager(ctx, cfg, managerAndSchedulerSetup())
-})
-
 var _ = ginkgo.AfterEach(func() {
 	fwk.StopManager(ctx)
 })
@@ -99,7 +94,10 @@ func managerAndSchedulerSetup() framework.ManagerSetup {
 
 		cCache := schdcache.New(mgr.GetClient())
 		preemptionExpectations := preemptexpectations.New()
-		preemptionLimitTracker = limits.NewPreemptionLimitTracker()
+		preemptionLimitTracker = nil
+		if features.Enabled(features.ConfigurablePreemptionLimits) {
+			preemptionLimitTracker = limits.NewPreemptionLimitTracker()
+		}
 		queues := integration.NewManager(ctx, mgr.GetClient(), cCache,
 			qcache.WithPreemptionExpectations(preemptionExpectations))
 		qManager = queues
