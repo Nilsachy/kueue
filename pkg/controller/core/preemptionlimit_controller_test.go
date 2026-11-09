@@ -88,6 +88,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 		// limit is "limit" when it is reconciled, or nil once deleted.
 		limit       *kueuealpha.PreemptionLimit
 		recorded    recorded
+		opts        []PreemptionLimitReconcilerOption
 		clientFuncs interceptor.Funcs
 		wantResult  reconcile.Result
 		wantErr     error
@@ -96,6 +97,13 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 		// wantLimitStatus, if set, is the status of "limit" after the reconcile.
 		wantLimitStatus *kueuealpha.PreemptionLimitStatus
 	}{
+		"custom prune interval overrides RequeueAfter": {
+			limit:      limit,
+			recorded:   seeded,
+			opts:       []PreemptionLimitReconcilerOption{WithPreemptionLimitPruneInterval(100 * time.Millisecond)},
+			wantResult: reconcile.Result{RequeueAfter: 100 * time.Millisecond},
+			wantCounts: policy.PreemptionLimitScopeCounts{"cq-a": 1, "cq-b": 1},
+		},
 		"unchanged limit keeps its events and reports them in its status": {
 			limit:      limit,
 			recorded:   seeded,
@@ -223,7 +231,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 				}).
 				Build()
 			tracker := limits.NewPreemptionLimitTracker()
-			reconciler := NewPreemptionLimitReconciler(cl, tracker, nil)
+			reconciler := NewPreemptionLimitReconciler(cl, tracker, nil, tc.opts...)
 			reconciler.clock = testingclock.NewFakeClock(now)
 			// Preemptions are only recorded for the reconciled PreemptionLimits.
 			for _, l := range []*kueuealpha.PreemptionLimit{limit, otherLimit} {
