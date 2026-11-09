@@ -750,7 +750,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, config, true)
 			})
 
-			ginkgo.It("should update, sort, preserve, reset, and prune status counts accurately", func() {
+			ginkgo.It("should update, sort, preserve, and prune status counts accurately", func() {
 				victimB1 := createWorkload("victim-b-1", lqVictimB.Name, 10, "1")
 				victimB2 := createWorkload("victim-b-2", lqVictimB.Name, 20, "1")
 				victimA1 := createWorkload("victim-a-1", lqVictimA.Name, 30, "1")
@@ -789,12 +789,99 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 						g.Expect(got.Status.Counts).To(gomega.Equal(wantCQCounts))
 					}, behavioral.ConsistentDuration, behavioral.ShortInterval).Should(gomega.Succeed())
 				})
+			})
+		})
 
-				ginkgo.By("Resetting status counts when scope changes", func() {
-					updatePreemptionLimit(preemptedCQLimit, func(pl *kueuealpha.PreemptionLimit) {
+		ginkgo.When("resetting or deleting a blocking PreemptionLimit", func() {
+			var (
+				config *kueuealpha.PreemptionConfig
+				limit  *kueuealpha.PreemptionLimit
+				cq     *kueue.ClusterQueue
+				lq     *kueue.LocalQueue
+			)
+
+			ginkgo.BeforeEach(func() {
+				config = kueuetestalpha1.MakePreemptionConfig("reset-delete-config").
+					Rule("within-cq", kueuealpha.Always,
+						kueuetestalpha1.MakeCandidateSelector(kueuealpha.WithinClusterQueue).
+							Priority(kueuealpha.Boosted, kueuealpha.LessThan).
+							Obj(),
+					).Obj()
+				behavioral.MustCreate(ctx, k8sClient, config)
+
+				cq = utiltestingapi.MakeClusterQueue("cq-reset-delete").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas(flavor.Name).
+						Resource(corev1.ResourceCPU, "3").Obj()).
+					Annotation(kueuealpha.PreemptionConfigNameAnnotation, config.Name).
+					Obj()
+				behavioral.CreateClusterQueuesAndWaitForActive(ctx, k8sClient, cq)
+
+				lq = utiltestingapi.MakeLocalQueue("lq-reset-delete", ns.Name).ClusterQueue(cq.Name).Obj()
+				behavioral.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lq)
+
+				limit = kueuetestalpha1.MakePreemptionLimit("reset-delete-limit", kueuealpha.GlobalPreemptionLimitScope).
+					Limit(1).
+					LimitWindowSeconds(60).
+					Obj()
+				createPreemptionLimitAndWaitForSync(limit)
+			})
+
+			ginkgo.AfterEach(func() {
+				gomega.Expect(behavioral.DeleteWorkloadsInNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
+				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, lq, true)
+				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, cq, true)
+				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, limit, true)
+				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, config, true)
+			})
+
+			ginkgo.It("should reset enforcement on scope change and unblock preemption when deleted", func() {
+				lowWl1 := createWorkload("low-1", lq.Name, 10, "1")
+				lowWl2 := createWorkload("low-2", lq.Name, 20, "1")
+				lowWl3 := createWorkload("low-3", lq.Name, 30, "1")
+				behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, lowWl1, lowWl2, lowWl3)
+
+				var highWl2, highWl3 *kueue.Workload
+				ginkgo.By("Exhausting Limit(1) and verifying a second preemption is blocked", func() {
+					highWl1 := createWorkload("high-1", lq.Name, 100, "1")
+					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowWl1)
+					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highWl1)
+					expectPreemptionLimitCounts(limit, []kueuealpha.PreemptionLimitCount{
+						{Name: string(policy.GlobalScopeValue), Value: 1},
+					})
+
+					highWl2 = createWorkload("high-2", lq.Name, 100, "1")
+					behavioral.ExpectWorkloadsToBePending(ctx, k8sClient, highWl2)
+					expectWorkloadsNotEvictedConsistently(lowWl2, lowWl3)
+				})
+
+				ginkgo.By("Updating Scope so counts clear, a new preemption proceeds, and counts record under the new scope", func() {
+					updatePreemptionLimit(limit, func(pl *kueuealpha.PreemptionLimit) {
 						pl.Spec.Scope = kueuealpha.PreemptorCQLimitScope
 					})
-					expectPreemptionLimitCounts(preemptedCQLimit, nil)
+					expectPreemptionLimitCounts(limit, nil)
+					waitForLimitAllowance(limit.Name, policy.PreemptionLimitScopeValue(cq.Name), 1)
+
+					highWl2 = recreateBlockedPreemptor(highWl2)
+					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowWl2)
+					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highWl2)
+					expectPreemptionLimitCounts(limit, []kueuealpha.PreemptionLimitCount{
+						{Name: cq.Name, Value: 1},
+					})
+
+					highWl3 = createWorkload("high-3", lq.Name, 100, "1")
+					behavioral.ExpectWorkloadsToBePending(ctx, k8sClient, highWl3)
+					expectWorkloadsNotEvictedConsistently(lowWl3)
+				})
+
+				ginkgo.By("Deleting the blocking PreemptionLimit so preemption is allowed again", func() {
+					behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, limit, true)
+					gomega.Eventually(func() policy.PreemptionLimitScopeCounts {
+						return preemptionLimitTracker.Counts(time.Now(), policy.PreemptionLimitReference(limit.Name))
+					}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.BeEmpty())
+
+					highWl3 = recreateBlockedPreemptor(highWl3)
+					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowWl3)
+					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highWl3)
 				})
 			})
 		})
