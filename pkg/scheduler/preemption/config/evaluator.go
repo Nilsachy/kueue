@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
 	cmputil "sigs.k8s.io/kueue/pkg/util/cmp"
 	"sigs.k8s.io/kueue/pkg/util/expectations"
+	"sigs.k8s.io/kueue/pkg/util/orderedgroups"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
@@ -216,22 +217,30 @@ func (p *PreemptionEvaluator) iterateOverCandidates(
 	preemptorCQ := snapshot.ClusterQueue(p.preemptor.ClusterQueue)
 	for _, candidate := range candidates {
 		targetCQ := snapshot.ClusterQueue(candidate.WlInfo.ClusterQueue)
-		consumedLimits, retryAt, withinLimits := budget.TryConsume(p.preemptor, candidate.WlInfo, preemptorCQ, targetCQ)
-		if !withinLimits {
-			p.retryAt = cmputil.EarliestTime(p.retryAt, retryAt)
-			continue
-		}
-		if !yield(&policy.Target{
-			WorkloadInfo: candidate.WlInfo,
-			Reason:       kueue.ConfigurablePreemptionReason,
-			WorkloadCq:   targetCQ,
-			ConfigurablePreemptionReasonData: &policy.ConfigurablePreemptionReasonData{
-				ConfigName:                candidate.ConfigName,
-				RuleNameToSelectorIndexes: candidate.RuleNameToSelectorIndexes,
-				ConsumedLimits:            consumedLimits,
-			},
-		}) {
-			return true
+		for ruleReference, selectorIndexes := range candidate.RuleNameToSelectorIndexes.InOrder {
+			consumedLimits, retryAt, withinLimits := budget.TryConsume(p.preemptor, candidate.WlInfo, ruleReference, preemptorCQ, targetCQ)
+			if !withinLimits {
+				p.retryAt = cmputil.EarliestTime(p.retryAt, retryAt)
+				continue
+			}
+			if !yield(&policy.Target{
+				WorkloadInfo: candidate.WlInfo,
+				Reason:       kueue.ConfigurablePreemptionReason,
+				WorkloadCq:   targetCQ,
+				ConfigurablePreemptionReasonData: &policy.ConfigurablePreemptionReasonData{
+					ConfigName: candidate.ConfigName,
+					MatchedRule: policy.MatchedRule{
+						RuleReference:   ruleReference,
+						SelectorIndexes: selectorIndexes,
+					},
+					ConsumedLimits: consumedLimits,
+				},
+			}) {
+				return true
+			}
+
+			// Only first matched rule within limits is processed per candidate.
+			break
 		}
 	}
 	return
@@ -260,9 +269,11 @@ func (p *PreemptionEvaluator) hasConditionalRules() bool {
 // configurableCandidate represents a workload selected for configurable preemption
 // together with the configuration rules and selectors that selected it.
 type configurableCandidate struct {
-	WlInfo                    *workload.Info
-	ConfigName                policy.PreemptionConfigReference
-	RuleNameToSelectorIndexes map[policy.PreemptionConfigRuleReference][]int
+	WlInfo     *workload.Info
+	ConfigName policy.PreemptionConfigReference
+	// RuleNameToSelectorIndexes maps a reference of a matched rule to indexes of the matched selectors.
+	// It keeps the order of matched rules for later evaluations like limits.
+	RuleNameToSelectorIndexes *orderedgroups.OrderedGroups[policy.PreemptionConfigRuleReference, int]
 }
 
 // orderedCandidates returns the candidates selected by the rules of the
@@ -355,9 +366,7 @@ func (p *PreemptionEvaluator) addMatchingCandidates(
 		for _, wlInfo := range targetCq.Workloads {
 			if matchesWorkload(filter, wlInfo) && classical.WorkloadUsesResources(wlInfo, flavorsNeedPreemption) {
 				candidate := p.ensureCandidate(seen, candidates, wlInfo)
-
-				indexes := candidate.RuleNameToSelectorIndexes[ruleReference]
-				candidate.RuleNameToSelectorIndexes[ruleReference] = append(indexes, selectorIndex)
+				candidate.RuleNameToSelectorIndexes.Insert(ruleReference, selectorIndex)
 			}
 		}
 	}
@@ -376,7 +385,7 @@ func (p *PreemptionEvaluator) ensureCandidate(
 	candidate := &configurableCandidate{
 		WlInfo:                    wlInfo,
 		ConfigName:                policy.PreemptionConfigReference(p.config.Name),
-		RuleNameToSelectorIndexes: map[policy.PreemptionConfigRuleReference][]int{},
+		RuleNameToSelectorIndexes: orderedgroups.NewOrderedGroups[policy.PreemptionConfigRuleReference, int](),
 	}
 
 	*candidates = append(*candidates, candidate)
