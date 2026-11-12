@@ -18,6 +18,7 @@ package policy
 
 import (
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -94,6 +95,53 @@ func (c ConsumedLimit) IsStaleFor(uid types.UID, minGeneration int64) bool {
 
 // ConsumedLimits maps each PreemptionLimit to the limit consumed by a preemption.
 type ConsumedLimits map[PreemptionLimitReference]ConsumedLimit
+
+// PreemptionLimitBlock identifies a PreemptionLimit that prevented preempting a
+// candidate and when that candidate's exhausted limits may clear.
+// RetryAt is nil when waiting for recorded events to expire cannot unblock it
+// (e.g., spec.limit is 0, or taken preemptions alone exhaust spec.limit).
+type PreemptionLimitBlock struct {
+	Limit   PreemptionLimitReference
+	RetryAt *time.Time
+}
+
+// Message formats the human-readable reason why preemption was blocked by the limit.
+func (b PreemptionLimitBlock) Message() string {
+	if b.RetryAt == nil {
+		return fmt.Sprintf("preemption blocked by PreemptionLimit %s", b.Limit)
+	}
+	return fmt.Sprintf("preemption blocked by PreemptionLimit %s until %s", b.Limit, b.RetryAt.UTC().Format(time.RFC3339))
+}
+
+// EarlierPreemptionLimitBlock returns the block that clears sooner between two
+// alternative candidates or attempts, or nil if both are nil.
+// A finite RetryAt clears sooner than a nil (non-expiring) RetryAt; ties are
+// broken deterministically by Limit name.
+func EarlierPreemptionLimitBlock(a, b *PreemptionLimitBlock) *PreemptionLimitBlock {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	case a.RetryAt == nil && b.RetryAt == nil:
+		if a.Limit <= b.Limit {
+			return a
+		}
+		return b
+	case a.RetryAt == nil:
+		return b
+	case b.RetryAt == nil:
+		return a
+	case a.RetryAt.Before(*b.RetryAt):
+		return a
+	case b.RetryAt.Before(*a.RetryAt):
+		return b
+	case a.Limit <= b.Limit:
+		return a
+	default:
+		return b
+	}
+}
 
 func (d *ConfigurablePreemptionReasonData) EvictionMessage(preemptor *kueue.Workload) string {
 	return fmt.Sprintf("Preempted by %s because of preemption config %s rule %s",

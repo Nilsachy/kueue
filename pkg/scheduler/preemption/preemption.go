@@ -51,7 +51,6 @@ import (
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/fairsharing"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/limits"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
-	cmputil "sigs.k8s.io/kueue/pkg/util/cmp"
 	"sigs.k8s.io/kueue/pkg/util/expectations"
 	"sigs.k8s.io/kueue/pkg/util/logging"
 	"sigs.k8s.io/kueue/pkg/util/priority"
@@ -80,8 +79,8 @@ type Preemptor struct {
 	preemptionLimitTracker *limits.PreemptionLimitTracker
 	// limitsSnapshot holds the PreemptionLimits enforced in the current scheduling cycle.
 	limitsSnapshot *limits.PreemptionLimitsSnapshot
-	// retryAt holds the earliest retry time from exhausted strategy iterations until TakeRetryAt clears it.
-	retryAt *time.Time
+	// blockedLimit holds the earliest-clearing PreemptionLimitBlock from exhausted strategy iterations until TakeBlockedLimit clears it.
+	blockedLimit *policy.PreemptionLimitBlock
 }
 
 // PreemptionStrategy represents a singular set of ordered potential preemption candidates.
@@ -195,7 +194,7 @@ func (p *Preemptor) getPreemptionStrategyIterator(ctx context.Context, preemptio
 			}
 		}
 		// Early exit means a strategy was accepted, so nothing needs a retry.
-		p.retryAt = cmputil.EarliestTime(p.retryAt, preemptionCtx.configurableEvaluator.RetryAt())
+		p.blockedLimit = policy.EarlierPreemptionLimitBlock(p.blockedLimit, preemptionCtx.configurableEvaluator.BlockedLimit())
 	}
 }
 
@@ -258,12 +257,12 @@ func (p *Preemptor) WithinPreemptionLimits(targets []*Target) bool {
 	return p.limitsSnapshot.WithinLimits(preemptions)
 }
 
-// TakeRetryAt returns and clears the earliest retry timestamp from failed
-// preemption attempts since the last call, or nil if none.
-func (p *Preemptor) TakeRetryAt() *time.Time {
-	retryAt := p.retryAt
-	p.retryAt = nil
-	return retryAt
+// TakeBlockedLimit returns and clears the earliest-clearing PreemptionLimitBlock
+// from failed preemption attempts since the last call, or nil if none.
+func (p *Preemptor) TakeBlockedLimit() *policy.PreemptionLimitBlock {
+	blockedLimit := p.blockedLimit
+	p.blockedLimit = nil
+	return blockedLimit
 }
 
 // Resolved once per attempt: both algorithms evaluate several triggers, and the

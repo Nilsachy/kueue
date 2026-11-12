@@ -984,6 +984,11 @@ const (
 	// failed because the workload's DRA resources could not be resolved.
 	WorkloadQuotaReservedReasonDRAResourcesUnresolved = "DRAResourcesUnresolved"
 
+	// WorkloadQuotaReservedReasonPreemptionLimitExceeded indicates that the workload requires
+	// preemption to reserve quota or satisfy topology placement, but preemption was blocked by
+	// a PreemptionLimit (alpha, requires the ConfigurablePreemptionLimits feature gate).
+	WorkloadQuotaReservedReasonPreemptionLimitExceeded = "PreemptionLimitExceeded"
+
 	// WorkloadAdmittedReasonNoReservation indicates that the workload has no reservation.
 	WorkloadAdmittedReasonNoReservation = "NoReservation"
 

@@ -54,6 +54,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/fairsharing"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/limits"
+	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
 	afs "sigs.k8s.io/kueue/pkg/util/admissionfairsharing"
 	"sigs.k8s.io/kueue/pkg/util/api"
 	"sigs.k8s.io/kueue/pkg/util/expectations"
@@ -301,14 +302,21 @@ func (e *entry) markAssumed() {
 }
 
 // recordAssignment stores a flavor assignment, its preemption targets, and
-// any retry timestamp. FlavorScanState aliases the stored assignment's
+// any PreemptionLimit block. FlavorScanState aliases the stored assignment's
 // FlavorScanState so it tracks any later mutation.
-func (e *entry) recordAssignment(a flavorassigner.Assignment, targets []*preemption.Target, retryAt *time.Time) {
+func (e *entry) recordAssignment(a flavorassigner.Assignment, targets []*preemption.Target, blockedLimit *policy.PreemptionLimitBlock) {
 	e.assignment = a
 	e.preemptionTargets = targets
-	e.retryAt = retryAt
+	e.blockedLimit = blockedLimit
 	e.inadmissibleMsg = e.assignment.Message()
 	e.FlavorScanState = &e.assignment.FlavorScanState
+}
+
+func (e *entry) appendInadmissibleMsg(msg string) {
+	if e.inadmissibleMsg != "" {
+		e.inadmissibleMsg += "; "
+	}
+	e.inadmissibleMsg += msg
 }
 
 // markPreemptionOutcome records the outcome of IssuePreemptions and
@@ -519,13 +527,21 @@ func (s *Scheduler) processEntry(
 		e.requeueReason = qcache.RequeueReasonNoFit
 		log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
 		e.quotaReservedReason = e.assignment.NoFitReason
+		if e.blockedLimit != nil {
+			e.appendInadmissibleMsg(e.blockedLimit.Message())
+		}
 		return
 	}
 
 	if mode == flavorassigner.Preempt {
 		if len(e.preemptionTargets) == 0 {
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
+			if e.blockedLimit != nil {
+				e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonPreemptionLimitExceeded
+				e.appendInadmissibleMsg(e.blockedLimit.Message())
+			} else {
+				e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
+			}
 			s.reserveCapacityForUnreclaimablePreempt(log, e, snapshot, cq)
 			return
 		}
@@ -723,7 +739,7 @@ type entry struct {
 	inadmissibleMsg      string
 	requeueReason        qcache.RequeueReason
 	preemptionTargets    []*preemption.Target
-	retryAt              *time.Time
+	blockedLimit         *policy.PreemptionLimitBlock
 	clusterQueueSnapshot *schdcache.ClusterQueueSnapshot
 	quotaReservedReason  string
 	skipStatusUpdate     bool
@@ -851,8 +867,8 @@ func (s *Scheduler) nominateWorkload(ctx context.Context, log logr.Logger, h qca
 			}
 		}
 	} else {
-		assignment, targets, retryAt := s.getAssignments(ctx, &e.Info, snap)
-		e.recordAssignment(assignment, targets, retryAt)
+		assignment, targets, blockedLimit := s.getAssignments(ctx, &e.Info, snap)
+		e.recordAssignment(assignment, targets, blockedLimit)
 		return e, true
 	}
 	return e, false
@@ -903,8 +919,8 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 	if !needsLimitsRecompute {
 		e.NominationMapping = e.readResourceToFlavorMapping()
 	}
-	newAssignment, newTargets, newRetryAt := s.getAssignments(ctx, &e.Info, snapshot)
-	e.recordAssignment(newAssignment, newTargets, newRetryAt)
+	newAssignment, newTargets, newBlockedLimit := s.getAssignments(ctx, &e.Info, snapshot)
+	e.recordAssignment(newAssignment, newTargets, newBlockedLimit)
 	if needsOverlapRecompute {
 		if revertRemoval != nil {
 			revertRemoval()
@@ -1296,8 +1312,9 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 	// RequeueWorkload resets e.ClusterQueue for non-admitted workloads.
 	cqName := e.ClusterQueue
 	added := s.queues.RequeueWorkload(ctx, &e.Info, e.requeueReason, qcache.QuotaReservedReason(e.quotaReservedReason))
-	if added && (e.requeueReason == qcache.RequeueReasonPreemptionNoCandidates || e.requeueReason == qcache.RequeueReasonNoFit) && e.retryAt != nil {
-		qcache.NotifyRetryInadmissibleAfter(s.queues, sets.New(cqName), e.retryAt.Sub(s.clock.Now()))
+	if added && (e.requeueReason == qcache.RequeueReasonPreemptionNoCandidates || e.requeueReason == qcache.RequeueReasonNoFit) &&
+		e.blockedLimit != nil && e.blockedLimit.RetryAt != nil {
+		qcache.NotifyRetryInadmissibleAfter(s.queues, sets.New(cqName), e.blockedLimit.RetryAt.Sub(s.clock.Now()))
 	}
 	log.V(2).
 		Info("Workload re-queued", "workload", klog.KObj(e.Obj), "clusterQueue", klog.KRef("", string(e.ClusterQueue)), "queue", klog.KRef(e.Obj.Namespace, string(e.Obj.Spec.QueueName)), "requeueReason", e.requeueReason, "added", added, "status", e.status)
@@ -1585,7 +1602,7 @@ func resolveFlavorIndex(wl *workload.Info, flavors []kueue.ResourceFlavorReferen
 func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap *schdcache.Snapshot) (
 	fullAssignment flavorassigner.Assignment,
 	targets []*preemption.Target,
-	retryAt *time.Time,
+	blockedLimit *policy.PreemptionLimitBlock,
 ) {
 	log := log.FromContext(ctx)
 	cq := snap.ClusterQueue(wl.ClusterQueue)
@@ -1606,9 +1623,21 @@ func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap 
 		replaceableWorkloadSlice, s.quotaCheckStrategy, s.resourceFormatter, s.schedulingCycle,
 	)
 
+	// Always drain s.preemptor so a failed attempt's blockedLimit never leaks across
+	// calls. A NoFit plan (e.g. impossible topology or unmatched PodSet flavor) cannot
+	// fit even if preemptions clear, so ignore any limit recorded while probing flavors.
+	takePlanBlockedLimit := func(plan *assignment.Plan) *policy.PreemptionLimitBlock {
+		blocked := s.preemptor.TakeBlockedLimit()
+		if plan.CanFit() || plan.Assignment.RepresentativeMode() != flavorassigner.Preempt {
+			return nil
+		}
+		return blocked
+	}
+
 	initialAssignment := flvAssigner.AssignFlavors(ctx, log, nil)
 	planner := nativeplanner.NewPlanner(wl, snap, s.preemptor, flvAssigner)
 	assignmentPlan := planner.Plan(ctx, &initialAssignment)
+	blockedLimit = takePlanBlockedLimit(&assignmentPlan)
 
 	if !assignmentPlan.CanFit() && workload.MinCountsUsable(wl.Obj) && wl.CanBePartiallyAdmitted() {
 		// bestPA is tracked here, not returned by fitsFn(), so it can't drift from
@@ -1616,10 +1645,13 @@ func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap 
 		var bestPartialPlan *assignment.Plan
 		fitsFn := func(nextCounts []int32) bool {
 			initialAssignment := flvAssigner.AssignFlavors(ctx, log, nextCounts)
-			if partialPlan := planner.Plan(ctx, &initialAssignment); partialPlan.CanFit() {
+			partialPlan := planner.Plan(ctx, &initialAssignment)
+			partialBlocked := takePlanBlockedLimit(&partialPlan)
+			if partialPlan.CanFit() {
 				bestPartialPlan = &partialPlan
 				return true
 			}
+			blockedLimit = policy.EarlierPreemptionLimitBlock(blockedLimit, partialBlocked)
 			return false
 		}
 		// Only an admitted predecessor can already be running these PodSets. A predecessor
@@ -1628,14 +1660,12 @@ func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap 
 		reducer := flavorassigner.NewOrderedPodSetReducer(effectiveReducerPodSets(wl.Obj.Spec.PodSets, replaceableWorkloadSlice, mustGrow), fitsFn)
 		if _, found := reducer.Reduce(mustGrow); found {
 			assignmentPlan = *bestPartialPlan
+			blockedLimit = nil
 		}
 	}
 
-	// Always drain so a skipped flavor's retry timestamp doesn't leak across calls.
-	retryAt = s.preemptor.TakeRetryAt()
 	fullAssignment, targets = *assignmentPlan.Assignment, assignmentPlan.PreemptionTargets
 	if assignmentPlan.CanFit() {
-		retryAt = nil
 		targets = append(slicePreemptTargets, targets...)
 	}
 	return

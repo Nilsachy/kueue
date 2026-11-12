@@ -79,6 +79,7 @@ const (
 	QuotaReservedReasonSuspended                    QuotaReservedReason = kueue.WorkloadQuotaReservedReasonSuspended
 	QuotaReservedReasonMisconfigured                QuotaReservedReason = kueue.WorkloadQuotaReservedReasonMisconfigured
 	QuotaReservedReasonAdmissionGated               QuotaReservedReason = kueue.WorkloadAdmissionGated
+	QuotaReservedReasonPreemptionLimitExceeded      QuotaReservedReason = kueue.WorkloadQuotaReservedReasonPreemptionLimitExceeded
 )
 
 var (
