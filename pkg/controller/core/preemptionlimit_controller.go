@@ -19,6 +19,7 @@ package core
 import (
 	"cmp"
 	"context"
+	"errors"
 	"slices"
 	"time"
 
@@ -58,12 +59,10 @@ type PreemptionLimitReconciler struct {
 type PreemptionLimitReconcilerOption func(*PreemptionLimitReconciler)
 
 // WithPreemptionLimitPruneInterval overrides how often expired preemption events
-// are pruned and status is updated when interval is positive.
+// are pruned and status is updated. Must be positive.
 func WithPreemptionLimitPruneInterval(interval time.Duration) PreemptionLimitReconcilerOption {
 	return func(r *PreemptionLimitReconciler) {
-		if interval > 0 {
-			r.pruneInterval = interval
-		}
+		r.pruneInterval = interval
 	}
 }
 
@@ -165,6 +164,9 @@ func (r *PreemptionLimitReconciler) preemptionLimitStatus(now time.Time, limit *
 // leader election, so the controller runs only on the leader, where the scheduler
 // records the preemption events.
 func (r *PreemptionLimitReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.pruneInterval <= 0 {
+		return errors.New("PreemptionLimit prune interval must be positive")
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("preemptionlimit_controller").
 		// Make sure that update to the status part aren't triggering additional Reconcile.

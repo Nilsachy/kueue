@@ -53,7 +53,7 @@ type SetupControllersOpts struct {
 	// feature gate is enabled, and nil otherwise.
 	PreemptionLimitTracker *limits.PreemptionLimitTracker
 	// PreemptionLimitPruneInterval overrides how often PreemptionLimit events
-	// are pruned and status is updated; non-positive values keep the default.
+	// are pruned and status is updated; zero keeps the default.
 	PreemptionLimitPruneInterval time.Duration
 	CustomLabels                 *metrics.CustomLabels
 	DRAMapper                    *dra.ResourceMapper
@@ -158,11 +158,15 @@ func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.
 		if opts.PreemptionLimitTracker == nil {
 			return "PreemptionLimit", errors.New("PreemptionLimitTracker is required when the ConfigurablePreemptionLimits feature gate is enabled")
 		}
+		var plOpts []PreemptionLimitReconcilerOption
+		if opts.PreemptionLimitPruneInterval != 0 {
+			plOpts = append(plOpts, WithPreemptionLimitPruneInterval(opts.PreemptionLimitPruneInterval))
+		}
 		plRec := NewPreemptionLimitReconciler(
 			mgr.GetClient(),
 			opts.PreemptionLimitTracker,
 			opts.RoleTracker,
-			WithPreemptionLimitPruneInterval(opts.PreemptionLimitPruneInterval),
+			plOpts...,
 		)
 		if err := plRec.SetupWithManager(mgr); err != nil {
 			return "PreemptionLimit", err

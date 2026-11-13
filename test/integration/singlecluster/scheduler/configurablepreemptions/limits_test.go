@@ -134,7 +134,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 		)
 
 		ginkgo.BeforeEach(func() {
-			fwk.StartManager(ctx, cfg, managerAndSchedulerSetup())
+			startManager()
 
 			ns = behavioral.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "preemptionlimits-disabled-")
 			flavor = utiltestingapi.MakeResourceFlavor("rf-preemptionlimits-disabled").Obj()
@@ -196,7 +196,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 	ginkgo.Context("when ConfigurablePreemptionLimits feature gate is enabled", func() {
 		ginkgo.BeforeEach(func() {
 			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.ConfigurablePreemptionLimits, true)
-			fwk.StartManager(ctx, cfg, managerAndSchedulerSetup())
+			startManager()
 
 			ns = behavioral.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "preemptionlimits-")
 			flavor = utiltestingapi.MakeResourceFlavor("rf-preemptionlimits").Obj()

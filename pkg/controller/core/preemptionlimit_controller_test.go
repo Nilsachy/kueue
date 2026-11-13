@@ -287,3 +287,23 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 		})
 	}
 }
+
+func TestPreemptionLimitSetupWithManagerInvalidPruneInterval(t *testing.T) {
+	for name, interval := range map[string]time.Duration{
+		"zero interval":     0,
+		"negative interval": -time.Second,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cl := utiltesting.NewClientBuilder().Build()
+			reconciler := NewPreemptionLimitReconciler(
+				cl,
+				limits.NewPreemptionLimitTracker(),
+				nil,
+				WithPreemptionLimitPruneInterval(interval),
+			)
+			if err := reconciler.SetupWithManager(nil); err == nil {
+				t.Errorf("Expected SetupWithManager() to fail for prune interval %v, got nil", interval)
+			}
+		})
+	}
+}

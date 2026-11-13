@@ -83,9 +83,16 @@ var _ = ginkgo.AfterSuite(func() {
 	fwk.Teardown()
 })
 
-var _ = ginkgo.AfterEach(func() {
-	fwk.StopManager(ctx)
-})
+// startManager starts the manager and scheduler for the current spec and
+// registers StopManager via DeferCleanup. It is called from spec/container
+// BeforeEach blocks rather than a suite-level BeforeEach because Ginkgo runs
+// suite-level BeforeEach before container BeforeEach blocks, so per-container
+// SetFeatureGateDuringTest(ConfigurablePreemptionLimits, ...) overrides must run
+// before SetupControllers registers controllers and allocates the tracker.
+func startManager() {
+	fwk.StartManager(ctx, cfg, managerAndSchedulerSetup())
+	ginkgo.DeferCleanup(fwk.StopManager, ctx)
+}
 
 func managerAndSchedulerSetup() framework.ManagerSetup {
 	return func(ctx context.Context, mgr manager.Manager) {
