@@ -579,39 +579,6 @@ func TestReconcileInadmissible(t *testing.T) {
 				}).
 				Obj(),
 		},
-		"should preserve PreemptionLimitExceeded reason": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsObservability: true,
-			},
-			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
-			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
-			workload: utiltestingapi.MakeWorkload("wl", "ns").
-				Active(true).
-				Queue("lq").
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonPreemptionLimitExceeded,
-					Message: "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 1 more needed; preemption blocked by PreemptionLimit global until 2026-01-01T00:01:00Z",
-				}).
-				Obj(),
-			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
-				Active(true).
-				Queue("lq").
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonPreemptionLimitExceeded,
-					Message: "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 1 more needed; preemption blocked by PreemptionLimit global until 2026-01-01T00:01:00Z",
-				}).
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadAdmitted,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadAdmittedReasonNoReservation,
-					Message: "The workload has no reservation",
-				}).
-				Obj(),
-		},
 		"should write AdmissionGated reason when admission gate is active": {
 			featureGates: map[featuregate.Feature]bool{
 				features.UnadmittedWorkloadsObservability: true,

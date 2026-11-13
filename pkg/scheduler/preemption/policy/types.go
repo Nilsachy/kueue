@@ -111,15 +111,16 @@ type ConsumedLimits map[PreemptionLimitReference]ConsumedLimit
 // (e.g., spec.limit is 0, or taken preemptions alone exhaust spec.limit).
 type PreemptionLimitBlock struct {
 	Limit   PreemptionLimitReference
+	Scope   kueuealpha.PreemptionLimitScope
 	RetryAt *time.Time
 }
 
-// Message formats the human-readable reason why preemption was blocked by the limit.
+// Message formats the human-readable reason why preemptions were blocked by the limit.
 func (b PreemptionLimitBlock) Message() string {
 	if b.RetryAt == nil {
-		return fmt.Sprintf("preemption blocked by PreemptionLimit %s", b.Limit)
+		return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s)", b.Limit, b.Scope)
 	}
-	return fmt.Sprintf("preemption blocked by PreemptionLimit %s until %s", b.Limit, b.RetryAt.UTC().Format(time.RFC3339))
+	return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s) until %s", b.Limit, b.Scope, b.RetryAt.UTC().Format(time.RFC3339))
 }
 
 // EarlierPreemptionLimitBlock returns the block that clears sooner between two

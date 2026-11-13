@@ -66,6 +66,7 @@ func (b *PreemptionLimitBudget) TryConsume(
 		if stricterTargetBlock(limit, slotTime, blocking) {
 			blocking = &policy.PreemptionLimitBlock{
 				Limit:   limit,
+				Scope:   b.limiter.snapshot.scope(limit),
 				RetryAt: slotTime,
 			}
 		}

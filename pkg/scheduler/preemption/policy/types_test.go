@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+
+	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 )
 
 func TestPreemptionLimitBlockMessage(t *testing.T) {
@@ -30,22 +32,27 @@ func TestPreemptionLimitBlockMessage(t *testing.T) {
 		want  string
 	}{
 		"non-expiring limit omits until timestamp": {
-			block: PreemptionLimitBlock{Limit: "blocked"},
-			want:  "preemption blocked by PreemptionLimit blocked",
+			block: PreemptionLimitBlock{
+				Limit: "blocked",
+				Scope: kueuealpha.GlobalPreemptionLimitScope,
+			},
+			want: "preemptions blocked by PreemptionLimit blocked (aggregation Global)",
 		},
 		"expiring limit formats timestamp as UTC RFC3339": {
 			block: PreemptionLimitBlock{
 				Limit:   "per-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(time.Date(2026, time.January, 1, 0, 1, 0, 0, time.UTC)),
 			},
-			want: "preemption blocked by PreemptionLimit per-cq until 2026-01-01T00:01:00Z",
+			want: "preemptions blocked by PreemptionLimit per-cq (aggregation PreemptedClusterQueue) until 2026-01-01T00:01:00Z",
 		},
 		"non-UTC timestamp is normalized to UTC RFC3339": {
 			block: PreemptionLimitBlock{
 				Limit:   "per-cq",
+				Scope:   kueuealpha.PreemptorCQLimitScope,
 				RetryAt: new(time.Date(2026, time.January, 1, 2, 1, 0, 0, utcPlus2)),
 			},
-			want: "preemption blocked by PreemptionLimit per-cq until 2026-01-01T00:01:00Z",
+			want: "preemptions blocked by PreemptionLimit per-cq (aggregation PreemptorClusterQueue) until 2026-01-01T00:01:00Z",
 		},
 	}
 

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +39,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/config/filters"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/limits"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
+	cmputil "sigs.k8s.io/kueue/pkg/util/cmp"
 	"sigs.k8s.io/kueue/pkg/util/expectations"
 	"sigs.k8s.io/kueue/pkg/util/orderedgroups"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -60,6 +62,8 @@ type PreemptionEvaluator struct {
 	// preemptionLimiter enforces the PreemptionLimits applying to the PreemptionConfig.
 	// It is nil when the ConfigurablePreemptionLimits feature is disabled.
 	preemptionLimiter *limits.PreemptionLimiter
+	// retryAt is the earliest time a skipped candidate may become eligible.
+	retryAt *time.Time
 	// blockedLimit holds the earliest-clearing PreemptionLimitBlock across skipped candidates.
 	blockedLimit *policy.PreemptionLimitBlock
 }
@@ -126,6 +130,15 @@ func NewEvaluatorForPreemptionConfig(
 func (p *PreemptionEvaluator) HasRules() bool {
 	return p != nil &&
 		p.hasRulesFor(kueuealpha.Always, kueuealpha.InsufficientQuota, kueuealpha.QuotaFeasibleAndInsufficientTopology)
+}
+
+// RetryAt returns the earliest time a candidate skipped so far may become eligible,
+// or nil if waiting alone would not make any eligible.
+func (p *PreemptionEvaluator) RetryAt() *time.Time {
+	if p == nil {
+		return nil
+	}
+	return p.retryAt
 }
 
 // BlockedLimit returns the earliest-clearing PreemptionLimitBlock across candidates
@@ -215,12 +228,17 @@ func (p *PreemptionEvaluator) iterateOverCandidates(
 	preemptorCQ := snapshot.ClusterQueue(p.preemptor.ClusterQueue)
 	for _, candidate := range candidates {
 		targetCQ := snapshot.ClusterQueue(candidate.WlInfo.ClusterQueue)
+		var (
+			candidateBlocked    *policy.PreemptionLimitBlock
+			matchedWithinLimits bool
+		)
 		for ruleReference, selectorIndexes := range candidate.RuleNameToSelectorIndexes.InOrder {
 			consumedLimits, blockedLimit, withinLimits := budget.TryConsume(p.preemptor, candidate.WlInfo, ruleReference, preemptorCQ, targetCQ)
 			if !withinLimits {
-				p.blockedLimit = policy.EarlierPreemptionLimitBlock(p.blockedLimit, blockedLimit)
+				candidateBlocked = policy.EarlierPreemptionLimitBlock(candidateBlocked, blockedLimit)
 				continue
 			}
+			matchedWithinLimits = true
 			if !yield(&policy.Target{
 				WorkloadInfo: candidate.WlInfo,
 				Reason:       kueue.ConfigurablePreemptionReason,
@@ -239,6 +257,10 @@ func (p *PreemptionEvaluator) iterateOverCandidates(
 
 			// Only first matched rule within limits is processed per candidate.
 			break
+		}
+		if !matchedWithinLimits && candidateBlocked != nil {
+			p.retryAt = cmputil.EarliestTime(p.retryAt, candidateBlocked.RetryAt)
+			p.blockedLimit = policy.EarlierPreemptionLimitBlock(p.blockedLimit, candidateBlocked)
 		}
 	}
 	return

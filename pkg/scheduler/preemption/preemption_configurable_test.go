@@ -1154,7 +1154,7 @@ func TestPreemptionOracleConfigurablePreemptions(t *testing.T) {
 	}
 }
 
-func TestGetTargetsWithStrategyBlockedLimit(t *testing.T) {
+func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	preemptConfig := utiltestingalpha.MakePreemptionConfig("cfg").
 		Rule("always-low", kueuealpha.Always,
@@ -1199,8 +1199,8 @@ func TestGetTargetsWithStrategyBlockedLimit(t *testing.T) {
 		wantTargets []string
 		wantBlocked *policy.PreemptionLimitBlock
 	}{
-		"TakeBlockedLimit returns nil when no strategies run": {},
-		"failed candidate search records earliest blocked limit and TakeBlockedLimit clears it": {
+		"TakeRetryAt and TakeBlockedLimit return nil when no strategies run": {},
+		"failed candidate search records earliest retry and blocked limit and Take clears them": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 				"cq-b": now.Add(-20 * time.Second),
@@ -1210,10 +1210,11 @@ func TestGetTargetsWithStrategyBlockedLimit(t *testing.T) {
 			},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "per-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"TakeBlockedLimit returns earliest blocked limit across multiple failed searches": {
+		"TakeRetryAt and TakeBlockedLimit return earliest across multiple failed searches": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 				"cq-b": now.Add(-20 * time.Second),
@@ -1224,10 +1225,11 @@ func TestGetTargetsWithStrategyBlockedLimit(t *testing.T) {
 			},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "per-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"rejected strategy verification preserves blocked limit from skipped candidates": {
+		"rejected strategy verification preserves retry and blocked limit from skipped candidates": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 			},
@@ -1236,10 +1238,11 @@ func TestGetTargetsWithStrategyBlockedLimit(t *testing.T) {
 			},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "per-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"failed earlier strategy does not set blocked limit when subsequent strategy succeeds": {
+		"failed earlier strategy does not set retry or blocked limit when subsequent strategy succeeds": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 			},
@@ -1314,11 +1317,21 @@ func TestGetTargetsWithStrategyBlockedLimit(t *testing.T) {
 			if diff := cmp.Diff(tc.wantTargets, gotTargets, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("GetTargetsWithStrategy() targets (-want,+got):\n%s", diff)
 			}
+			var wantRetryAt *time.Time
+			if tc.wantBlocked != nil {
+				wantRetryAt = tc.wantBlocked.RetryAt
+			}
+			if diff := cmp.Diff(wantRetryAt, preemptor.TakeRetryAt()); diff != "" {
+				t.Errorf("TakeRetryAt() (-want,+got):\n%s", diff)
+			}
+			if secondRetry := preemptor.TakeRetryAt(); secondRetry != nil {
+				t.Errorf("Second TakeRetryAt() = %v, want nil", secondRetry)
+			}
 			if diff := cmp.Diff(tc.wantBlocked, preemptor.TakeBlockedLimit()); diff != "" {
 				t.Errorf("TakeBlockedLimit() (-want,+got):\n%s", diff)
 			}
-			if second := preemptor.TakeBlockedLimit(); second != nil {
-				t.Errorf("Second TakeBlockedLimit() = %v, want nil", second)
+			if secondBlocked := preemptor.TakeBlockedLimit(); secondBlocked != nil {
+				t.Errorf("Second TakeBlockedLimit() = %v, want nil", secondBlocked)
 			}
 		})
 	}

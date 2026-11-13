@@ -92,12 +92,19 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			taken:            preemptionCounts{"global": {policy.GlobalScopeValue: 1}},
 			wantOK:           false,
 			wantTaken:        preemptionCounts{"global": {policy.GlobalScopeValue: 1}},
-			wantBlocked:      &policy.PreemptionLimitBlock{Limit: "global", RetryAt: new(now.Add(30 * time.Second))},
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit:   "global",
+				Scope:   kueuealpha.GlobalPreemptionLimitScope,
+				RetryAt: new(now.Add(30 * time.Second)),
+			},
 		},
 		"limit of 0 blocks the target": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Clone().Limit(0).Obj()},
 			wantOK:           false,
-			wantBlocked:      &policy.PreemptionLimitBlock{Limit: "global"},
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit: "global",
+				Scope: kueuealpha.GlobalPreemptionLimitScope,
+			},
 		},
 		"multiple applicable limits are all consumed and taken from the budget": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Obj(), *perCQ.Obj()},
@@ -113,7 +120,10 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			taken:            preemptionCounts{"per-cq": {"preempted-cq": 1}},
 			wantOK:           false,
 			wantTaken:        preemptionCounts{"per-cq": {"preempted-cq": 1}},
-			wantBlocked:      &policy.PreemptionLimitBlock{Limit: "per-cq"},
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit: "per-cq",
+				Scope: kueuealpha.PreemptedCQLimitScope,
+			},
 		},
 		"scope values of a limit have independent budgets": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*perCQ.Obj()},
@@ -142,8 +152,12 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 				"global": {policy.GlobalScopeValue: {now.Add(-50 * time.Second)}},
 				"per-cq": {"preempted-cq": {now.Add(-15 * time.Second)}},
 			},
-			wantOK:      false,
-			wantBlocked: &policy.PreemptionLimitBlock{Limit: "per-cq", RetryAt: new(now.Add(45 * time.Second))},
+			wantOK: false,
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit:   "per-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
+				RetryAt: new(now.Add(45 * time.Second)),
+			},
 		},
 		"multiple blocking limits with equal retry time break ties by name": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*globalOne.Obj(), *perCQ.Obj()},
@@ -151,28 +165,41 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 				"global": {policy.GlobalScopeValue: {now.Add(-30 * time.Second)}},
 				"per-cq": {"preempted-cq": {now.Add(-30 * time.Second)}},
 			},
-			wantOK:      false,
-			wantBlocked: &policy.PreemptionLimitBlock{Limit: "global", RetryAt: new(now.Add(30 * time.Second))},
+			wantOK: false,
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit:   "global",
+				Scope:   kueuealpha.GlobalPreemptionLimitScope,
+				RetryAt: new(now.Add(30 * time.Second)),
+			},
 		},
 		"non-expiring blocking limit overrides expiring limit on the same target": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Clone().Limit(0).Obj(), *perCQ.Obj()},
 			events: EventsByLimit{
 				"per-cq": {"preempted-cq": {now.Add(-50 * time.Second)}},
 			},
-			wantOK:      false,
-			wantBlocked: &policy.PreemptionLimitBlock{Limit: "global"},
+			wantOK: false,
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit: "global",
+				Scope: kueuealpha.GlobalPreemptionLimitScope,
+			},
 		},
 		"multiple non-expiring blocking limits break ties by name": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*perCQ.Clone().Limit(0).Obj(), *global.Clone().Limit(0).Obj()},
 			wantOK:           false,
-			wantBlocked:      &policy.PreemptionLimitBlock{Limit: "global"},
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit: "global",
+				Scope: kueuealpha.GlobalPreemptionLimitScope,
+			},
 		},
 		"taken preemptions alone reaching the limit return nil retry time": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Clone().Limit(2).Obj()},
 			taken:            preemptionCounts{"global": {policy.GlobalScopeValue: 2}},
 			wantOK:           false,
 			wantTaken:        preemptionCounts{"global": {policy.GlobalScopeValue: 2}},
-			wantBlocked:      &policy.PreemptionLimitBlock{Limit: "global"},
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit: "global",
+				Scope: kueuealpha.GlobalPreemptionLimitScope,
+			},
 		},
 	}
 	for name, tc := range cases {

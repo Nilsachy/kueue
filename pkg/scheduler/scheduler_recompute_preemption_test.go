@@ -2442,8 +2442,8 @@ func TestScheduleRecomputePreemptionTargets(t *testing.T) {
 			},
 			wantWorkloads: []kueue.Workload{
 				*pending(limitsPreemptor("p1", "lq-p1", now.Add(-2*time.Minute)), kueue.WorkloadQuotaReservedReasonWaitingForPreemptedWorkloads, limitsPendingPreemptionMsg).Obj(),
-				*pending(limitsPreemptor("p2", "lq-p2", now.Add(-time.Minute)), kueue.WorkloadQuotaReservedReasonPreemptionLimitExceeded,
-					fmt.Sprintf("%s; preemption blocked by PreemptionLimit global until %s", limitsInsufficientQuotaMsg, now.Add(60*time.Second).UTC().Format(time.RFC3339))).Obj(),
+				*pending(limitsPreemptor("p2", "lq-p2", now.Add(-time.Minute)), kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+					fmt.Sprintf("%s; preemptions blocked by PreemptionLimit global (aggregation Global) until %s", limitsInsufficientQuotaMsg, now.Add(60*time.Second).UTC().Format(time.RFC3339))).Obj(),
 				*preemptedBy(limitsCandidate("v1", "lq-v", "cq-v", "one"), "p1", "cfg-one", "one").Obj(),
 				*limitsCandidate("v2", "lq-v", "cq-v", "two").Obj(),
 				*limitsCandidate("v3", "lq-w", "cq-w", "two").Priority(1).Obj(),
@@ -2544,8 +2544,8 @@ func TestScheduleRecomputePreemptionTargets(t *testing.T) {
 			},
 			wantWorkloads: []kueue.Workload{
 				*pending(limitsPreemptor("p1", "lq-p1", now.Add(-2*time.Minute)), kueue.WorkloadQuotaReservedReasonWaitingForPreemptedWorkloads, limitsPendingPreemptionMsg).Obj(),
-				*pending(limitsPreemptor("p2", "lq-p2", now.Add(-time.Minute)), kueue.WorkloadQuotaReservedReasonPreemptionLimitExceeded,
-					fmt.Sprintf("%s, skipping flavor on-demand as it is not found in the nomination mapping for resource cpu; preemption blocked by PreemptionLimit per-preempted-cq until %s",
+				*pending(limitsPreemptor("p2", "lq-p2", now.Add(-time.Minute)), kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+					fmt.Sprintf("%s, skipping flavor on-demand as it is not found in the nomination mapping for resource cpu; preemptions blocked by PreemptionLimit per-preempted-cq (aggregation PreemptedClusterQueue) until %s",
 						limitsInsufficientQuotaMsg, now.Add(60*time.Second).UTC().Format(time.RFC3339))).Obj(),
 				*preemptedBy(limitsCandidate("v1", "lq-v", "cq-v", "one"), "p1", "cfg-one", "one").Obj(),
 				*limitsCandidate("v2", "lq-v", "cq-v", "one").Priority(1).Obj(),

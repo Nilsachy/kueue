@@ -448,7 +448,7 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, config, true)
 		})
 
-		ginkgo.It("Should report PreemptionLimitExceeded without until timestamp when limit is 0", func() {
+		ginkgo.It("Should report blocking PreemptionLimit without until timestamp when limit is 0", func() {
 			createAndSyncPreemptionLimit(
 				kueuetestalpha1.MakePreemptionLimit("zero-limit", kueuealpha.GlobalPreemptionLimitScope).
 					Limit(0).
@@ -468,6 +468,7 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 				Request(corev1.ResourceCPU, "1").
 				Obj()
 			behavioral.MustCreate(ctx, k8sClient, preemptor)
+			behavioral.ExpectWorkloadsToBePending(ctx, k8sClient, preemptor)
 
 			gomega.Eventually(func(g gomega.Gomega) {
 				var got kueue.Workload
@@ -475,13 +476,13 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 				cond := meta.FindStatusCondition(got.Status.Conditions, kueue.WorkloadQuotaReserved)
 				g.Expect(cond).NotTo(gomega.BeNil())
 				g.Expect(cond.Status).To(gomega.Equal(metav1.ConditionFalse))
-				g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonPreemptionLimitExceeded))
-				g.Expect(cond.Message).To(gomega.ContainSubstring("; preemption blocked by PreemptionLimit zero-limit"))
+				g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonWaitingForQuota))
+				g.Expect(cond.Message).To(gomega.ContainSubstring("; preemptions blocked by PreemptionLimit zero-limit (aggregation Global)"))
 				g.Expect(cond.Message).NotTo(gomega.ContainSubstring("until "))
 			}, behavioral.Timeout, behavioral.Interval).Should(gomega.Succeed())
 		})
 
-		ginkgo.It("Should report PreemptionLimitExceeded with until timestamp and admit after window elapses", func() {
+		ginkgo.It("Should report blocking PreemptionLimit with until timestamp and admit after window elapses", func() {
 			createAndSyncPreemptionLimit(
 				kueuetestalpha1.MakePreemptionLimit("window-limit", kueuealpha.GlobalPreemptionLimitScope).
 					Limit(1).
@@ -540,8 +541,8 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 				cond := meta.FindStatusCondition(got.Status.Conditions, kueue.WorkloadQuotaReserved)
 				g.Expect(cond).NotTo(gomega.BeNil())
 				g.Expect(cond.Status).To(gomega.Equal(metav1.ConditionFalse))
-				g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonPreemptionLimitExceeded))
-				g.Expect(cond.Message).To(gomega.MatchRegexp(`; preemption blocked by PreemptionLimit window-limit until \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`))
+				g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonWaitingForQuota))
+				g.Expect(cond.Message).To(gomega.MatchRegexp(`; preemptions blocked by PreemptionLimit window-limit \(aggregation Global\) until \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`))
 			}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.Succeed())
 
 			// Once the 4s PreemptionLimit window elapses, the timed requeue wakes hero2 to preempt secondVictim.

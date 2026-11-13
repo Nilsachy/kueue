@@ -1280,7 +1280,7 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 	}
 }
 
-func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
+func TestPreemptionEvaluatorRetryAt(t *testing.T) {
 	const windowSeconds = 60
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	clusterQueues := []*kueue.ClusterQueue{
@@ -1304,6 +1304,13 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 		Rule("any-cluster-queue-rule", kueuealpha.InsufficientQuota,
 			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).Obj(),
 		).Obj()
+	multiRuleSameTriggerConfig := utiltestingalpha.MakePreemptionConfig("multi-rule").
+		Rule("first-rule", kueuealpha.InsufficientQuota,
+			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).Obj(),
+		).
+		Rule("second-rule", kueuealpha.InsufficientQuota,
+			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).Obj(),
+		).Obj()
 	unitWl := *utiltestingapi.MakeWorkload("unit", "").Request(corev1.ResourceCPU, "1")
 	perPreemptedCQLimit := utiltestingalpha.MakePreemptionLimit("per-preempted-cq", kueuealpha.PreemptedCQLimitScope).
 		Limit(1).LimitWindowSeconds(windowSeconds).Obj()
@@ -1319,6 +1326,10 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 	limitZ := utiltestingalpha.MakePreemptionLimit("limit-z", kueuealpha.PreemptedCQLimitScope).
 		Limit(1).LimitWindowSeconds(windowSeconds).
 		PreemptedClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"cq": "a"}}).Obj()
+	firstRuleLimit := utiltestingalpha.MakePreemptionLimit("first-rule-limit", kueuealpha.GlobalPreemptionLimitScope).
+		Limit(1).LimitWindowSeconds(windowSeconds).RuleNames("first-rule").Obj()
+	secondRuleLimit := utiltestingalpha.MakePreemptionLimit("second-rule-limit", kueuealpha.GlobalPreemptionLimitScope).
+		Limit(1).LimitWindowSeconds(windowSeconds).RuleNames("second-rule").Obj()
 
 	type recordedEvent struct {
 		ts       time.Time
@@ -1347,7 +1358,7 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
 			},
 		},
-		"skipped candidate updates BlockedLimit while later allowed candidate is still yielded": {
+		"skipped candidate updates RetryAt and BlockedLimit while later allowed candidate is still yielded": {
 			config:           multiTriggerConfig,
 			preemptionLimits: []kueuealpha.PreemptionLimit{*perPreemptedCQLimit},
 			recordedEvents: []recordedEvent{
@@ -1360,6 +1371,7 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 			wantYielded: []string{"/b1"},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "per-preempted-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(40 * time.Second)),
 			},
 		},
@@ -1376,6 +1388,7 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 			},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "per-preempted-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
@@ -1392,10 +1405,11 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 			},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "per-preempted-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"interrupted yield preserves BlockedLimit from candidates evaluated before halting": {
+		"interrupted yield preserves RetryAt and BlockedLimit from candidates evaluated before halting": {
 			config:           multiTriggerConfig,
 			preemptionLimits: []kueuealpha.PreemptionLimit{*perPreemptedCQLimit},
 			recordedEvents: []recordedEvent{
@@ -1411,6 +1425,7 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 			wantYielded: []string{"/b1"},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "per-preempted-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(40 * time.Second)),
 			},
 		},
@@ -1429,16 +1444,20 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 			},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "per-preempted-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"all skipped candidates hitting limit of 0 record non-expiring BlockedLimit": {
+		"all skipped candidates hitting limit of 0 record non-expiring BlockedLimit and nil RetryAt": {
 			config:           multiTriggerConfig,
 			preemptionLimits: []kueuealpha.PreemptionLimit{*zeroBLimit},
 			admitted: []kueue.Workload{
 				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
 			},
-			wantBlocked: &policy.PreemptionLimitBlock{Limit: "zero-b"},
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit: "zero-b",
+				Scope: kueuealpha.PreemptedCQLimitScope,
+			},
 		},
 		"equal retry times across candidates break ties by limit name": {
 			config:           multiTriggerConfig,
@@ -1453,10 +1472,11 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 			},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "limit-a",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"BlockedLimit from earlier FindCandidates call is preserved when subsequent call hits no limits": {
+		"RetryAt and BlockedLimit from earlier FindCandidates call are preserved when subsequent call hits no limits": {
 			config:           multiTriggerConfig,
 			preemptionLimits: []kueuealpha.PreemptionLimit{*perPreemptedCQLimit},
 			recordedEvents: []recordedEvent{
@@ -1470,6 +1490,35 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 			wantYielded: []string{"/a1"},
 			wantBlocked: &policy.PreemptionLimitBlock{
 				Limit:   "per-preempted-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
+				RetryAt: new(now.Add(15 * time.Second)),
+			},
+		},
+		"candidate blocked on first rule but yielded via second rule in same trigger does not record BlockedLimit": {
+			config:           multiRuleSameTriggerConfig,
+			preemptionLimits: []kueuealpha.PreemptionLimit{*firstRuleLimit, *secondRuleLimit},
+			recordedEvents: []recordedEvent{
+				{ts: now.Add(-20 * time.Second), consumed: policy.ConsumedLimits{"first-rule-limit": policy.NewConsumedLimit(firstRuleLimit, policy.GlobalScopeValue)}},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			wantYielded: []string{"/a1"},
+			wantBlocked: nil,
+		},
+		"candidate blocked on all matched rules in same trigger records earliest rule BlockedLimit": {
+			config:           multiRuleSameTriggerConfig,
+			preemptionLimits: []kueuealpha.PreemptionLimit{*firstRuleLimit, *secondRuleLimit},
+			recordedEvents: []recordedEvent{
+				{ts: now.Add(-20 * time.Second), consumed: policy.ConsumedLimits{"first-rule-limit": policy.NewConsumedLimit(firstRuleLimit, policy.GlobalScopeValue)}},
+				{ts: now.Add(-45 * time.Second), consumed: policy.ConsumedLimits{"second-rule-limit": policy.NewConsumedLimit(secondRuleLimit, policy.GlobalScopeValue)}},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			wantBlocked: &policy.PreemptionLimitBlock{
+				Limit:   "second-rule-limit",
+				Scope:   kueuealpha.GlobalPreemptionLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
@@ -1532,6 +1581,13 @@ func TestPreemptionEvaluatorBlockedLimit(t *testing.T) {
 
 			if diff := cmp.Diff(tc.wantYielded, gotYielded, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("FindCandidates() yielded (-want,+got):\n%s", diff)
+			}
+			var wantRetryAt *time.Time
+			if tc.wantBlocked != nil {
+				wantRetryAt = tc.wantBlocked.RetryAt
+			}
+			if diff := cmp.Diff(wantRetryAt, evaluator.RetryAt()); diff != "" {
+				t.Errorf("evaluator.RetryAt() (-want,+got):\n%s", diff)
 			}
 			if diff := cmp.Diff(tc.wantBlocked, evaluator.BlockedLimit()); diff != "" {
 				t.Errorf("evaluator.BlockedLimit() (-want,+got):\n%s", diff)
