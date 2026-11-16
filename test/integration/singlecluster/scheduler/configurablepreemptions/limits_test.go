@@ -84,9 +84,8 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 	}
 
 	// recreateBlockedPreemptor recreates a pending preemptor that was parked in inadmissibleWorkloads
-	// while a PreemptionLimit blocked preemption. Once PreemptionLimit reconciliation requeues
-	// inadmissible workloads on spec updates and window expiration, callers can drop this call and
-	// assert directly that the existing pending workload gets admitted.
+	// while a PreemptionLimit blocked preemption, for PreemptionLimit spec updates and deletions (which
+	// do not trigger automatic requeuing, unlike sliding-window expiration).
 	recreateBlockedPreemptor := func(wl *kueue.Workload) *kueue.Workload {
 		ginkgo.GinkgoHelper()
 		replacement := utiltestingapi.MakeWorkload(wl.Name, wl.Namespace).
@@ -134,6 +133,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 		)
 
 		ginkgo.BeforeEach(func() {
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.ConfigurablePreemptionLimits, false)
 			startManager()
 
 			ns = behavioral.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "preemptionlimits-disabled-")
@@ -432,7 +432,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 
 				limit = kueuetestalpha1.MakePreemptionLimit("global-rate-limit", kueuealpha.GlobalPreemptionLimitScope).
 					Limit(2).
-					LimitWindowSeconds(3).
+					LimitWindowSeconds(5).
 					Obj()
 				createPreemptionLimitAndWaitForSync(limit)
 			})
@@ -448,7 +448,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, configBeta, true)
 			})
 
-			ginkgo.It("should throttle preemptions across ClusterQueues and recover budget once the window elapses", func() {
+			ginkgo.It("should throttle preemptions across ClusterQueues and automatically requeue once the window elapses", func() {
 				lowAlpha := createWorkload("low-alpha", lqAlpha.Name, 10, "1")
 				lowBeta1 := createWorkload("low-beta-1", lqBeta.Name, 10, "1")
 				lowBeta2 := createWorkload("low-beta-2", lqBeta.Name, 20, "1")
@@ -472,11 +472,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 					})
 				})
 
-				ginkgo.By("Allowing the third preemption after the sliding window expires", func() {
-					expectPreemptionLimitCounts(limit, nil)
-					waitForLimitAllowance(limit.Name, policy.GlobalScopeValue, 2)
-					highBeta2 = recreateBlockedPreemptor(highBeta2)
-
+				ginkgo.By("Automatically requeuing the blocked preemptor and allowing preemption after the sliding window expires", func() {
 					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowBeta2)
 					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highBeta2)
 					expectPreemptionLimitCounts(limit, []kueuealpha.PreemptionLimitCount{
@@ -731,7 +727,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				shortGlobalLimit = kueuetestalpha1.MakePreemptionLimit("status-short-global-limit", kueuealpha.GlobalPreemptionLimitScope).
 					ConfigSelector(prodConfigSelector).
 					Limit(5).
-					LimitWindowSeconds(2).
+					LimitWindowSeconds(5).
 					Obj()
 				createPreemptionLimitAndWaitForSync(preemptedCQLimit)
 				createPreemptionLimitAndWaitForSync(shortGlobalLimit)
@@ -763,13 +759,13 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 
 				ginkgo.By("Recording preemptions and reporting counts sorted by descending value", func() {
 					preemptor := createWorkload("preemptor-all", lqPreemptor.Name, 100, "3")
-					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, victimB1, victimB2, victimA1)
-					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, preemptor)
-
-					expectPreemptionLimitCounts(preemptedCQLimit, wantCQCounts)
 					expectPreemptionLimitCounts(shortGlobalLimit, []kueuealpha.PreemptionLimitCount{
 						{Name: string(policy.GlobalScopeValue), Value: 3},
 					})
+					expectPreemptionLimitCounts(preemptedCQLimit, wantCQCounts)
+
+					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, victimB1, victimB2, victimA1)
+					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, preemptor)
 				})
 
 				ginkgo.By("Pruning expired counts from status once the short sliding window elapses", func() {
