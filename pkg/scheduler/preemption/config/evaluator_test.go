@@ -42,6 +42,7 @@ import (
 	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/limits"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
+	"sigs.k8s.io/kueue/pkg/util/orderedgroups"
 	utilslices "sigs.k8s.io/kueue/pkg/util/slices"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingalpha "sigs.k8s.io/kueue/pkg/util/testing/v1alpha1"
@@ -599,11 +600,23 @@ func TestPreemptionEvaluatorSelectorIndexes(t *testing.T) {
 	}
 
 	unitWl := *utiltestingapi.MakeWorkload("unit", "").Request(corev1.ResourceCPU, "1")
-	candidate := func(name string, indexes map[policy.PreemptionConfigRuleReference][]int) *configurableCandidate {
+	matchedRule := func(ruleReference policy.PreemptionConfigRuleReference, selectorIndexes ...int) policy.MatchedRule {
+		return policy.MatchedRule{
+			RuleReference:   ruleReference,
+			SelectorIndexes: selectorIndexes,
+		}
+	}
+	candidate := func(name string, matchedRules ...policy.MatchedRule) *configurableCandidate {
+		group := orderedgroups.NewOrderedGroups[policy.PreemptionConfigRuleReference, int]()
+		for _, matchedRule := range matchedRules {
+			for _, selectorIndex := range matchedRule.SelectorIndexes {
+				group.Insert(matchedRule.RuleReference, selectorIndex)
+			}
+		}
 		return &configurableCandidate{
 			WlInfo:                    wlInfoWithName(name),
 			ConfigName:                configName,
-			RuleNameToSelectorIndexes: indexes,
+			RuleNameToSelectorIndexes: group,
 		}
 	}
 
@@ -630,8 +643,8 @@ func TestPreemptionEvaluatorSelectorIndexes(t *testing.T) {
 			preemptorWl: unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq: "a",
 			wantCandidates: []*configurableCandidate{
-				candidate("a1", map[policy.PreemptionConfigRuleReference][]int{"test": {0}}),
-				candidate("a2", map[policy.PreemptionConfigRuleReference][]int{"test": {0}}),
+				candidate("a1", matchedRule("test", 0)),
+				candidate("a2", matchedRule("test", 0)),
 			},
 		},
 		"Candidate match multiple rules": {
@@ -650,8 +663,8 @@ func TestPreemptionEvaluatorSelectorIndexes(t *testing.T) {
 			preemptorWl: unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq: "a",
 			wantCandidates: []*configurableCandidate{
-				candidate("a1", map[policy.PreemptionConfigRuleReference][]int{"test1": {0}, "test2": {0}}),
-				candidate("a2", map[policy.PreemptionConfigRuleReference][]int{"test1": {0}, "test2": {0}}),
+				candidate("a1", matchedRule("test1", 0), matchedRule("test2", 0)),
+				candidate("a2", matchedRule("test1", 0), matchedRule("test2", 0)),
 			},
 		},
 		"Candidate match multiple rules related to the trigger": {
@@ -674,8 +687,8 @@ func TestPreemptionEvaluatorSelectorIndexes(t *testing.T) {
 			preemptorCq: "a",
 			trigger:     kueuealpha.InsufficientQuota,
 			wantCandidates: []*configurableCandidate{
-				candidate("a1", map[policy.PreemptionConfigRuleReference][]int{"test2": {0}, "test3": {0}}),
-				candidate("a2", map[policy.PreemptionConfigRuleReference][]int{"test2": {0}, "test3": {0}}),
+				candidate("a1", matchedRule("test2", 0), matchedRule("test3", 0)),
+				candidate("a2", matchedRule("test2", 0), matchedRule("test3", 0)),
 			},
 		},
 		"Candidates match multiple selectors": {
@@ -692,8 +705,8 @@ func TestPreemptionEvaluatorSelectorIndexes(t *testing.T) {
 			preemptorWl: unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq: "a",
 			wantCandidates: []*configurableCandidate{
-				candidate("a1", map[policy.PreemptionConfigRuleReference][]int{"test": {0, 1}}),
-				candidate("a2", map[policy.PreemptionConfigRuleReference][]int{"test": {0, 1}}),
+				candidate("a1", matchedRule("test", 0, 1)),
+				candidate("a2", matchedRule("test", 0, 1)),
 			},
 		},
 		"Candidate matches only the second selector": {
@@ -713,7 +726,7 @@ func TestPreemptionEvaluatorSelectorIndexes(t *testing.T) {
 			preemptorWl: unitWl.Clone().Name("a-incoming").Obj(),
 			preemptorCq: "a",
 			wantCandidates: []*configurableCandidate{
-				candidate("a1", map[policy.PreemptionConfigRuleReference][]int{"test": {1}}),
+				candidate("a1", matchedRule("test", 1)),
 			},
 		},
 	}
@@ -766,6 +779,7 @@ func TestPreemptionEvaluatorSelectorIndexes(t *testing.T) {
 				cmpopts.AcyclicTransformer("Info", func(wlInfo *workload.Info) string {
 					return wlInfo.Obj.Name
 				}),
+				cmp.AllowUnexported(orderedgroups.OrderedGroups[policy.PreemptionConfigRuleReference, int]{}),
 				// Sort candidates by name to have consistent output
 				cmpopts.SortSlices(func(a, b *configurableCandidate) bool {
 					return a.WlInfo.Obj.Name < b.WlInfo.Obj.Name
@@ -1004,6 +1018,9 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 		).
 		Rule("any-cluster-queue-rule", kueuealpha.InsufficientQuota,
 			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).Obj(),
+		).
+		Rule("second-any-cluster-queue-rule", kueuealpha.InsufficientQuota,
+			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).Obj(),
 		).Obj()
 	unitWl := *utiltestingapi.MakeWorkload("unit", "").Request(corev1.ResourceCPU, "1")
 	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
@@ -1069,6 +1086,41 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 			},
 			want: map[string]policy.ConsumedLimits{
 				"/a1": nil,
+			},
+		},
+		"limits with ruleNames only apply to matching rules": {
+			preemptionLimits: []kueuealpha.PreemptionLimit{
+				*utiltestingalpha.MakePreemptionLimit("low-tier-limit", kueuealpha.GlobalPreemptionLimitScope).
+					LimitWindowSeconds(windowSeconds).RuleNames("low-tier-rule").Limit(10).Obj(),
+				*utiltestingalpha.MakePreemptionLimit("any-cq-limit", kueuealpha.GlobalPreemptionLimitScope).
+					LimitWindowSeconds(windowSeconds).RuleNames("any-cluster-queue-rule").Limit(10).Obj(),
+				*utiltestingalpha.MakePreemptionLimit("other-rule-limit", kueuealpha.GlobalPreemptionLimitScope).
+					LimitWindowSeconds(windowSeconds).RuleNames("other-rule").Limit(0).Obj(),
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").Label("tier", "low").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			want: map[string]policy.ConsumedLimits{
+				"/a1": {"low-tier-limit": "Global"},
+				"/a2": {"any-cq-limit": "Global"},
+			},
+		},
+		"candidate matching multiple rules only consumes and respects limits of the first matching rule": {
+			preemptionLimits: []kueuealpha.PreemptionLimit{
+				*utiltestingalpha.MakePreemptionLimit("first-rule-limit", kueuealpha.GlobalPreemptionLimitScope).
+					LimitWindowSeconds(windowSeconds).RuleNames("any-cluster-queue-rule").Limit(1).Obj(),
+				*utiltestingalpha.MakePreemptionLimit("second-rule-limit", kueuealpha.GlobalPreemptionLimitScope).
+					LimitWindowSeconds(windowSeconds).RuleNames("second-any-cluster-queue-rule").Limit(1).Obj(),
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a3").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			want: map[string]policy.ConsumedLimits{
+				"/a1": {"first-rule-limit": "Global"},
+				"/a2": {"second-rule-limit": "Global"},
 			},
 		},
 		"candidates whose preemption is in progress are yielded without limits and take no budget": {
@@ -1141,6 +1193,22 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 			},
 			want: map[string]policy.ConsumedLimits{},
 		},
+		"candidate skipped due to Always rule limit can still be selected by InsufficientQuota rule": {
+			preemptionLimits: []kueuealpha.PreemptionLimit{
+				*utiltestingalpha.MakePreemptionLimit("low-tier-limit", kueuealpha.GlobalPreemptionLimitScope).
+					LimitWindowSeconds(windowSeconds).RuleNames("low-tier-rule").Limit(1).Obj(),
+				*utiltestingalpha.MakePreemptionLimit("any-cq-limit", kueuealpha.GlobalPreemptionLimitScope).
+					LimitWindowSeconds(windowSeconds).RuleNames("any-cluster-queue-rule").Limit(10).Obj(),
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").Label("tier", "low").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("a2").Label("tier", "low").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			want: map[string]policy.ConsumedLimits{
+				"/a1": {"low-tier-limit": "Global"},
+				"/a2": {"any-cq-limit": "Global"},
+			},
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -1205,6 +1273,217 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 			// Then
 			if diff := cmp.Diff(tc.want, got, cmp.AllowUnexported(policy.ConsumedLimit{})); diff != "" {
 				t.Errorf("Unexpected consumed limits (-want,+got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestPreemptionEvaluatorRetryAt(t *testing.T) {
+	const windowSeconds = 60
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	clusterQueues := []*kueue.ClusterQueue{
+		utiltestingapi.MakeClusterQueue("a").Label("cq", "a").
+			ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").
+				Resource(corev1.ResourceCPU, "3").
+				Resource(corev1.ResourceMemory, "3").Obj()).Obj(),
+		utiltestingapi.MakeClusterQueue("b").Label("cq", "b").
+			ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").Resource(corev1.ResourceCPU, "3").Obj()).Obj(),
+		utiltestingapi.MakeClusterQueue("c").Label("cq", "c").
+			ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").Resource(corev1.ResourceCPU, "3").Obj()).Obj(),
+	}
+	fr := resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU}
+	frMem := resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceMemory}
+	emptyConfig := utiltestingalpha.MakePreemptionConfig("empty").Obj()
+	multiTriggerConfig := utiltestingalpha.MakePreemptionConfig("test").
+		Rule("low-tier-rule", kueuealpha.Always,
+			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).
+				LabelSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"tier": "low"}}).Obj(),
+		).
+		Rule("any-cluster-queue-rule", kueuealpha.InsufficientQuota,
+			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).Obj(),
+		).Obj()
+	unitWl := *utiltestingapi.MakeWorkload("unit", "").Request(corev1.ResourceCPU, "1")
+	perPreemptedCQLimit := utiltestingalpha.MakePreemptionLimit("per-preempted-cq", kueuealpha.PreemptedCQLimitScope).
+		Limit(1).LimitWindowSeconds(windowSeconds).Obj()
+	perPreemptedCQConsumed := func(cq policy.PreemptionLimitScopeValue) policy.ConsumedLimits {
+		return policy.ConsumedLimits{"per-preempted-cq": policy.NewConsumedLimit(perPreemptedCQLimit, cq)}
+	}
+
+	type recordedEvent struct {
+		ts       time.Time
+		consumed policy.ConsumedLimits
+	}
+
+	cases := map[string]struct {
+		config           *kueuealpha.PreemptionConfig // Nil leaves the evaluator nil.
+		preemptionLimits []kueuealpha.PreemptionLimit
+		recordedEvents   []recordedEvent
+		admitted         []kueue.Workload
+		maxYields        int
+		// frsPerCall, when set, runs FindCandidates once per FlavorResource instead of once for fr.
+		frsPerCall  []resources.FlavorResource
+		wantYielded []string
+		wantRetryAt *time.Time
+	}{
+		"nil evaluator returns nil": {},
+		"evaluator without rules returns nil": {
+			config:           emptyConfig,
+			preemptionLimits: []kueuealpha.PreemptionLimit{*perPreemptedCQLimit},
+			recordedEvents: []recordedEvent{
+				{ts: now.Add(-20 * time.Second), consumed: perPreemptedCQConsumed("a")},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+		},
+		"skipped candidate updates RetryAt while later allowed candidate is still yielded": {
+			config:           multiTriggerConfig,
+			preemptionLimits: []kueuealpha.PreemptionLimit{*perPreemptedCQLimit},
+			recordedEvents: []recordedEvent{
+				{ts: now.Add(-20 * time.Second), consumed: perPreemptedCQConsumed("a")},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+			},
+			wantYielded: []string{"/b1"},
+			wantRetryAt: new(now.Add(40 * time.Second)),
+		},
+		"earlier RetryAt from Always trigger is preserved when InsufficientQuota expires later": {
+			config:           multiTriggerConfig,
+			preemptionLimits: []kueuealpha.PreemptionLimit{*perPreemptedCQLimit},
+			recordedEvents: []recordedEvent{
+				{ts: now.Add(-45 * time.Second), consumed: perPreemptedCQConsumed("a")},
+				{ts: now.Add(-20 * time.Second), consumed: perPreemptedCQConsumed("b")},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").Label("tier", "low").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+			},
+			wantRetryAt: new(now.Add(15 * time.Second)),
+		},
+		"later RetryAt from Always trigger is lowered when InsufficientQuota expires earlier": {
+			config:           multiTriggerConfig,
+			preemptionLimits: []kueuealpha.PreemptionLimit{*perPreemptedCQLimit},
+			recordedEvents: []recordedEvent{
+				{ts: now.Add(-20 * time.Second), consumed: perPreemptedCQConsumed("a")},
+				{ts: now.Add(-45 * time.Second), consumed: perPreemptedCQConsumed("b")},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").Label("tier", "low").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+			},
+			wantRetryAt: new(now.Add(15 * time.Second)),
+		},
+		"interrupted yield preserves RetryAt from candidates evaluated before halting": {
+			config:           multiTriggerConfig,
+			preemptionLimits: []kueuealpha.PreemptionLimit{*perPreemptedCQLimit},
+			recordedEvents: []recordedEvent{
+				{ts: now.Add(-20 * time.Second), consumed: perPreemptedCQConsumed("a")},
+				{ts: now.Add(-50 * time.Second), consumed: perPreemptedCQConsumed("c")},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+				*unitWl.Clone().Name("c1").SimpleReserveQuota("c", "default", now).Obj(),
+			},
+			maxYields:   1,
+			wantYielded: []string{"/b1"},
+			wantRetryAt: new(now.Add(40 * time.Second)),
+		},
+		"limit of 0 on one candidate does not mask expiring limit on another candidate": {
+			config: multiTriggerConfig,
+			preemptionLimits: []kueuealpha.PreemptionLimit{
+				*perPreemptedCQLimit,
+				*utiltestingalpha.MakePreemptionLimit("zero-b", kueuealpha.PreemptedCQLimitScope).
+					Limit(0).LimitWindowSeconds(windowSeconds).
+					PreemptedClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"cq": "b"}}).Obj(),
+			},
+			recordedEvents: []recordedEvent{
+				{ts: now.Add(-45 * time.Second), consumed: perPreemptedCQConsumed("a")},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+			},
+			wantRetryAt: new(now.Add(15 * time.Second)),
+		},
+		"RetryAt from earlier FindCandidates call is preserved when subsequent call hits no limits": {
+			config:           multiTriggerConfig,
+			preemptionLimits: []kueuealpha.PreemptionLimit{*perPreemptedCQLimit},
+			recordedEvents: []recordedEvent{
+				{ts: now.Add(-45 * time.Second), consumed: perPreemptedCQConsumed("b")},
+			},
+			admitted: []kueue.Workload{
+				*unitWl.Clone().Name("b1").SimpleReserveQuota("b", "default", now).Obj(),
+				*utiltestingapi.MakeWorkload("a1", "").Request(corev1.ResourceMemory, "1").SimpleReserveQuota("a", "default", now).Obj(),
+			},
+			frsPerCall:  []resources.FlavorResource{fr, frMem},
+			wantYielded: []string{"/a1"},
+			wantRetryAt: new(now.Add(15 * time.Second)),
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+				features.ConfigurablePreemptions:      true,
+				features.ConfigurablePreemptionLimits: true,
+			})
+			ctx, log := utiltesting.ContextWithLog(t)
+			for i := range tc.admitted {
+				tc.admitted[i].UID = types.UID(tc.admitted[i].Name)
+			}
+			builder := utiltesting.NewClientBuilder().WithLists(&kueue.WorkloadList{Items: tc.admitted})
+			if tc.config != nil {
+				builder = builder.WithObjects(tc.config)
+			}
+			cl := builder.Build()
+			cqCache := schdcache.New(cl)
+			cqCache.AddOrUpdateResourceFlavor(log, utiltestingapi.MakeResourceFlavor("default").Obj())
+			for _, cq := range clusterQueues {
+				if err := cqCache.AddClusterQueue(ctx, cq); err != nil {
+					t.Fatalf("Couldn't add ClusterQueue to cache: %v", err)
+				}
+			}
+
+			tracker := limits.NewPreemptionLimitTracker()
+			for i := range tc.preemptionLimits {
+				tracker.Sync(&tc.preemptionLimits[i])
+			}
+			for _, ev := range tc.recordedEvents {
+				tracker.Record(ev.ts, ev.consumed)
+			}
+			limitsSnapshot := tracker.Snapshot(now)
+
+			var evaluator *PreemptionEvaluator
+			if tc.config != nil {
+				preemptor := workload.NewInfo(log, unitWl.Clone().Name("a_incoming").Obj())
+				preemptor.ClusterQueue = "a"
+				evaluator = NewEvaluatorForPreemptionConfig(ctx, log, cl, limitsSnapshot, preemptexpectations.New(), tc.config.Name, preemptor, candidatesByName)
+			}
+
+			frsPerCall := tc.frsPerCall
+			if len(frsPerCall) == 0 {
+				frsPerCall = []resources.FlavorResource{fr}
+			}
+			var gotYielded []string
+			for _, callFR := range frsPerCall {
+				snapshot, err := cqCache.Snapshot(ctx)
+				if err != nil {
+					t.Fatalf("unexpected error while building snapshot: %v", err)
+				}
+				evaluator.FindCandidates(snapshot, sets.New(callFR), func() bool { return false }, func(target *policy.Target) bool {
+					gotYielded = append(gotYielded, string(workload.Key(target.WorkloadInfo.Obj)))
+					return tc.maxYields == 0 || len(gotYielded) < tc.maxYields
+				})
+			}
+
+			if diff := cmp.Diff(tc.wantYielded, gotYielded, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("FindCandidates() yielded (-want,+got):\n%s", diff)
+			}
+			if diff := cmp.Diff(tc.wantRetryAt, evaluator.RetryAt()); diff != "" {
+				t.Errorf("evaluator.RetryAt() (-want,+got):\n%s", diff)
 			}
 		})
 	}
