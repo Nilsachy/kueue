@@ -57,7 +57,6 @@ import (
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
 	afs "sigs.k8s.io/kueue/pkg/util/admissionfairsharing"
 	"sigs.k8s.io/kueue/pkg/util/api"
-	cmputil "sigs.k8s.io/kueue/pkg/util/cmp"
 	"sigs.k8s.io/kueue/pkg/util/expectations"
 	"sigs.k8s.io/kueue/pkg/util/priority"
 	utilqueue "sigs.k8s.io/kueue/pkg/util/queue"
@@ -1621,24 +1620,9 @@ func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap 
 		replaceableWorkloadSlice, s.quotaCheckStrategy, s.resourceFormatter, s.schedulingCycle,
 	)
 
-	// Drain s.preemptor after each Plan so PreemptionOracle probes from a plan that
-	// ends up NoFit (e.g. impossible topology in AssignTopology, an unmatched PodSet
-	// flavor, or an over-max-quota full count before Reduce) neither leak across
-	// calls nor attach preemption retry state to a NoFit plan. Clearing at the end
-	// on NoFit instead would drop Preempt retries from partial-admission probes.
-	takePlanRetry := func(plan *assignment.Plan) (*time.Time, *policy.BlockingPreemptionLimit) {
-		planRetryAt := s.preemptor.TakeRetryAt()
-		planBlockingLimit := s.preemptor.TakeBlockingLimit()
-		if plan.CanFit() || plan.Assignment.RepresentativeMode() != flavorassigner.Preempt {
-			return nil, nil
-		}
-		return planRetryAt, planBlockingLimit
-	}
-
 	initialAssignment := flvAssigner.AssignFlavors(ctx, log, nil)
 	planner := nativeplanner.NewPlanner(wl, snap, s.preemptor, flvAssigner)
 	assignmentPlan := planner.Plan(ctx, &initialAssignment)
-	retryAt, blockingLimit = takePlanRetry(&assignmentPlan)
 
 	if !assignmentPlan.CanFit() && workload.MinCountsUsable(wl.Obj) && wl.CanBePartiallyAdmitted() {
 		// bestPA is tracked here, not returned by fitsFn(), so it can't drift from
@@ -1646,14 +1630,10 @@ func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap 
 		var bestPartialPlan *assignment.Plan
 		fitsFn := func(nextCounts []int32) bool {
 			initialAssignment := flvAssigner.AssignFlavors(ctx, log, nextCounts)
-			partialPlan := planner.Plan(ctx, &initialAssignment)
-			partialRetryAt, partialBlockingLimit := takePlanRetry(&partialPlan)
-			if partialPlan.CanFit() {
+			if partialPlan := planner.Plan(ctx, &initialAssignment); partialPlan.CanFit() {
 				bestPartialPlan = &partialPlan
 				return true
 			}
-			retryAt = cmputil.EarliestTime(retryAt, partialRetryAt)
-			blockingLimit = blockingLimit.Earlier(partialBlockingLimit)
 			return false
 		}
 		// Only an admitted predecessor can already be running these PodSets. A predecessor
@@ -1665,6 +1645,9 @@ func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap 
 		}
 	}
 
+	// Always drain so a skipped flavor's retry state doesn't leak across calls.
+	retryAt = s.preemptor.TakeRetryAt()
+	blockingLimit = s.preemptor.TakeBlockingLimit()
 	fullAssignment, targets = *assignmentPlan.Assignment, assignmentPlan.PreemptionTargets
 	if assignmentPlan.CanFit() {
 		retryAt, blockingLimit = nil, nil

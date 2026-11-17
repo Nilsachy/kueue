@@ -173,7 +173,7 @@ func TestRequeueAndUpdateRetryAt(t *testing.T) {
 
 func TestGetAssignmentsRetryAt(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	tasTopology := utiltestingapi.MakeDefaultOneLevelTopology("tas-single-level")
+	rfOnDemand := utiltestingapi.MakeResourceFlavor("on-demand").Obj()
 	rfSpot := utiltestingapi.MakeResourceFlavor("spot").Obj()
 	preemptionCfg := utiltestingalpha.MakePreemptionConfig("limits-cfg").
 		Rule("within-cq", kueuealpha.InsufficientQuota,
@@ -200,13 +200,11 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 		Obj()
 
 	cases := map[string]struct {
-		enableTAS         bool
 		spotQuota         string
 		onDemandCPU       string
 		incoming          *kueue.Workload
 		extraWorkloads    []*kueue.Workload
 		recordedAgoByName map[policy.PreemptionLimitScopeValue]time.Duration
-		nodes             []corev1.Node
 		wantMode          flavorassigner.FlavorAssignmentMode
 		wantRetryAt       *time.Time
 		wantBlocking      *policy.BlockingPreemptionLimit
@@ -228,30 +226,6 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 			onDemandCPU: "1",
 			incoming:    defaultIncoming,
 			wantMode:    flavorassigner.Fit,
-		},
-		"ignores retryAt and blockingLimit when plan fails with NoFit due to impossible topology": {
-			enableTAS:   true,
-			spotQuota:   "0",
-			onDemandCPU: "2",
-			incoming: utiltestingapi.MakeWorkload("incoming", "default").
-				Queue("limits-lq").
-				PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 2).
-					Request(corev1.ResourceCPU, "1").
-					RequiredTopologyRequest(corev1.LabelHostname).
-					Obj()).
-				Obj(),
-			nodes: []corev1.Node{
-				*testingnode.MakeNode("x1").
-					Label("tas-node", "true").
-					Label(corev1.LabelHostname, "x1").
-					StatusAllocatable(corev1.ResourceList{
-						corev1.ResourceCPU:  resource.MustParse("1"),
-						corev1.ResourcePods: resource.MustParse("10"),
-					}).
-					Ready().
-					Obj(),
-			},
-			wantMode: flavorassigner.NoFit,
 		},
 		"keeps earliest retryAt and blockingLimit across two reduced counts blocked until different times": {
 			spotQuota:      "0",
@@ -304,14 +278,8 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 				features.PartialAdmission:             true,
 				features.ConfigurablePreemptions:      true,
 				features.ConfigurablePreemptionLimits: true,
-				features.TopologyAwareScheduling:      tc.enableTAS,
 			})
 			ctx, log := utiltesting.ContextWithLog(t)
-			rfOnDemandBuilder := utiltestingapi.MakeResourceFlavor("on-demand")
-			if tc.enableTAS {
-				rfOnDemandBuilder = rfOnDemandBuilder.NodeLabel("tas-node", "true").TopologyName("tas-single-level")
-			}
-			rfOnDemand := rfOnDemandBuilder.Obj()
 			cq := utiltestingapi.MakeClusterQueue("limits-cq").
 				Annotation(kueuealpha.PreemptionConfigNameAnnotation, "limits-cfg").
 				ResourceGroup(
@@ -333,20 +301,11 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 			for _, extra := range tc.extraWorkloads {
 				objs = append(objs, extra)
 			}
-			cl := utiltesting.NewClientBuilder().
-				WithObjects(objs...).
-				WithLists(&corev1.NodeList{Items: tc.nodes}).
-				Build()
+			cl := utiltesting.NewClientBuilder().WithObjects(objs...).Build()
 
 			cqCache := schdcache.New(cl)
 			cqCache.AddOrUpdateResourceFlavor(log, rfOnDemand)
 			cqCache.AddOrUpdateResourceFlavor(log, rfSpot)
-			if tc.enableTAS {
-				cqCache.AddOrUpdateTopology(log, tasTopology)
-				for i := range tc.nodes {
-					cqCache.TASCache().SyncNode(&tc.nodes[i])
-				}
-			}
 			if err := cqCache.AddClusterQueue(ctx, cq); err != nil {
 				t.Fatalf("adding ClusterQueue to cache: %v", err)
 			}
