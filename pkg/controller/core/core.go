@@ -21,6 +21,7 @@ import (
 	"time"
 
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -55,11 +56,14 @@ type SetupControllersOpts struct {
 	// PreemptionLimitPruneInterval overrides how often PreemptionLimit events
 	// are pruned and status is updated; zero keeps the default.
 	PreemptionLimitPruneInterval time.Duration
-	CustomLabels                 *metrics.CustomLabels
-	DRAMapper                    *dra.ResourceMapper
-	DRABackedResources           *dra.ExtendedResourceCache
-	ResourceFormatter            *resources.ResourceFormatter
-	ResourceSliceAPIAvailable    bool
+	// PreemptionLimitClock overrides the clock used by PreemptionLimitReconciler;
+	// nil keeps the default real clock.
+	PreemptionLimitClock      clock.Clock
+	CustomLabels              *metrics.CustomLabels
+	DRAMapper                 *dra.ResourceMapper
+	DRABackedResources        *dra.ExtendedResourceCache
+	ResourceFormatter         *resources.ResourceFormatter
+	ResourceSliceAPIAvailable bool
 }
 
 // SetupControllers sets up the core controllers. It returns the name of the
@@ -161,6 +165,9 @@ func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.
 		var plOpts []PreemptionLimitReconcilerOption
 		if opts.PreemptionLimitPruneInterval != 0 {
 			plOpts = append(plOpts, WithPreemptionLimitPruneInterval(opts.PreemptionLimitPruneInterval))
+		}
+		if opts.PreemptionLimitClock != nil {
+			plOpts = append(plOpts, WithPreemptionLimitClock(opts.PreemptionLimitClock))
 		}
 		plRec := NewPreemptionLimitReconciler(
 			mgr.GetClient(),

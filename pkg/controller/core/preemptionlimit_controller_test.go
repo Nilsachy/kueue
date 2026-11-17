@@ -231,8 +231,8 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 				}).
 				Build()
 			tracker := limits.NewPreemptionLimitTracker()
-			reconciler := NewPreemptionLimitReconciler(cl, tracker, nil, tc.opts...)
-			reconciler.clock = testingclock.NewFakeClock(now)
+			reconcilerOpts := append([]PreemptionLimitReconcilerOption{WithPreemptionLimitClock(testingclock.NewFakeClock(now))}, tc.opts...)
+			reconciler := NewPreemptionLimitReconciler(cl, tracker, nil, reconcilerOpts...)
 			// Preemptions are only recorded for the reconciled PreemptionLimits.
 			for _, l := range []*kueuealpha.PreemptionLimit{limit, otherLimit} {
 				if _, err := reconciler.Reconcile(ctx, reconcile.Request{Name: l.Name}); err != nil {
@@ -288,10 +288,11 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 	}
 }
 
-func TestPreemptionLimitSetupWithManagerInvalidPruneInterval(t *testing.T) {
-	for name, interval := range map[string]time.Duration{
-		"zero interval":     0,
-		"negative interval": -time.Second,
+func TestPreemptionLimitSetupWithManagerInvalidOptions(t *testing.T) {
+	for name, opt := range map[string]PreemptionLimitReconcilerOption{
+		"zero interval":     WithPreemptionLimitPruneInterval(0),
+		"negative interval": WithPreemptionLimitPruneInterval(-time.Second),
+		"nil clock":         WithPreemptionLimitClock(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			cl := utiltesting.NewClientBuilder().Build()
@@ -299,10 +300,10 @@ func TestPreemptionLimitSetupWithManagerInvalidPruneInterval(t *testing.T) {
 				cl,
 				limits.NewPreemptionLimitTracker(),
 				nil,
-				WithPreemptionLimitPruneInterval(interval),
+				opt,
 			)
 			if err := reconciler.SetupWithManager(nil); err == nil {
-				t.Errorf("Expected SetupWithManager() to fail for prune interval %v, got nil", interval)
+				t.Errorf("Expected SetupWithManager() to fail for %s, got nil", name)
 			}
 		})
 	}

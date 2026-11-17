@@ -66,6 +66,13 @@ func WithPreemptionLimitPruneInterval(interval time.Duration) PreemptionLimitRec
 	}
 }
 
+// WithPreemptionLimitClock overrides the clock used by the reconciler. Must not be nil.
+func WithPreemptionLimitClock(c clock.Clock) PreemptionLimitReconcilerOption {
+	return func(r *PreemptionLimitReconciler) {
+		r.clock = c
+	}
+}
+
 var _ reconcile.Reconciler = (*PreemptionLimitReconciler)(nil)
 
 func NewPreemptionLimitReconciler(
@@ -166,6 +173,9 @@ func (r *PreemptionLimitReconciler) preemptionLimitStatus(now time.Time, limit *
 func (r *PreemptionLimitReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.pruneInterval <= 0 {
 		return errors.New("PreemptionLimit prune interval must be positive")
+	}
+	if r.clock == nil {
+		return errors.New("PreemptionLimit clock must not be nil")
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("preemptionlimit_controller").

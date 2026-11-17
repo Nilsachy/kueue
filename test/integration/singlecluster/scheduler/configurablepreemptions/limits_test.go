@@ -20,11 +20,13 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	testingclock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
@@ -39,8 +41,9 @@ import (
 
 var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepreemptions"), func() {
 	var (
-		ns     *corev1.Namespace
-		flavor *kueue.ResourceFlavor
+		ns        *corev1.Namespace
+		flavor    *kueue.ResourceFlavor
+		fakeClock *testingclock.FakeClock
 	)
 
 	createWorkload := func(name, queue string, priority int32, cpu string) *kueue.Workload {
@@ -79,14 +82,12 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 			{policy.PreemptionLimitReference(limitName): {ScopeValue: scopeValue}},
 		}, count)
 		gomega.Eventually(func() bool {
-			return preemptionLimitTracker.Snapshot(time.Now()).WithinLimits(probe)
+			return preemptionLimitTracker.Snapshot(fakeClock.Now()).WithinLimits(probe)
 		}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.BeTrue())
 	}
 
-	// recreateBlockedPreemptor recreates a pending preemptor that was parked in inadmissibleWorkloads
-	// while a PreemptionLimit blocked preemption, for PreemptionLimit spec updates and deletions (which
-	// do not trigger automatic requeuing, unlike sliding-window expiration).
-	recreateBlockedPreemptor := func(wl *kueue.Workload) *kueue.Workload {
+	// recreateWorkload deletes wl and creates a fresh Workload with the same spec.
+	recreateWorkload := func(wl *kueue.Workload) *kueue.Workload {
 		ginkgo.GinkgoHelper()
 		replacement := utiltestingapi.MakeWorkload(wl.Name, wl.Namespace).
 			Queue(wl.Spec.QueueName).
@@ -116,11 +117,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 			var got kueuealpha.PreemptionLimit
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(limit), &got)).To(gomega.Succeed())
 			g.Expect(got.Status.LastUpdateTime).NotTo(gomega.BeNil())
-			if len(want) == 0 {
-				g.Expect(got.Status.Counts).To(gomega.BeEmpty())
-			} else {
-				g.Expect(got.Status.Counts).To(gomega.Equal(want))
-			}
+			g.Expect(got.Status.Counts).To(gomega.BeComparableTo(want, cmpopts.EquateEmpty()))
 		}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.Succeed())
 	}
 
@@ -196,7 +193,8 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 	ginkgo.Context("when ConfigurablePreemptionLimits feature gate is enabled", func() {
 		ginkgo.BeforeEach(func() {
 			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.ConfigurablePreemptionLimits, true)
-			startManager()
+			fakeClock = testingclock.NewFakeClock(time.Now().Truncate(time.Second))
+			startManagerWithClock(fakeClock)
 
 			ns = behavioral.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "preemptionlimits-")
 			flavor = utiltestingapi.MakeResourceFlavor("rf-preemptionlimits").Obj()
@@ -273,7 +271,8 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 						pl.Spec.Limit = 1
 					})
 					waitForLimitAllowance(limit.Name, policy.GlobalScopeValue, 1)
-					highWl1 = recreateBlockedPreemptor(highWl1)
+					// PreemptionLimit spec updates do not requeue inadmissible workloads, so recreate highWl1 to trigger scheduling.
+					highWl1 = recreateWorkload(highWl1)
 
 					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowWl1)
 					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highWl1)
@@ -292,7 +291,8 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 						pl.Spec.Limit = 2
 					})
 					waitForLimitAllowance(limit.Name, policy.GlobalScopeValue, 1)
-					highWl2 = recreateBlockedPreemptor(highWl2)
+					// PreemptionLimit spec updates do not requeue inadmissible workloads, so recreate highWl2 to trigger scheduling.
+					highWl2 = recreateWorkload(highWl2)
 
 					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowWl2)
 					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highWl2)
@@ -432,7 +432,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 
 				limit = kueuetestalpha1.MakePreemptionLimit("global-rate-limit", kueuealpha.GlobalPreemptionLimitScope).
 					Limit(2).
-					LimitWindowSeconds(5).
+					LimitWindowSeconds(60).
 					Obj()
 				createPreemptionLimitAndWaitForSync(limit)
 			})
@@ -472,7 +472,9 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 					})
 				})
 
-				ginkgo.By("Automatically requeuing the blocked preemptor and allowing preemption after the sliding window expires", func() {
+				ginkgo.By("Advancing the clock past the sliding window so the blocked preemptor is automatically requeued and admitted", func() {
+					fakeClock.Step(61 * time.Second)
+
 					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowBeta2)
 					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highBeta2)
 					expectPreemptionLimitCounts(limit, []kueuealpha.PreemptionLimitCount{
@@ -722,12 +724,12 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				preemptedCQLimit = kueuetestalpha1.MakePreemptionLimit("status-preempted-cq-limit", kueuealpha.PreemptedCQLimitScope).
 					ConfigSelector(prodConfigSelector).
 					Limit(5).
-					LimitWindowSeconds(60).
+					LimitWindowSeconds(300).
 					Obj()
 				shortGlobalLimit = kueuetestalpha1.MakePreemptionLimit("status-short-global-limit", kueuealpha.GlobalPreemptionLimitScope).
 					ConfigSelector(prodConfigSelector).
 					Limit(5).
-					LimitWindowSeconds(5).
+					LimitWindowSeconds(60).
 					Obj()
 				createPreemptionLimitAndWaitForSync(preemptedCQLimit)
 				createPreemptionLimitAndWaitForSync(shortGlobalLimit)
@@ -759,16 +761,17 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 
 				ginkgo.By("Recording preemptions and reporting counts sorted by descending value", func() {
 					preemptor := createWorkload("preemptor-all", lqPreemptor.Name, 100, "3")
+					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, victimB1, victimB2, victimA1)
+					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, preemptor)
+
+					expectPreemptionLimitCounts(preemptedCQLimit, wantCQCounts)
 					expectPreemptionLimitCounts(shortGlobalLimit, []kueuealpha.PreemptionLimitCount{
 						{Name: string(policy.GlobalScopeValue), Value: 3},
 					})
-					expectPreemptionLimitCounts(preemptedCQLimit, wantCQCounts)
-
-					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, victimB1, victimB2, victimA1)
-					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, preemptor)
 				})
 
-				ginkgo.By("Pruning expired counts from status once the short sliding window elapses", func() {
+				ginkgo.By("Advancing the clock past the short sliding window so only its counts are pruned", func() {
+					fakeClock.Step(61 * time.Second)
 					expectPreemptionLimitCounts(shortGlobalLimit, nil)
 					expectPreemptionLimitCounts(preemptedCQLimit, wantCQCounts)
 				})
@@ -857,7 +860,8 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 					expectPreemptionLimitCounts(limit, nil)
 					waitForLimitAllowance(limit.Name, policy.PreemptionLimitScopeValue(cq.Name), 1)
 
-					highWl2 = recreateBlockedPreemptor(highWl2)
+					// PreemptionLimit spec updates do not requeue inadmissible workloads, so recreate highWl2 to trigger scheduling.
+					highWl2 = recreateWorkload(highWl2)
 					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowWl2)
 					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highWl2)
 					expectPreemptionLimitCounts(limit, []kueuealpha.PreemptionLimitCount{
@@ -872,10 +876,11 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				ginkgo.By("Deleting the blocking PreemptionLimit so preemption is allowed again", func() {
 					behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, limit, true)
 					gomega.Eventually(func() policy.PreemptionLimitScopeCounts {
-						return preemptionLimitTracker.Counts(time.Now(), policy.PreemptionLimitReference(limit.Name))
+						return preemptionLimitTracker.Counts(fakeClock.Now(), policy.PreemptionLimitReference(limit.Name))
 					}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.BeEmpty())
 
-					highWl3 = recreateBlockedPreemptor(highWl3)
+					// PreemptionLimit deletion does not requeue inadmissible workloads, so recreate highWl3 to trigger scheduling.
+					highWl3 = recreateWorkload(highWl3)
 					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowWl3)
 					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highWl3)
 				})
