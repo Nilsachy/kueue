@@ -62,10 +62,15 @@ type PreemptionEvaluator struct {
 	// preemptionLimiter enforces the PreemptionLimits applying to the PreemptionConfig.
 	// It is nil when the ConfigurablePreemptionLimits feature is disabled.
 	preemptionLimiter *limits.PreemptionLimiter
-	// retryAt is the earliest time a skipped candidate may become eligible.
+	// retryAt is the earliest time any skipped candidate may become eligible (across
+	// both PreemptionLimits with a finite RetryAt and time-based candidate filters).
 	retryAt *time.Time
-	// blockedLimit holds the earliest-clearing PreemptionLimitBlock across skipped candidates.
-	blockedLimit *policy.PreemptionLimitBlock
+	// blockingLimit holds the earliest-clearing BlockingPreemptionLimit across
+	// candidates skipped because of a PreemptionLimit. When a PreemptionLimit has a
+	// finite RetryAt, both retryAt and blockingLimit.RetryAt are updated (with
+	// retryAt <= blockingLimit.RetryAt once time filters also feed retryAt); when
+	// waiting alone cannot clear the limit (RetryAt == nil), only blockingLimit is set.
+	blockingLimit *policy.BlockingPreemptionLimit
 }
 
 // NewPreemptionEvaluator returns the PreemptionEvaluator of the given preemptor for the
@@ -141,13 +146,13 @@ func (p *PreemptionEvaluator) RetryAt() *time.Time {
 	return p.retryAt
 }
 
-// BlockedLimit returns the earliest-clearing PreemptionLimitBlock across candidates
-// skipped so far, or nil if no candidate was skipped by a PreemptionLimit.
-func (p *PreemptionEvaluator) BlockedLimit() *policy.PreemptionLimitBlock {
+// BlockingLimit returns the earliest-clearing BlockingPreemptionLimit across candidates
+// skipped so far, or nil if no candidate was skipped because of a PreemptionLimit.
+func (p *PreemptionEvaluator) BlockingLimit() *policy.BlockingPreemptionLimit {
 	if p == nil {
 		return nil
 	}
-	return p.blockedLimit
+	return p.blockingLimit
 }
 
 // FindCandidates evaluates candidates across applicable PreemptionConfig
@@ -228,17 +233,13 @@ func (p *PreemptionEvaluator) iterateOverCandidates(
 	preemptorCQ := snapshot.ClusterQueue(p.preemptor.ClusterQueue)
 	for _, candidate := range candidates {
 		targetCQ := snapshot.ClusterQueue(candidate.WlInfo.ClusterQueue)
-		var (
-			candidateBlocked    *policy.PreemptionLimitBlock
-			matchedWithinLimits bool
-		)
 		for ruleReference, selectorIndexes := range candidate.RuleNameToSelectorIndexes.InOrder {
-			consumedLimits, blockedLimit, withinLimits := budget.TryConsume(p.preemptor, candidate.WlInfo, ruleReference, preemptorCQ, targetCQ)
+			consumedLimits, blockingLimit, withinLimits := budget.TryConsume(p.preemptor, candidate.WlInfo, ruleReference, preemptorCQ, targetCQ)
 			if !withinLimits {
-				candidateBlocked = policy.EarlierPreemptionLimitBlock(candidateBlocked, blockedLimit)
+				p.retryAt = cmputil.EarliestTime(p.retryAt, blockingLimit.RetryAt)
+				p.blockingLimit = p.blockingLimit.Earlier(blockingLimit)
 				continue
 			}
-			matchedWithinLimits = true
 			if !yield(&policy.Target{
 				WorkloadInfo: candidate.WlInfo,
 				Reason:       kueue.ConfigurablePreemptionReason,
@@ -257,10 +258,6 @@ func (p *PreemptionEvaluator) iterateOverCandidates(
 
 			// Only first matched rule within limits is processed per candidate.
 			break
-		}
-		if !matchedWithinLimits && candidateBlocked != nil {
-			p.retryAt = cmputil.EarliestTime(p.retryAt, candidateBlocked.RetryAt)
-			p.blockedLimit = policy.EarlierPreemptionLimitBlock(p.blockedLimit, candidateBlocked)
 		}
 	}
 	return

@@ -209,27 +209,27 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 		nodes             []corev1.Node
 		wantMode          flavorassigner.FlavorAssignmentMode
 		wantRetryAt       *time.Time
-		wantBlocked       *policy.PreemptionLimitBlock
+		wantBlocking      *policy.BlockingPreemptionLimit
 	}{
-		"returns retryAt and blockedLimit when all flavors are blocked by expiring limit": {
+		"returns retryAt and blockingLimit when all flavors are blocked by expiring limit": {
 			spotQuota:   "0",
 			onDemandCPU: "1",
 			incoming:    defaultIncoming,
 			wantMode:    flavorassigner.Preempt,
 			wantRetryAt: new(now.Add(10 * time.Second)),
-			wantBlocked: &policy.PreemptionLimitBlock{
+			wantBlocking: &policy.BlockingPreemptionLimit{
 				Limit:   "per-workload",
 				Scope:   kueuealpha.PreemptedWorkloadLimitScope,
 				RetryAt: new(now.Add(10 * time.Second)),
 			},
 		},
-		"returns nil retryAt and blockedLimit and leaves preemptor drained when fallback flavor fits": {
+		"returns nil retryAt and blockingLimit and leaves preemptor drained when fallback flavor fits": {
 			spotQuota:   "1",
 			onDemandCPU: "1",
 			incoming:    defaultIncoming,
 			wantMode:    flavorassigner.Fit,
 		},
-		"ignores retryAt and blockedLimit when plan fails with NoFit due to impossible topology": {
+		"ignores retryAt and blockingLimit when plan fails with NoFit due to impossible topology": {
 			enableTAS:   true,
 			spotQuota:   "0",
 			onDemandCPU: "2",
@@ -253,7 +253,7 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 			},
 			wantMode: flavorassigner.NoFit,
 		},
-		"keeps earliest retryAt and blockedLimit across two reduced counts blocked until different times": {
+		"keeps earliest retryAt and blockingLimit across two reduced counts blocked until different times": {
 			spotQuota:      "0",
 			onDemandCPU:    "1",
 			extraWorkloads: []*kueue.Workload{memVictim},
@@ -276,13 +276,13 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 				Obj(),
 			wantMode:    flavorassigner.NoFit,
 			wantRetryAt: new(now.Add(10 * time.Second)),
-			wantBlocked: &policy.PreemptionLimitBlock{
+			wantBlocking: &policy.BlockingPreemptionLimit{
 				Limit:   "per-workload",
 				Scope:   kueuealpha.PreemptedWorkloadLimitScope,
 				RetryAt: new(now.Add(10 * time.Second)),
 			},
 		},
-		"clears retryAt and blockedLimit when partial reduction fits before probing larger blocked count": {
+		"clears retryAt and blockingLimit when partial reduction fits before probing larger blocked count": {
 			spotQuota:   "0",
 			onDemandCPU: "3",
 			incoming: utiltestingapi.MakeWorkload("incoming", "default").
@@ -380,21 +380,21 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 
 			wlInfo := workload.NewInfo(log, tc.incoming)
 			wlInfo.ClusterQueue = "limits-cq"
-			gotAssignment, _, gotRetryAt, gotBlocked := sched.getAssignments(ctx, wlInfo, snap)
+			gotAssignment, _, gotRetryAt, gotBlocking := sched.getAssignments(ctx, wlInfo, snap)
 			if gotAssignment.RepresentativeMode() != tc.wantMode {
 				t.Errorf("getAssignments mode = %v, want %v", gotAssignment.RepresentativeMode(), tc.wantMode)
 			}
 			if diff := cmp.Diff(tc.wantRetryAt, gotRetryAt); diff != "" {
 				t.Errorf("getAssignments retryAt (-want,+got):\n%s", diff)
 			}
-			if diff := cmp.Diff(tc.wantBlocked, gotBlocked); diff != "" {
-				t.Errorf("getAssignments blockedLimit (-want,+got):\n%s", diff)
+			if diff := cmp.Diff(tc.wantBlocking, gotBlocking); diff != "" {
+				t.Errorf("getAssignments blockingLimit (-want,+got):\n%s", diff)
 			}
 			if leakedRetry := sched.preemptor.TakeRetryAt(); leakedRetry != nil {
 				t.Errorf("preemptor.TakeRetryAt() = %v after getAssignments, want nil", leakedRetry)
 			}
-			if leakedBlocked := sched.preemptor.TakeBlockedLimit(); leakedBlocked != nil {
-				t.Errorf("preemptor.TakeBlockedLimit() = %v after getAssignments, want nil", leakedBlocked)
+			if leakedBlocking := sched.preemptor.TakeBlockingLimit(); leakedBlocking != nil {
+				t.Errorf("preemptor.TakeBlockingLimit() = %v after getAssignments, want nil", leakedBlocking)
 			}
 		})
 	}
@@ -414,6 +414,15 @@ func TestSchedulePreemptionRetry(t *testing.T) {
 			utiltestingalpha.MakeCandidateSelector(kueuealpha.WithinClusterQueue).Obj(),
 		).
 		Obj()
+	multiRuleCfg := utiltestingalpha.MakePreemptionConfig("multi-rule-cfg").
+		Rule("rule-a", kueuealpha.InsufficientQuota,
+			utiltestingalpha.MakeCandidateSelector(kueuealpha.WithinClusterQueue).
+				LabelSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"tier": "low"}}).Obj(),
+		).
+		Rule("rule-b", kueuealpha.InsufficientQuota,
+			utiltestingalpha.MakeCandidateSelector(kueuealpha.WithinClusterQueue).Obj(),
+		).
+		Obj()
 	tasPreemptionCfg := utiltestingalpha.MakePreemptionConfig("tas-limits-cfg").
 		Rule("within-cq-topology", kueuealpha.QuotaFeasibleAndInsufficientTopology,
 			utiltestingalpha.MakeCandidateSelector(kueuealpha.WithinClusterQueue).Obj(),
@@ -423,6 +432,10 @@ func TestSchedulePreemptionRetry(t *testing.T) {
 		Limit(1).LimitWindowSeconds(60).Obj()
 	zeroLimit := utiltestingalpha.MakePreemptionLimit("zero-limit", kueuealpha.GlobalPreemptionLimitScope).
 		Limit(0).LimitWindowSeconds(60).Obj()
+	ruleALimit := utiltestingalpha.MakePreemptionLimit("limit-a", kueuealpha.GlobalPreemptionLimitScope).
+		Limit(1).LimitWindowSeconds(60).RuleNames("rule-a").Obj()
+	ruleBLimit := utiltestingalpha.MakePreemptionLimit("limit-b", kueuealpha.GlobalPreemptionLimitScope).
+		Limit(1).LimitWindowSeconds(60).RuleNames("rule-b").Obj()
 	perWorkloadConsumed := func(wl policy.PreemptionLimitScopeValue) policy.ConsumedLimits {
 		return policy.ConsumedLimits{
 			"per-workload": policy.NewConsumedLimit(perWorkloadLimit, wl),
@@ -929,6 +942,118 @@ func TestSchedulePreemptionRetry(t *testing.T) {
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"limits-cq": {"default/incoming"},
+			},
+		},
+		"multi-rule fallback reports exhausted first rule limit and arms retry instead of fully consumed second rule limit": {
+			featureGates: map[featuregate.Feature]bool{
+				features.ConfigurablePreemptions:      true,
+				features.ConfigurablePreemptionLimits: true,
+			},
+			additionalClusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("limits-cq").
+					Annotation(kueuealpha.PreemptionConfigNameAnnotation, "multi-rule-cfg").
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("on-demand").Resource(corev1.ResourceCPU, "2").Obj(),
+					).
+					Obj(),
+			},
+			additionalLocalQueues: []kueue.LocalQueue{
+				*utiltestingapi.MakeLocalQueue("limits-lq", "default").ClusterQueue("limits-cq").Obj(),
+			},
+			objects: []client.Object{
+				multiRuleCfg,
+				ruleALimit.DeepCopy(),
+				ruleBLimit.DeepCopy(),
+			},
+			recordedPreemptions: []recordedPreemption{
+				{
+					at: now.Add(-45 * time.Second),
+					consumed: policy.ConsumedLimits{
+						"limit-a": policy.NewConsumedLimit(ruleALimit, policy.GlobalScopeValue),
+					},
+				},
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("v1", "default").
+					Queue("limits-lq").
+					Label("tier", "low").
+					Request(corev1.ResourceCPU, "1").
+					SimpleReserveQuota("limits-cq", "on-demand", now).
+					AdmittedAt(true, now).
+					Obj(),
+				*utiltestingapi.MakeWorkload("v2", "default").
+					Queue("limits-lq").
+					Request(corev1.ResourceCPU, "1").
+					SimpleReserveQuota("limits-cq", "on-demand", now).
+					AdmittedAt(true, now).
+					Obj(),
+				*utiltestingapi.MakeWorkload("incoming", "default").
+					Queue("limits-lq").
+					Request(corev1.ResourceCPU, "2").
+					Creation(now).
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("incoming", "default").
+					Queue("limits-lq").
+					Request(corev1.ResourceCPU, "2").
+					Creation(now).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 2 more needed; preemptions blocked by PreemptionLimit limit-a (aggregation Global) until 2026-01-01T00:00:15Z",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadAdmittedReasonNoReservation,
+						Message:            "The workload has no reservation",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name:      kueue.DefaultPodSetName,
+						Resources: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")},
+					}).
+					Obj(),
+				*utiltestingapi.MakeWorkload("v1", "default").
+					Queue("limits-lq").
+					Label("tier", "low").
+					Request(corev1.ResourceCPU, "1").
+					SimpleReserveQuota("limits-cq", "on-demand", now).
+					AdmittedAt(true, now).
+					Obj(),
+				*utiltestingapi.MakeWorkload("v2", "default").
+					Queue("limits-lq").
+					Request(corev1.ResourceCPU, "1").
+					SimpleReserveQuota("limits-cq", "on-demand", now).
+					AdmittedAt(true, now).
+					Obj(),
+			},
+			wantAssignments: map[workload.Reference]kueue.Admission{
+				"default/v1": *utiltestingapi.MakeAdmission("limits-cq").
+					PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+						Assignment(corev1.ResourceCPU, "on-demand", "1").Obj()).
+					Obj(),
+				"default/v2": *utiltestingapi.MakeAdmission("limits-cq").
+					PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+						Assignment(corev1.ResourceCPU, "on-demand", "1").Obj()).
+					Obj(),
+			},
+			wantInadmissibleLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"limits-cq": {"default/incoming"},
+			},
+			wantClusterQueueRequeueDelays: map[kueue.ClusterQueueReference]time.Duration{
+				"limits-cq": 15 * time.Second,
+			},
+			wantEvents: []utiltesting.EventRecord{
+				{
+					Key:       client.ObjectKey{Namespace: "default", Name: "incoming"},
+					Reason:    kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+					EventType: corev1.EventTypeWarning,
+					Message:   "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 2 more needed; preemptions blocked by PreemptionLimit limit-a (aggregation Global) until 2026-01-01T00:00:15Z",
+				},
 			},
 		},
 	}

@@ -1194,13 +1194,13 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 	}
 
 	cases := map[string]struct {
-		recordedAt  map[policy.PreemptionLimitScopeValue]time.Time
-		attempts    []searchAttempt
-		wantTargets []string
-		wantBlocked *policy.PreemptionLimitBlock
+		recordedAt   map[policy.PreemptionLimitScopeValue]time.Time
+		attempts     []searchAttempt
+		wantTargets  []string
+		wantBlocking *policy.BlockingPreemptionLimit
 	}{
-		"TakeRetryAt and TakeBlockedLimit return nil when no strategies run": {},
-		"failed candidate search records earliest retry and blocked limit and Take clears them": {
+		"TakeRetryAt and TakeBlockingLimit return nil when no strategies run": {},
+		"failed candidate search records earliest retry and blocking limit and Take clears them": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 				"cq-b": now.Add(-20 * time.Second),
@@ -1208,13 +1208,13 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			attempts: []searchAttempt{
 				{flavor: "on-demand", strategyAccepted: []bool{true}},
 			},
-			wantBlocked: &policy.PreemptionLimitBlock{
+			wantBlocking: &policy.BlockingPreemptionLimit{
 				Limit:   "per-cq",
 				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"TakeRetryAt and TakeBlockedLimit return earliest across multiple failed searches": {
+		"TakeRetryAt and TakeBlockingLimit return earliest across multiple failed searches": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 				"cq-b": now.Add(-20 * time.Second),
@@ -1223,34 +1223,34 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 				{flavor: "on-demand", strategyAccepted: []bool{true}},
 				{flavor: "spot", strategyAccepted: []bool{true}},
 			},
-			wantBlocked: &policy.PreemptionLimitBlock{
+			wantBlocking: &policy.BlockingPreemptionLimit{
 				Limit:   "per-cq",
 				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"rejected strategy verification preserves retry and blocked limit from skipped candidates": {
+		"rejected strategy verification preserves retry and blocking limit from skipped candidates": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 			},
 			attempts: []searchAttempt{
 				{flavor: "on-demand", strategyAccepted: []bool{false}},
 			},
-			wantBlocked: &policy.PreemptionLimitBlock{
+			wantBlocking: &policy.BlockingPreemptionLimit{
 				Limit:   "per-cq",
 				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"failed earlier strategy does not set retry or blocked limit when subsequent strategy succeeds": {
+		"failed earlier strategy does not set retry or blocking limit when subsequent strategy succeeds": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 			},
 			attempts: []searchAttempt{
 				{flavor: "on-demand", strategyAccepted: []bool{false, true}},
 			},
-			wantTargets: []string{"default/v-b"},
-			wantBlocked: nil,
+			wantTargets:  []string{"default/v-b"},
+			wantBlocking: nil,
 		},
 	}
 
@@ -1318,8 +1318,8 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 				t.Errorf("GetTargetsWithStrategy() targets (-want,+got):\n%s", diff)
 			}
 			var wantRetryAt *time.Time
-			if tc.wantBlocked != nil {
-				wantRetryAt = tc.wantBlocked.RetryAt
+			if tc.wantBlocking != nil {
+				wantRetryAt = tc.wantBlocking.RetryAt
 			}
 			if diff := cmp.Diff(wantRetryAt, preemptor.TakeRetryAt()); diff != "" {
 				t.Errorf("TakeRetryAt() (-want,+got):\n%s", diff)
@@ -1327,11 +1327,11 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			if secondRetry := preemptor.TakeRetryAt(); secondRetry != nil {
 				t.Errorf("Second TakeRetryAt() = %v, want nil", secondRetry)
 			}
-			if diff := cmp.Diff(tc.wantBlocked, preemptor.TakeBlockedLimit()); diff != "" {
-				t.Errorf("TakeBlockedLimit() (-want,+got):\n%s", diff)
+			if diff := cmp.Diff(tc.wantBlocking, preemptor.TakeBlockingLimit()); diff != "" {
+				t.Errorf("TakeBlockingLimit() (-want,+got):\n%s", diff)
 			}
-			if secondBlocked := preemptor.TakeBlockedLimit(); secondBlocked != nil {
-				t.Errorf("Second TakeBlockedLimit() = %v, want nil", secondBlocked)
+			if secondBlocking := preemptor.TakeBlockingLimit(); secondBlocking != nil {
+				t.Errorf("Second TakeBlockingLimit() = %v, want nil", secondBlocking)
 			}
 		})
 	}

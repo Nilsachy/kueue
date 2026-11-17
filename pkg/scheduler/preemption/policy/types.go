@@ -17,6 +17,7 @@ limitations under the License.
 package policy
 
 import (
+	"cmp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ import (
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/scheduler"
+	cmputil "sigs.k8s.io/kueue/pkg/util/cmp"
 	"sigs.k8s.io/kueue/pkg/util/logging"
 	sliceutils "sigs.k8s.io/kueue/pkg/util/slices"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -105,52 +107,48 @@ func (c ConsumedLimit) IsStaleFor(uid types.UID, minGeneration int64) bool {
 // ConsumedLimits maps each PreemptionLimit to the limit consumed by a preemption.
 type ConsumedLimits map[PreemptionLimitReference]ConsumedLimit
 
-// PreemptionLimitBlock identifies a PreemptionLimit that prevented preempting a
-// candidate and when that candidate's exhausted limits may clear.
+// BlockingPreemptionLimit identifies a PreemptionLimit that prevented preempting
+// a candidate and when that candidate's exhausted limits may clear.
 // RetryAt is nil when waiting for recorded events to expire cannot unblock it
 // (e.g., spec.limit is 0, or taken preemptions alone exhaust spec.limit).
-type PreemptionLimitBlock struct {
+type BlockingPreemptionLimit struct {
 	Limit   PreemptionLimitReference
 	Scope   kueuealpha.PreemptionLimitScope
 	RetryAt *time.Time
 }
 
 // Message formats the human-readable reason why preemptions were blocked by the limit.
-func (b PreemptionLimitBlock) Message() string {
+func (b BlockingPreemptionLimit) Message() string {
 	if b.RetryAt == nil {
 		return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s)", b.Limit, b.Scope)
 	}
 	return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s) until %s", b.Limit, b.Scope, b.RetryAt.UTC().Format(time.RFC3339))
 }
 
-// EarlierPreemptionLimitBlock returns the block that clears sooner between two
-// alternative candidates or attempts, or nil if both are nil.
+// Earlier returns whichever of b and other clears sooner, or nil if both are nil.
 // A finite RetryAt clears sooner than a nil (non-expiring) RetryAt; ties are
 // broken deterministically by Limit name.
-func EarlierPreemptionLimitBlock(a, b *PreemptionLimitBlock) *PreemptionLimitBlock {
-	switch {
-	case a == nil:
-		return b
-	case b == nil:
-		return a
-	case a.RetryAt == nil && b.RetryAt == nil:
-		if a.Limit <= b.Limit {
-			return a
-		}
-		return b
-	case a.RetryAt == nil:
-		return b
-	case b.RetryAt == nil:
-		return a
-	case a.RetryAt.Before(*b.RetryAt):
-		return a
-	case b.RetryAt.Before(*a.RetryAt):
-		return b
-	case a.Limit <= b.Limit:
-		return a
-	default:
+func (b *BlockingPreemptionLimit) Earlier(other *BlockingPreemptionLimit) *BlockingPreemptionLimit {
+	if b == nil {
+		return other
+	}
+	if other == nil {
 		return b
 	}
+	c := cmputil.LazyOr(
+		func() int { return cmputil.CompareBool(b.RetryAt == nil, other.RetryAt == nil) },
+		func() int {
+			if b.RetryAt == nil {
+				return 0
+			}
+			return b.RetryAt.Compare(*other.RetryAt)
+		},
+		func() int { return cmp.Compare(b.Limit, other.Limit) },
+	)
+	if c <= 0 {
+		return b
+	}
+	return other
 }
 
 func (d *ConfigurablePreemptionReasonData) EvictionMessage(preemptor *kueue.Workload) string {
