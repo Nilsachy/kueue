@@ -146,8 +146,8 @@ func (p *PreemptionEvaluator) RetryAt() *time.Time {
 	return p.retryAt
 }
 
-// BlockingLimit returns the earliest-clearing BlockingPreemptionLimit across candidates
-// skipped so far, or nil if no candidate was skipped because of a PreemptionLimit.
+// BlockingLimit returns the recorded BlockingPreemptionLimit, or nil if no
+// candidate was skipped because of a PreemptionLimit.
 func (p *PreemptionEvaluator) BlockingLimit() *policy.BlockingPreemptionLimit {
 	if p == nil {
 		return nil
