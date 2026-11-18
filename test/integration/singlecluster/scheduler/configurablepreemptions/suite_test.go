@@ -91,15 +91,17 @@ var _ = ginkgo.AfterSuite(func() {
 // SetFeatureGateDuringTest(ConfigurablePreemptionLimits, ...) overrides must run
 // before SetupControllers registers controllers and allocates the tracker.
 func startManager() {
-	startManagerWithClock(nil)
-}
-
-func startManagerWithClock(clk clock.WithTickerAndDelayedExecution) {
-	fwk.StartManager(ctx, cfg, managerAndSchedulerSetup(clk))
+	fwk.StartManager(ctx, cfg, managerAndSchedulerSetup(clock.RealClock{}, 100*time.Millisecond))
 	ginkgo.DeferCleanup(fwk.StopManager, ctx)
 }
 
-func managerAndSchedulerSetup(clk clock.WithTickerAndDelayedExecution) framework.ManagerSetup {
+func startManagerWithClock(clk clock.WithTickerAndDelayedExecution) {
+	// Use batchPeriod=0 so un-delayed requeue notifications do not wait on a frozen test clock.
+	fwk.StartManager(ctx, cfg, managerAndSchedulerSetup(clk, 0))
+	ginkgo.DeferCleanup(fwk.StopManager, ctx)
+}
+
+func managerAndSchedulerSetup(clk clock.WithTickerAndDelayedExecution, requeueBatchPeriod time.Duration) framework.ManagerSetup {
 	return func(ctx context.Context, mgr manager.Manager) {
 		err := indexer.Setup(ctx, mgr.GetFieldIndexer())
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
@@ -110,14 +112,8 @@ func managerAndSchedulerSetup(clk clock.WithTickerAndDelayedExecution) framework
 		if features.Enabled(features.ConfigurablePreemptionLimits) {
 			preemptionLimitTracker = limits.NewPreemptionLimitTracker()
 		}
-		var queues *qcache.Manager
-		if clk != nil {
-			queues = integration.NewManagerWithClock(ctx, mgr.GetClient(), cCache, clk,
-				qcache.WithPreemptionExpectations(preemptionExpectations))
-		} else {
-			queues = integration.NewManager(ctx, mgr.GetClient(), cCache,
-				qcache.WithPreemptionExpectations(preemptionExpectations))
-		}
+		queues := integration.NewManagerWithClock(ctx, mgr.GetClient(), cCache, requeueBatchPeriod, clk,
+			qcache.WithPreemptionExpectations(preemptionExpectations))
 		qManager = queues
 
 		configuration := &config.Configuration{
@@ -134,7 +130,7 @@ func managerAndSchedulerSetup(clk clock.WithTickerAndDelayedExecution) framework
 				PreemptionExpectations:       preemptionExpectations,
 				PreemptionLimitTracker:       preemptionLimitTracker,
 				PreemptionLimitPruneInterval: 100 * time.Millisecond,
-				PreemptionLimitClock:         clk,
+				Clock:                        clk,
 			},
 		)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
@@ -153,19 +149,14 @@ func managerAndSchedulerSetup(clk clock.WithTickerAndDelayedExecution) framework
 		err = workloadjob.SetupIndexes(ctx, mgr.GetFieldIndexer())
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		schedulerOpts := []scheduler.Option{
-			scheduler.WithPreemptionExpectations(preemptionExpectations),
-			scheduler.WithPreemptionLimitTracker(preemptionLimitTracker),
-		}
-		if clk != nil {
-			schedulerOpts = append(schedulerOpts, scheduler.WithClock(ginkgo.GinkgoTB(), clk))
-		}
 		sched := scheduler.New(
 			queues,
 			cCache,
 			mgr.GetClient(),
 			mgr.GetEventRecorder(constants.AdmissionName),
-			schedulerOpts...,
+			scheduler.WithPreemptionExpectations(preemptionExpectations),
+			scheduler.WithPreemptionLimitTracker(preemptionLimitTracker),
+			scheduler.WithClock(ginkgo.GinkgoTB(), clk),
 		)
 		err = sched.Start(ctx)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

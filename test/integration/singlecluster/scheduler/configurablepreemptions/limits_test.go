@@ -40,6 +40,12 @@ import (
 )
 
 var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepreemptions"), func() {
+	const (
+		limitWindowSeconds     = 60
+		longLimitWindowSeconds = 300
+		nextWindowOffset       = (limitWindowSeconds + 1) * time.Second
+	)
+
 	var (
 		ns        *corev1.Namespace
 		flavor    *kueue.ResourceFlavor
@@ -157,7 +163,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 
 			limit = kueuetestalpha1.MakePreemptionLimit("ignored-zero-limit", kueuealpha.GlobalPreemptionLimitScope).
 				Limit(0).
-				LimitWindowSeconds(60).
+				LimitWindowSeconds(limitWindowSeconds).
 				Obj()
 			behavioral.MustCreate(ctx, k8sClient, limit)
 		})
@@ -237,7 +243,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				limit = kueuetestalpha1.MakePreemptionLimit("canary-rollout-limit", kueuealpha.GlobalPreemptionLimitScope).
 					ConfigSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"rollout": "canary"}}).
 					Limit(0).
-					LimitWindowSeconds(60).
+					LimitWindowSeconds(limitWindowSeconds).
 					Obj()
 				createPreemptionLimitAndWaitForSync(limit)
 			})
@@ -333,7 +339,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 
 				limit = kueuetestalpha1.MakePreemptionLimit("per-workload-disruption-limit", kueuealpha.PreemptedWorkloadLimitScope).
 					Limit(1).
-					LimitWindowSeconds(60).
+					LimitWindowSeconds(limitWindowSeconds).
 					Obj()
 				createPreemptionLimitAndWaitForSync(limit)
 			})
@@ -432,7 +438,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 
 				limit = kueuetestalpha1.MakePreemptionLimit("global-rate-limit", kueuealpha.GlobalPreemptionLimitScope).
 					Limit(2).
-					LimitWindowSeconds(60).
+					LimitWindowSeconds(limitWindowSeconds).
 					Obj()
 				createPreemptionLimitAndWaitForSync(limit)
 			})
@@ -472,8 +478,8 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 					})
 				})
 
-				ginkgo.By("Advancing the clock past the sliding window so the blocked preemptor is automatically requeued and admitted", func() {
-					fakeClock.Step(61 * time.Second)
+				ginkgo.By("Automatically requeuing the blocked preemptor and allowing preemption after the sliding window expires", func() {
+					fakeClock.Step(nextWindowOffset)
 
 					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, lowBeta2)
 					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highBeta2)
@@ -533,7 +539,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				limit = kueuetestalpha1.MakePreemptionLimit("protect-mission-critical-cq", kueuealpha.PreemptedCQLimitScope).
 					PreemptedClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"tier": "mission-critical"}}).
 					Limit(0).
-					LimitWindowSeconds(60).
+					LimitWindowSeconds(limitWindowSeconds).
 					Obj()
 				createPreemptionLimitAndWaitForSync(limit)
 			})
@@ -622,7 +628,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				limit = kueuetestalpha1.MakePreemptionLimit("per-tenant-budget", kueuealpha.PreemptorCQLimitScope).
 					PreemptorClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"role": "tenant"}}).
 					Limit(1).
-					LimitWindowSeconds(60).
+					LimitWindowSeconds(limitWindowSeconds).
 					Obj()
 				createPreemptionLimitAndWaitForSync(limit)
 			})
@@ -724,12 +730,12 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				preemptedCQLimit = kueuetestalpha1.MakePreemptionLimit("status-preempted-cq-limit", kueuealpha.PreemptedCQLimitScope).
 					ConfigSelector(prodConfigSelector).
 					Limit(5).
-					LimitWindowSeconds(300).
+					LimitWindowSeconds(longLimitWindowSeconds).
 					Obj()
 				shortGlobalLimit = kueuetestalpha1.MakePreemptionLimit("status-short-global-limit", kueuealpha.GlobalPreemptionLimitScope).
 					ConfigSelector(prodConfigSelector).
 					Limit(5).
-					LimitWindowSeconds(60).
+					LimitWindowSeconds(limitWindowSeconds).
 					Obj()
 				createPreemptionLimitAndWaitForSync(preemptedCQLimit)
 				createPreemptionLimitAndWaitForSync(shortGlobalLimit)
@@ -770,8 +776,8 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 					})
 				})
 
-				ginkgo.By("Advancing the clock past the short sliding window so only its counts are pruned", func() {
-					fakeClock.Step(61 * time.Second)
+				ginkgo.By("Pruning expired counts from status once the short sliding window elapses", func() {
+					fakeClock.Step(nextWindowOffset)
 					expectPreemptionLimitCounts(shortGlobalLimit, nil)
 					expectPreemptionLimitCounts(preemptedCQLimit, wantCQCounts)
 				})
@@ -820,7 +826,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 
 				limit = kueuetestalpha1.MakePreemptionLimit("reset-delete-limit", kueuealpha.GlobalPreemptionLimitScope).
 					Limit(1).
-					LimitWindowSeconds(60).
+					LimitWindowSeconds(limitWindowSeconds).
 					Obj()
 				createPreemptionLimitAndWaitForSync(limit)
 			})

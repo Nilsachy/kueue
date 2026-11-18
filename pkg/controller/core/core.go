@@ -56,14 +56,12 @@ type SetupControllersOpts struct {
 	// PreemptionLimitPruneInterval overrides how often PreemptionLimit events
 	// are pruned and status is updated; zero keeps the default.
 	PreemptionLimitPruneInterval time.Duration
-	// PreemptionLimitClock overrides the clock used by PreemptionLimitReconciler;
-	// nil keeps the default real clock.
-	PreemptionLimitClock      clock.Clock
-	CustomLabels              *metrics.CustomLabels
-	DRAMapper                 *dra.ResourceMapper
-	DRABackedResources        *dra.ExtendedResourceCache
-	ResourceFormatter         *resources.ResourceFormatter
-	ResourceSliceAPIAvailable bool
+	Clock                        clock.Clock
+	CustomLabels                 *metrics.CustomLabels
+	DRAMapper                    *dra.ResourceMapper
+	DRABackedResources           *dra.ExtendedResourceCache
+	ResourceFormatter            *resources.ResourceFormatter
+	ResourceSliceAPIAvailable    bool
 }
 
 // SetupControllers sets up the core controllers. It returns the name of the
@@ -85,11 +83,16 @@ func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.
 	if err := wpcRec.SetupWithManager(mgr, cfg); err != nil {
 		return "WorkloadPriorityClass", err
 	}
-	qRec := NewLocalQueueReconciler(mgr.GetClient(), qManager, cc,
+	lqOpts := []LocalQueueReconcilerOption{
 		WithAdmissionFairSharingConfig(cfg.AdmissionFairSharing),
 		WithRoleTracker(opts.RoleTracker),
 		WithCustomLabels(opts.CustomLabels),
-		WithLocalQueueMetrics(lqMetrics))
+		WithLocalQueueMetrics(lqMetrics),
+	}
+	if opts.Clock != nil {
+		lqOpts = append(lqOpts, WithClock(opts.Clock))
+	}
+	qRec := NewLocalQueueReconciler(mgr.GetClient(), qManager, cc, lqOpts...)
 	if err := qRec.SetupWithManager(mgr, cfg); err != nil {
 		return "LocalQueue", err
 	}
@@ -166,8 +169,8 @@ func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.
 		if opts.PreemptionLimitPruneInterval != 0 {
 			plOpts = append(plOpts, WithPreemptionLimitPruneInterval(opts.PreemptionLimitPruneInterval))
 		}
-		if opts.PreemptionLimitClock != nil {
-			plOpts = append(plOpts, WithPreemptionLimitClock(opts.PreemptionLimitClock))
+		if opts.Clock != nil {
+			plOpts = append(plOpts, WithPreemptionLimitClock(opts.Clock))
 		}
 		plRec := NewPreemptionLimitReconciler(
 			mgr.GetClient(),

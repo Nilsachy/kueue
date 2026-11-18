@@ -31,19 +31,20 @@ func NewManager(ctx context.Context, client client.Client, checker qcache.Status
 }
 
 func NewManagerWithBatchPeriod(ctx context.Context, client client.Client, checker qcache.StatusChecker, batchPeriod time.Duration, options ...qcache.Option) *qcache.Manager {
-	requeuer := qcache.NewRequeuer(qcache.WithBatchPeriod(batchPeriod))
-	go func() {
-		// ignore error to make linter happy.
-		_ = requeuer.Start(ctx)
-	}()
-	return qcache.NewManager(client, checker, requeuer, options...)
+	return NewManagerWithClock(ctx, client, checker, batchPeriod, clock.RealClock{}, options...)
 }
 
 // NewManagerWithClock configures both the Manager and its inadmissible Requeuer
-// with clk, setting batchPeriod to 0 so un-delayed requeue notifications do not
-// block on a frozen test clock while delayed retries fire when clk advances.
-func NewManagerWithClock(ctx context.Context, client client.Client, checker qcache.StatusChecker, clk clock.WithTickerAndDelayedExecution, options ...qcache.Option) *qcache.Manager {
-	requeuer := qcache.NewRequeuer(qcache.WithBatchPeriod(0), qcache.WithRequeuerClock(clk))
+// with the given batchPeriod and clk.
+func NewManagerWithClock(
+	ctx context.Context,
+	client client.Client,
+	checker qcache.StatusChecker,
+	batchPeriod time.Duration,
+	clk clock.WithTickerAndDelayedExecution,
+	options ...qcache.Option,
+) *qcache.Manager {
+	requeuer := qcache.NewRequeuer(qcache.WithBatchPeriod(batchPeriod), qcache.WithRequeuerClock(clk))
 	go func() {
 		// ignore error to make linter happy.
 		_ = requeuer.Start(ctx)
