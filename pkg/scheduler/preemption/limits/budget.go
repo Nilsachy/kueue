@@ -17,13 +17,13 @@ limitations under the License.
 package limits
 
 import (
-	"cmp"
+	"maps"
+	"slices"
 
 	"k8s.io/klog/v2"
 
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
-	cmputil "sigs.k8s.io/kueue/pkg/util/cmp"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
@@ -59,15 +59,26 @@ func (b *PreemptionLimitBudget) TryConsume(
 		return nil, nil, true
 	}
 	var blockingLimit *policy.BlockingPreemptionLimit
-	for limit, consumed := range consumedLimits {
+	for _, limit := range slices.Sorted(maps.Keys(consumedLimits)) {
+		consumed := consumedLimits[limit]
 		if b.remaining(limit, consumed.ScopeValue) > 0 {
 			continue
 		}
-		blockingLimit = stricterBlockingLimit(blockingLimit, &policy.BlockingPreemptionLimit{
-			Limit:   limit,
-			Scope:   b.limiter.snapshot.scope(limit),
-			RetryAt: b.limiter.snapshot.nextSlotTime(limit, consumed.ScopeValue),
-		})
+		slotTime := b.limiter.snapshot.nextSlotTime(limit, consumed.ScopeValue)
+		if slotTime == nil {
+			blockingLimit = &policy.BlockingPreemptionLimit{
+				Limit: limit,
+				Scope: b.limiter.snapshot.scope(limit),
+			}
+			break
+		}
+		if blockingLimit == nil || slotTime.After(*blockingLimit.RetryAt) {
+			blockingLimit = &policy.BlockingPreemptionLimit{
+				Limit:   limit,
+				Scope:   b.limiter.snapshot.scope(limit),
+				RetryAt: slotTime,
+			}
+		}
 	}
 	if blockingLimit != nil {
 		log := b.limiter.log.V(5)
@@ -85,32 +96,6 @@ func (b *PreemptionLimitBudget) TryConsume(
 		b.taken.add(limit, consumed.ScopeValue, 1)
 	}
 	return consumedLimits, nil, true
-}
-
-// stricterBlockingLimit returns whichever of a and b clears later on the same
-// candidate (where a nil RetryAt never clears by waiting, so it is stricter than
-// a finite RetryAt), breaking ties deterministically by Limit name.
-func stricterBlockingLimit(a, b *policy.BlockingPreemptionLimit) *policy.BlockingPreemptionLimit {
-	if a == nil {
-		return b
-	}
-	if b == nil {
-		return a
-	}
-	c := cmputil.LazyOr(
-		func() int { return cmputil.CompareBool(b.RetryAt == nil, a.RetryAt == nil) },
-		func() int {
-			if a.RetryAt == nil {
-				return 0
-			}
-			return b.RetryAt.Compare(*a.RetryAt)
-		},
-		func() int { return cmp.Compare(a.Limit, b.Limit) },
-	)
-	if c <= 0 {
-		return a
-	}
-	return b
 }
 
 // remaining returns how many more preemptions can be taken from this budget for limit and scopeValue.
