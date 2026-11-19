@@ -103,26 +103,6 @@ func TestBlockingPreemptionLimitEarlier(t *testing.T) {
 			b:    &BlockingPreemptionLimit{Limit: "z", RetryAt: &t1},
 			want: &BlockingPreemptionLimit{Limit: "z", RetryAt: &t1},
 		},
-		"equal RetryAt breaks tie by Limit name (a <= b)": {
-			a:    &BlockingPreemptionLimit{Limit: "alpha", RetryAt: &t1},
-			b:    &BlockingPreemptionLimit{Limit: "beta", RetryAt: &t1},
-			want: &BlockingPreemptionLimit{Limit: "alpha", RetryAt: &t1},
-		},
-		"equal RetryAt breaks tie by Limit name (b < a)": {
-			a:    &BlockingPreemptionLimit{Limit: "beta", RetryAt: &t1},
-			b:    &BlockingPreemptionLimit{Limit: "alpha", RetryAt: &t1},
-			want: &BlockingPreemptionLimit{Limit: "alpha", RetryAt: &t1},
-		},
-		"both nil RetryAt breaks tie by Limit name (a <= b)": {
-			a:    &BlockingPreemptionLimit{Limit: "alpha"},
-			b:    &BlockingPreemptionLimit{Limit: "beta"},
-			want: &BlockingPreemptionLimit{Limit: "alpha"},
-		},
-		"both nil RetryAt breaks tie by Limit name (b < a)": {
-			a:    &BlockingPreemptionLimit{Limit: "beta"},
-			b:    &BlockingPreemptionLimit{Limit: "alpha"},
-			want: &BlockingPreemptionLimit{Limit: "alpha"},
-		},
 	}
 
 	for name, tc := range cases {

@@ -159,33 +159,12 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 				RetryAt: new(now.Add(45 * time.Second)),
 			},
 		},
-		"multiple blocking limits with equal retry time break ties by name": {
-			preemptionLimits: []kueuealpha.PreemptionLimit{*globalOne.Obj(), *perCQ.Obj()},
-			events: EventsByLimit{
-				"global": {policy.GlobalScopeValue: {now.Add(-30 * time.Second)}},
-				"per-cq": {"preempted-cq": {now.Add(-30 * time.Second)}},
-			},
-			wantOK: false,
-			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   "global",
-				Scope:   kueuealpha.GlobalPreemptionLimitScope,
-				RetryAt: new(now.Add(30 * time.Second)),
-			},
-		},
 		"non-expiring blocking limit overrides expiring limit on the same target": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Clone().Limit(0).Obj(), *perCQ.Obj()},
 			events: EventsByLimit{
 				"per-cq": {"preempted-cq": {now.Add(-50 * time.Second)}},
 			},
 			wantOK: false,
-			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit: "global",
-				Scope: kueuealpha.GlobalPreemptionLimitScope,
-			},
-		},
-		"multiple non-expiring blocking limits break ties by name": {
-			preemptionLimits: []kueuealpha.PreemptionLimit{*perCQ.Clone().Limit(0).Obj(), *global.Clone().Limit(0).Obj()},
-			wantOK:           false,
 			wantBlocking: &policy.BlockingPreemptionLimit{
 				Limit: "global",
 				Scope: kueuealpha.GlobalPreemptionLimitScope,

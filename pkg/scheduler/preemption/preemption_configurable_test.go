@@ -1164,7 +1164,8 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 		Rule("quota-any", kueuealpha.InsufficientQuota,
 			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).Obj(),
 		).Obj()
-	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptedCQLimitScope).
+	const perCQLimitName = "per-cq"
+	perCQLimit := utiltestingalpha.MakePreemptionLimit(perCQLimitName, kueuealpha.PreemptedCQLimitScope).
 		Limit(1).LimitWindowSeconds(60).Obj()
 	clusterQueues := []*kueue.ClusterQueue{
 		utiltestingapi.MakeClusterQueue("cq-a").Cohort("cohort").
@@ -1197,10 +1198,11 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 		recordedAt   map[policy.PreemptionLimitScopeValue]time.Time
 		attempts     []searchAttempt
 		wantTargets  []string
+		wantRetryAt  *time.Time
 		wantBlocking *policy.BlockingPreemptionLimit
 	}{
-		"TakeRetryAt and TakeBlockingLimit return nil when no strategies run": {},
-		"failed candidate search records earliest retry and blocking limit and Take clears them": {
+		"TakeRetryAt return nil when no strategies run": {},
+		"failed candidate search records earliest retry and TakeRetryAt clears it": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 				"cq-b": now.Add(-20 * time.Second),
@@ -1208,13 +1210,14 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			attempts: []searchAttempt{
 				{flavor: "on-demand", strategyAccepted: []bool{true}},
 			},
+			wantRetryAt: new(now.Add(15 * time.Second)),
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   "per-cq",
+				Limit:   perCQLimitName,
 				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"TakeRetryAt and TakeBlockingLimit return earliest across multiple failed searches": {
+		"TakeRetryAt returns earliest across multiple failed searches": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 				"cq-b": now.Add(-20 * time.Second),
@@ -1223,34 +1226,36 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 				{flavor: "on-demand", strategyAccepted: []bool{true}},
 				{flavor: "spot", strategyAccepted: []bool{true}},
 			},
+			wantRetryAt: new(now.Add(15 * time.Second)),
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   "per-cq",
+				Limit:   perCQLimitName,
 				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"rejected strategy verification preserves retry and blocking limit from skipped candidates": {
+		"rejected strategy verification preserves retry from skipped candidates": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 			},
 			attempts: []searchAttempt{
 				{flavor: "on-demand", strategyAccepted: []bool{false}},
 			},
+			wantRetryAt: new(now.Add(15 * time.Second)),
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   "per-cq",
+				Limit:   perCQLimitName,
 				Scope:   kueuealpha.PreemptedCQLimitScope,
 				RetryAt: new(now.Add(15 * time.Second)),
 			},
 		},
-		"failed earlier strategy does not set retry or blocking limit when subsequent strategy succeeds": {
+		"failed earlier strategy does not set retry when subsequent strategy succeeds": {
 			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 			},
 			attempts: []searchAttempt{
 				{flavor: "on-demand", strategyAccepted: []bool{false, true}},
 			},
-			wantTargets:  []string{"default/v-b"},
-			wantBlocking: nil,
+			wantTargets: []string{"default/v-b"},
+			wantRetryAt: nil,
 		},
 	}
 
@@ -1282,7 +1287,7 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			tracker := limits.NewPreemptionLimitTracker()
 			tracker.Sync(perCQLimit)
 			for cqName, ts := range tc.recordedAt {
-				tracker.Record(ts, policy.ConsumedLimits{"per-cq": policy.NewConsumedLimit(perCQLimit, cqName)})
+				tracker.Record(ts, policy.ConsumedLimits{perCQLimitName: policy.NewConsumedLimit(perCQLimit, cqName)})
 			}
 
 			preemptor := New(cl, workload.Ordering{}, &utiltesting.EventRecorder{}, nil, false, clocktesting.NewFakeClock(now), nil, preemptexpectations.New(), nil, tracker)
@@ -1317,15 +1322,11 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			if diff := cmp.Diff(tc.wantTargets, gotTargets, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("GetTargetsWithStrategy() targets (-want,+got):\n%s", diff)
 			}
-			var wantRetryAt *time.Time
-			if tc.wantBlocking != nil {
-				wantRetryAt = tc.wantBlocking.RetryAt
-			}
-			if diff := cmp.Diff(wantRetryAt, preemptor.TakeRetryAt()); diff != "" {
+			if diff := cmp.Diff(tc.wantRetryAt, preemptor.TakeRetryAt()); diff != "" {
 				t.Errorf("TakeRetryAt() (-want,+got):\n%s", diff)
 			}
-			if secondRetry := preemptor.TakeRetryAt(); secondRetry != nil {
-				t.Errorf("Second TakeRetryAt() = %v, want nil", secondRetry)
+			if second := preemptor.TakeRetryAt(); second != nil {
+				t.Errorf("Second TakeRetryAt() = %v, want nil", second)
 			}
 			if diff := cmp.Diff(tc.wantBlocking, preemptor.TakeBlockingLimit()); diff != "" {
 				t.Errorf("TakeBlockingLimit() (-want,+got):\n%s", diff)

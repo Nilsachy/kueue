@@ -17,7 +17,6 @@ limitations under the License.
 package policy
 
 import (
-	"cmp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,7 +28,6 @@ import (
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/scheduler"
-	cmputil "sigs.k8s.io/kueue/pkg/util/cmp"
 	"sigs.k8s.io/kueue/pkg/util/logging"
 	sliceutils "sigs.k8s.io/kueue/pkg/util/slices"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -107,10 +105,10 @@ func (c ConsumedLimit) IsStaleFor(uid types.UID, minGeneration int64) bool {
 // ConsumedLimits maps each PreemptionLimit to the limit consumed by a preemption.
 type ConsumedLimits map[PreemptionLimitReference]ConsumedLimit
 
-// BlockingPreemptionLimit identifies a PreemptionLimit that prevented preempting
-// a candidate and when that candidate's exhausted limits may clear.
-// RetryAt is nil when waiting for recorded events to expire cannot unblock it
-// (e.g., spec.limit is 0, or taken preemptions alone exhaust spec.limit).
+// BlockingPreemptionLimit identifies a PreemptionLimit blocking preemption and
+// when that limit is expected to elapse. RetryAt is nil when waiting for
+// recorded events to expire cannot unblock it (e.g., spec.limit is 0, or taken
+// preemptions alone exhaust spec.limit).
 type BlockingPreemptionLimit struct {
 	Limit   PreemptionLimitReference
 	Scope   kueuealpha.PreemptionLimitScope
@@ -125,30 +123,24 @@ func (b BlockingPreemptionLimit) Message() string {
 	return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s) until %s", b.Limit, b.Scope, b.RetryAt.UTC().Format(time.RFC3339))
 }
 
-// Earlier returns whichever of b and other clears sooner, or nil if both are nil.
-// A finite RetryAt clears sooner than a nil (non-expiring) RetryAt; ties are
-// broken deterministically by Limit name.
+// Earlier returns whichever of b and other is expected to elapse sooner (keeping
+// b on ties), or nil if both are nil. A non-nil RetryAt elapses sooner than a
+// nil RetryAt.
 func (b *BlockingPreemptionLimit) Earlier(other *BlockingPreemptionLimit) *BlockingPreemptionLimit {
-	if b == nil {
+	switch {
+	case b == nil:
 		return other
-	}
-	if other == nil {
+	case other == nil:
+		return b
+	case other.RetryAt == nil:
+		return b
+	case b.RetryAt == nil:
+		return other
+	case other.RetryAt.Before(*b.RetryAt):
+		return other
+	default:
 		return b
 	}
-	c := cmputil.LazyOr(
-		func() int { return cmputil.CompareBool(b.RetryAt == nil, other.RetryAt == nil) },
-		func() int {
-			if b.RetryAt == nil {
-				return 0
-			}
-			return b.RetryAt.Compare(*other.RetryAt)
-		},
-		func() int { return cmp.Compare(b.Limit, other.Limit) },
-	)
-	if c <= 0 {
-		return b
-	}
-	return other
 }
 
 func (d *ConfigurablePreemptionReasonData) EvictionMessage(preemptor *kueue.Workload) string {

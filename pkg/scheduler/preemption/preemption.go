@@ -82,7 +82,9 @@ type Preemptor struct {
 	limitsSnapshot *limits.PreemptionLimitsSnapshot
 	// retryAt holds the earliest retry time from exhausted strategy iterations until TakeRetryAt clears it.
 	retryAt *time.Time
-	// blockingLimit holds the earliest-clearing BlockingPreemptionLimit from exhausted strategy iterations until TakeBlockingLimit clears it.
+	// blockingLimit holds information about the PreemptionLimit blocking candidate
+	// selection across exhausted strategy iterations (keeping the limit expected to
+	// unlock candidates at the earliest possible time) until TakeBlockingLimit clears it.
 	blockingLimit *policy.BlockingPreemptionLimit
 }
 
@@ -269,7 +271,7 @@ func (p *Preemptor) TakeRetryAt() *time.Time {
 	return retryAt
 }
 
-// TakeBlockingLimit returns and clears the earliest-clearing BlockingPreemptionLimit
+// TakeBlockingLimit returns and clears the recorded BlockingPreemptionLimit
 // from failed preemption attempts since the last call, or nil if none.
 func (p *Preemptor) TakeBlockingLimit() *policy.BlockingPreemptionLimit {
 	blockingLimit := p.blockingLimit

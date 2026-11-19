@@ -64,11 +64,12 @@ type PreemptionEvaluator struct {
 	preemptionLimiter *limits.PreemptionLimiter
 	// retryAt is the earliest time a skipped candidate may become eligible.
 	retryAt *time.Time
-	// blockingLimit holds the earliest-clearing BlockingPreemptionLimit across
-	// candidates skipped because of a PreemptionLimit. When a PreemptionLimit has a
-	// finite RetryAt, both retryAt and blockingLimit.RetryAt are updated (with
-	// retryAt <= blockingLimit.RetryAt once time filters also feed retryAt); when
-	// waiting alone cannot clear the limit (RetryAt == nil), only blockingLimit is set.
+	// blockingLimit holds information about the preemption limit blocking the
+	// selection of some candidates. If multiple PreemptionLimits are blocking
+	// selection, it contains the limit expected to unlock candidates at the
+	// earliest possible time. If selection is blocked and the limit is not
+	// expected to elapse at any point, RetryAt is nil; otherwise
+	// retryAt <= blockingLimit.RetryAt.
 	blockingLimit *policy.BlockingPreemptionLimit
 }
 

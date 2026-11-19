@@ -17,9 +17,6 @@ limitations under the License.
 package limits
 
 import (
-	"maps"
-	"slices"
-
 	"k8s.io/klog/v2"
 
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
@@ -59,8 +56,7 @@ func (b *PreemptionLimitBudget) TryConsume(
 		return nil, nil, true
 	}
 	var blockingLimit *policy.BlockingPreemptionLimit
-	for _, limit := range slices.Sorted(maps.Keys(consumedLimits)) {
-		consumed := consumedLimits[limit]
+	for limit, consumed := range consumedLimits {
 		if b.remaining(limit, consumed.ScopeValue) > 0 {
 			continue
 		}
@@ -70,7 +66,8 @@ func (b *PreemptionLimitBudget) TryConsume(
 				Limit: limit,
 				Scope: b.limiter.snapshot.scope(limit),
 			}
-			break
+			b.logSkipped(target, blockingLimit, consumed.ScopeValue)
+			return nil, blockingLimit, false
 		}
 		if blockingLimit == nil || slotTime.After(*blockingLimit.RetryAt) {
 			blockingLimit = &policy.BlockingPreemptionLimit{
@@ -81,21 +78,29 @@ func (b *PreemptionLimitBudget) TryConsume(
 		}
 	}
 	if blockingLimit != nil {
-		log := b.limiter.log.V(5)
-		if blockingLimit.RetryAt != nil {
-			log = log.WithValues("nextSlotTime", *blockingLimit.RetryAt)
-		}
-		log.Info("Skipping preemption candidate exceeding a PreemptionLimit",
-			"candidate", klog.KObj(target.Obj),
-			"preemptionLimit", blockingLimit.Limit,
-			"scopeValue", consumedLimits[blockingLimit.Limit].ScopeValue,
-		)
+		b.logSkipped(target, blockingLimit, consumedLimits[blockingLimit.Limit].ScopeValue)
 		return nil, blockingLimit, false
 	}
 	for limit, consumed := range consumedLimits {
 		b.taken.add(limit, consumed.ScopeValue, 1)
 	}
 	return consumedLimits, nil, true
+}
+
+func (b *PreemptionLimitBudget) logSkipped(
+	target *workload.Info,
+	blockingLimit *policy.BlockingPreemptionLimit,
+	scopeValue policy.PreemptionLimitScopeValue,
+) {
+	log := b.limiter.log.V(5)
+	if blockingLimit.RetryAt != nil {
+		log = log.WithValues("nextSlotTime", *blockingLimit.RetryAt)
+	}
+	log.Info("Skipping preemption candidate exceeding a PreemptionLimit",
+		"candidate", klog.KObj(target.Obj),
+		"preemptionLimit", blockingLimit.Limit,
+		"scopeValue", scopeValue,
+	)
 }
 
 // remaining returns how many more preemptions can be taken from this budget for limit and scopeValue.
