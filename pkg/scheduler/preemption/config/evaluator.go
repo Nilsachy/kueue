@@ -62,8 +62,7 @@ type PreemptionEvaluator struct {
 	// preemptionLimiter enforces the PreemptionLimits applying to the PreemptionConfig.
 	// It is nil when the ConfigurablePreemptionLimits feature is disabled.
 	preemptionLimiter *limits.PreemptionLimiter
-	// retryAt is the earliest time any skipped candidate may become eligible (across
-	// both PreemptionLimits with a finite RetryAt and time-based candidate filters).
+	// retryAt is the earliest time a skipped candidate may become eligible.
 	retryAt *time.Time
 	// blockingLimit holds the earliest-clearing BlockingPreemptionLimit across
 	// candidates skipped because of a PreemptionLimit. When a PreemptionLimit has a
