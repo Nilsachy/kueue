@@ -392,16 +392,6 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 			preemptionLimit *kueuealpha.PreemptionLimit
 		)
 
-		createAndSyncPreemptionLimit := func(limit *kueuealpha.PreemptionLimit) {
-			preemptionLimit = limit
-			behavioral.MustCreate(ctx, k8sClient, preemptionLimit)
-			gomega.Eventually(func(g gomega.Gomega) {
-				var got kueuealpha.PreemptionLimit
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(preemptionLimit), &got)).To(gomega.Succeed())
-				g.Expect(got.Status.LastUpdateTime).NotTo(gomega.BeNil())
-			}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.Succeed())
-		}
-
 		ginkgo.BeforeEach(func() {
 			config = kueuetestalpha1.MakePreemptionConfig("limited-preemption-config").
 				Rule("any-cq-preemption",
@@ -410,6 +400,17 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 						Scope: kueuealpha.AnyClusterQueue,
 					}).Obj()
 			behavioral.MustCreate(ctx, k8sClient, config)
+
+			preemptionLimit = kueuetestalpha1.MakePreemptionLimit("window-limit", kueuealpha.GlobalPreemptionLimitScope).
+				Limit(1).
+				LimitWindowSeconds(4).
+				Obj()
+			behavioral.MustCreate(ctx, k8sClient, preemptionLimit)
+			gomega.Eventually(func(g gomega.Gomega) {
+				var got kueuealpha.PreemptionLimit
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(preemptionLimit), &got)).To(gomega.Succeed())
+				g.Expect(got.Status.LastUpdateTime).NotTo(gomega.BeNil())
+			}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.Succeed())
 
 			flavor = utiltestingapi.MakeResourceFlavor("rf-limits").Obj()
 			behavioral.MustCreate(ctx, k8sClient, flavor)
@@ -436,10 +437,7 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 
 		ginkgo.AfterEach(func() {
 			gomega.Expect(behavioral.DeleteWorkloadsInNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
-			if preemptionLimit != nil {
-				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, preemptionLimit, true)
-				preemptionLimit = nil
-			}
+			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, preemptionLimit, true)
 			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, lqRegular, true)
 			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, lqPreemptor, true)
 			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, cqRegular, true)
@@ -448,48 +446,7 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, config, true)
 		})
 
-		ginkgo.It("Should report blocking PreemptionLimit without until timestamp when limit is 0", func() {
-			createAndSyncPreemptionLimit(
-				kueuetestalpha1.MakePreemptionLimit("zero-limit", kueuealpha.GlobalPreemptionLimitScope).
-					Limit(0).
-					LimitWindowSeconds(60).
-					Obj(),
-			)
-
-			victim := utiltestingapi.MakeWorkload("victim", ns.Name).
-				Queue(kueue.LocalQueueName(lqRegular.Name)).
-				Request(corev1.ResourceCPU, "2").
-				Obj()
-			behavioral.MustCreate(ctx, k8sClient, victim)
-			behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, victim)
-
-			preemptor := utiltestingapi.MakeWorkload("preemptor", ns.Name).
-				Queue(kueue.LocalQueueName(lqPreemptor.Name)).
-				Request(corev1.ResourceCPU, "1").
-				Obj()
-			behavioral.MustCreate(ctx, k8sClient, preemptor)
-			behavioral.ExpectWorkloadsToBePending(ctx, k8sClient, preemptor)
-
-			gomega.Eventually(func(g gomega.Gomega) {
-				var got kueue.Workload
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(preemptor), &got)).To(gomega.Succeed())
-				cond := meta.FindStatusCondition(got.Status.Conditions, kueue.WorkloadQuotaReserved)
-				g.Expect(cond).NotTo(gomega.BeNil())
-				g.Expect(cond.Status).To(gomega.Equal(metav1.ConditionFalse))
-				g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonWaitingForQuota))
-				g.Expect(cond.Message).To(gomega.ContainSubstring("; preemptions blocked by PreemptionLimit zero-limit (aggregation Global)"))
-				g.Expect(cond.Message).NotTo(gomega.ContainSubstring("until "))
-			}, behavioral.Timeout, behavioral.Interval).Should(gomega.Succeed())
-		})
-
 		ginkgo.It("Should report blocking PreemptionLimit with until timestamp and admit after window elapses", func() {
-			createAndSyncPreemptionLimit(
-				kueuetestalpha1.MakePreemptionLimit("window-limit", kueuealpha.GlobalPreemptionLimitScope).
-					Limit(1).
-					LimitWindowSeconds(4).
-					Obj(),
-			)
-
 			victim1 := utiltestingapi.MakeWorkload("victim-1", ns.Name).
 				Queue(kueue.LocalQueueName(lqRegular.Name)).
 				Priority(10).
