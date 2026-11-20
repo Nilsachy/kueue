@@ -61,6 +61,7 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 	}
 
 	ginkgo.BeforeEach(func() {
+		startManager()
 		ns = behavioral.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "configurablepreemptions-")
 	})
 
@@ -378,126 +379,6 @@ var _ = ginkgo.Describe("ConfigurablePreemptions", ginkgo.Label("feature:configu
 			behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wlC)
 			gomega.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wlB), wlB)).To(gomega.Succeed())
 			gomega.Expect(meta.IsStatusConditionTrue(wlB.Status.Conditions, kueue.WorkloadEvicted)).To(gomega.BeFalse())
-		})
-	})
-
-	ginkgo.When("PreemptionLimits are configured", func() {
-		var (
-			flavor          *kueue.ResourceFlavor
-			cqRegular       *kueue.ClusterQueue
-			cqPreemptor     *kueue.ClusterQueue
-			lqRegular       *kueue.LocalQueue
-			lqPreemptor     *kueue.LocalQueue
-			config          *kueuealpha.PreemptionConfig
-			preemptionLimit *kueuealpha.PreemptionLimit
-		)
-
-		ginkgo.BeforeEach(func() {
-			config = kueuetestalpha1.MakePreemptionConfig("limited-preemption-config").
-				Rule("any-cq-preemption",
-					kueuealpha.InsufficientQuota,
-					kueuealpha.PreemptionConfigPreemptionCandidateSelector{
-						Scope: kueuealpha.AnyClusterQueue,
-					}).Obj()
-			behavioral.MustCreate(ctx, k8sClient, config)
-
-			preemptionLimit = kueuetestalpha1.MakePreemptionLimit("window-limit", kueuealpha.GlobalPreemptionLimitScope).
-				Limit(1).
-				LimitWindowSeconds(4).
-				Obj()
-			behavioral.MustCreate(ctx, k8sClient, preemptionLimit)
-			gomega.Eventually(func(g gomega.Gomega) {
-				var got kueuealpha.PreemptionLimit
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(preemptionLimit), &got)).To(gomega.Succeed())
-				g.Expect(got.Status.LastUpdateTime).NotTo(gomega.BeNil())
-			}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.Succeed())
-
-			flavor = utiltestingapi.MakeResourceFlavor("rf-limits").Obj()
-			behavioral.MustCreate(ctx, k8sClient, flavor)
-
-			cqRegular = utiltestingapi.MakeClusterQueue("cq-limits-regular").
-				Cohort("limits-root").
-				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(flavor.Name).
-					Resource(corev1.ResourceCPU, "2").Obj()).
-				Obj()
-			behavioral.CreateClusterQueuesAndWaitForActive(ctx, k8sClient, cqRegular)
-			lqRegular = utiltestingapi.MakeLocalQueue("lq-limits-regular", ns.Name).ClusterQueue(cqRegular.Name).Obj()
-			behavioral.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lqRegular)
-
-			cqPreemptor = utiltestingapi.MakeClusterQueue("cq-limits-preemptor").
-				Cohort("limits-root").
-				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(flavor.Name).
-					Resource(corev1.ResourceCPU, "0").Obj()).
-				Annotation(kueuealpha.PreemptionConfigNameAnnotation, config.Name).
-				Obj()
-			behavioral.CreateClusterQueuesAndWaitForActive(ctx, k8sClient, cqPreemptor)
-			lqPreemptor = utiltestingapi.MakeLocalQueue("lq-limits-preemptor", ns.Name).ClusterQueue(cqPreemptor.Name).Obj()
-			behavioral.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lqPreemptor)
-		})
-
-		ginkgo.AfterEach(func() {
-			gomega.Expect(behavioral.DeleteWorkloadsInNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
-			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, preemptionLimit, true)
-			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, lqRegular, true)
-			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, lqPreemptor, true)
-			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, cqRegular, true)
-			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, cqPreemptor, true)
-			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, flavor, true)
-			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, config, true)
-		})
-
-		ginkgo.It("Should report blocking PreemptionLimit with until timestamp and admit after window elapses", func() {
-			victim1 := utiltestingapi.MakeWorkload("victim-1", ns.Name).
-				Queue(kueue.LocalQueueName(lqRegular.Name)).
-				Priority(10).
-				Request(corev1.ResourceCPU, "1").
-				Obj()
-			victim2 := utiltestingapi.MakeWorkload("victim-2", ns.Name).
-				Queue(kueue.LocalQueueName(lqRegular.Name)).
-				Priority(20).
-				Request(corev1.ResourceCPU, "1").
-				Obj()
-			behavioral.MustCreate(ctx, k8sClient, victim1)
-			behavioral.MustCreate(ctx, k8sClient, victim2)
-			behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, victim1, victim2)
-
-			preemptor1 := utiltestingapi.MakeWorkload("preemptor-1", ns.Name).
-				Queue(kueue.LocalQueueName(lqPreemptor.Name)).
-				Priority(100).
-				Request(corev1.ResourceCPU, "1").
-				Obj()
-			behavioral.MustCreate(ctx, k8sClient, preemptor1)
-
-			// victim1 has lower priority than victim2, so preemptor1 deterministically evicts victim1 first.
-			gomega.Eventually(func(g gomega.Gomega) {
-				var got kueue.Workload
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(victim1), &got)).To(gomega.Succeed())
-				g.Expect(meta.IsStatusConditionTrue(got.Status.Conditions, kueue.WorkloadEvicted)).To(gomega.BeTrue())
-			}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.Succeed())
-
-			preemptor2 := utiltestingapi.MakeWorkload("preemptor-2", ns.Name).
-				Queue(kueue.LocalQueueName(lqPreemptor.Name)).
-				Priority(50).
-				Request(corev1.ResourceCPU, "1").
-				Obj()
-			behavioral.MustCreate(ctx, k8sClient, preemptor2)
-
-			behavioral.FinishEvictionForWorkloads(ctx, k8sClient, victim1)
-			behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, preemptor1)
-
-			gomega.Eventually(func(g gomega.Gomega) {
-				var got kueue.Workload
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(preemptor2), &got)).To(gomega.Succeed())
-				cond := meta.FindStatusCondition(got.Status.Conditions, kueue.WorkloadQuotaReserved)
-				g.Expect(cond).NotTo(gomega.BeNil())
-				g.Expect(cond.Status).To(gomega.Equal(metav1.ConditionFalse))
-				g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonWaitingForQuota))
-				g.Expect(cond.Message).To(gomega.MatchRegexp(`; preemptions blocked by PreemptionLimit window-limit \(aggregation Global\) until \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`))
-			}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.Succeed())
-
-			// Once the 4s PreemptionLimit window elapses, the timed requeue wakes preemptor2 to preempt victim2.
-			behavioral.FinishEvictionForWorkloads(ctx, k8sClient, victim2)
-			behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, preemptor2)
 		})
 	})
 })

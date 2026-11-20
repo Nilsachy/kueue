@@ -24,6 +24,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -55,11 +56,12 @@ const (
 )
 
 var (
-	cfg       *rest.Config
-	k8sClient client.Client
-	ctx       context.Context
-	fwk       *framework.Framework
-	qManager  *qcache.Manager
+	cfg                    *rest.Config
+	k8sClient              client.Client
+	ctx                    context.Context
+	fwk                    *framework.Framework
+	qManager               *qcache.Manager
+	preemptionLimitTracker *limits.PreemptionLimitTracker
 )
 
 func TestConfigurablePreemptions(t *testing.T) {
@@ -68,7 +70,6 @@ func TestConfigurablePreemptions(t *testing.T) {
 
 var _ = ginkgo.BeforeSuite(func() {
 	features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.ConfigurablePreemptions, true)
-	features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.ConfigurablePreemptionLimits, true)
 	features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.TopologyAwareScheduling, true)
 	features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.PrioritizePreemptorWorkloads, true)
 
@@ -83,23 +84,35 @@ var _ = ginkgo.AfterSuite(func() {
 	fwk.Teardown()
 })
 
-var _ = ginkgo.BeforeEach(func() {
-	fwk.StartManager(ctx, cfg, managerAndSchedulerSetup())
-})
+// startManager starts the manager and scheduler for the current spec and
+// registers StopManager via DeferCleanup. It is called from spec/container
+// BeforeEach blocks rather than a suite-level BeforeEach because Ginkgo runs
+// suite-level BeforeEach before container BeforeEach blocks, so per-container
+// SetFeatureGateDuringTest(ConfigurablePreemptionLimits, ...) overrides must run
+// before SetupControllers registers controllers and allocates the tracker.
+func startManager() {
+	fwk.StartManager(ctx, cfg, managerAndSchedulerSetup(clock.RealClock{}, 100*time.Millisecond))
+	ginkgo.DeferCleanup(fwk.StopManager, ctx)
+}
 
-var _ = ginkgo.AfterEach(func() {
-	fwk.StopManager(ctx)
-})
+func startManagerWithClock(clk clock.WithTickerAndDelayedExecution) {
+	// Use batchPeriod=0 so un-delayed requeue notifications do not wait on a frozen test clock.
+	fwk.StartManager(ctx, cfg, managerAndSchedulerSetup(clk, 0))
+	ginkgo.DeferCleanup(fwk.StopManager, ctx)
+}
 
-func managerAndSchedulerSetup() framework.ManagerSetup {
+func managerAndSchedulerSetup(clk clock.WithTickerAndDelayedExecution, requeueBatchPeriod time.Duration) framework.ManagerSetup {
 	return func(ctx context.Context, mgr manager.Manager) {
 		err := indexer.Setup(ctx, mgr.GetFieldIndexer())
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 		cCache := schdcache.New(mgr.GetClient())
 		preemptionExpectations := preemptexpectations.New()
-		preemptionLimitTracker := limits.NewPreemptionLimitTracker()
-		queues := integration.NewManager(ctx, mgr.GetClient(), cCache,
+		preemptionLimitTracker = nil
+		if features.Enabled(features.ConfigurablePreemptionLimits) {
+			preemptionLimitTracker = limits.NewPreemptionLimitTracker()
+		}
+		queues := integration.NewManagerWithClock(ctx, mgr.GetClient(), cCache, requeueBatchPeriod, clk,
 			qcache.WithPreemptionExpectations(preemptionExpectations))
 		qManager = queues
 
@@ -114,8 +127,10 @@ func managerAndSchedulerSetup() framework.ManagerSetup {
 			cCache,
 			configuration,
 			core.SetupControllersOpts{
-				PreemptionExpectations: preemptionExpectations,
-				PreemptionLimitTracker: preemptionLimitTracker,
+				PreemptionExpectations:       preemptionExpectations,
+				PreemptionLimitTracker:       preemptionLimitTracker,
+				PreemptionLimitPruneInterval: 100 * time.Millisecond,
+				Clock:                        clk,
 			},
 		)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
@@ -141,6 +156,7 @@ func managerAndSchedulerSetup() framework.ManagerSetup {
 			mgr.GetEventRecorder(constants.AdmissionName),
 			scheduler.WithPreemptionExpectations(preemptionExpectations),
 			scheduler.WithPreemptionLimitTracker(preemptionLimitTracker),
+			scheduler.WithClock(ginkgo.GinkgoTB(), clk),
 		)
 		err = sched.Start(ctx)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
