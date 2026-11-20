@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -103,6 +104,44 @@ func (c ConsumedLimit) IsStaleFor(uid types.UID, minGeneration int64) bool {
 
 // ConsumedLimits maps each PreemptionLimit to the limit consumed by a preemption.
 type ConsumedLimits map[PreemptionLimitReference]ConsumedLimit
+
+// BlockingPreemptionLimit identifies a PreemptionLimit blocking preemption and
+// when that limit is expected to elapse. RetryAt is nil when waiting for
+// recorded events to expire cannot unblock it (e.g., spec.limit is 0, or already
+// selected preemption candidates alone exhaust spec.limit).
+type BlockingPreemptionLimit struct {
+	Limit   PreemptionLimitReference
+	Scope   kueuealpha.PreemptionLimitScope
+	RetryAt *time.Time
+}
+
+// Message formats the human-readable reason why preemptions were blocked by the limit.
+func (b BlockingPreemptionLimit) Message() string {
+	if b.RetryAt == nil {
+		return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s)", b.Limit, b.Scope)
+	}
+	return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s) until %s", b.Limit, b.Scope, b.RetryAt.UTC().Format(time.RFC3339))
+}
+
+// Earlier returns whichever of b and other is expected to elapse sooner (keeping
+// b on ties), or nil if both are nil. A non-nil RetryAt elapses sooner than a
+// nil RetryAt.
+func (b *BlockingPreemptionLimit) Earlier(other *BlockingPreemptionLimit) *BlockingPreemptionLimit {
+	switch {
+	case b == nil:
+		return other
+	case other == nil:
+		return b
+	case other.RetryAt == nil:
+		return b
+	case b.RetryAt == nil:
+		return other
+	case other.RetryAt.Before(*b.RetryAt):
+		return other
+	default:
+		return b
+	}
+}
 
 func (d *ConfigurablePreemptionReasonData) EvictionMessage(preemptor *kueue.Workload) string {
 	itoa := func(n *int) string { return strconv.Itoa(*n) }

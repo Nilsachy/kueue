@@ -147,7 +147,7 @@ func TestRequeueAndUpdateRetryAt(t *testing.T) {
 				status:        nominated,
 				requeueReason: tc.requeueReason,
 			}
-			e.recordAssignment(flavorassigner.Assignment{}, nil, tc.retryAt)
+			e.recordAssignment(flavorassigner.Assignment{}, nil, tc.retryAt, nil)
 			if tc.beforeRequeue != nil {
 				if err := tc.beforeRequeue(ctx, cl, wl); err != nil {
 					t.Fatalf("beforeRequeue(): %v", err)
@@ -191,12 +191,18 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 		Obj()
 
 	cases := map[string]struct {
-		spotQuota   string
-		wantRetryAt *time.Time
+		spotQuota    string
+		wantRetryAt  *time.Time
+		wantBlocking *policy.BlockingPreemptionLimit
 	}{
 		"returns retryAt when all flavors are blocked by expiring limit": {
 			spotQuota:   "0",
 			wantRetryAt: new(now.Add(10 * time.Second)),
+			wantBlocking: &policy.BlockingPreemptionLimit{
+				Limit:   "per-workload",
+				Scope:   kueuealpha.PreemptedWorkloadLimitScope,
+				RetryAt: new(now.Add(10 * time.Second)),
+			},
 		},
 		"returns nil retryAt and leaves preemptor drained when fallback flavor fits": {
 			spotQuota:   "1",
@@ -252,12 +258,18 @@ func TestGetAssignmentsRetryAt(t *testing.T) {
 
 			wlInfo := workload.NewInfo(log, incoming)
 			wlInfo.ClusterQueue = "limits-cq"
-			_, _, gotRetryAt := sched.getAssignments(ctx, wlInfo, snap)
+			_, _, gotRetryAt, gotBlocking := sched.getAssignments(ctx, wlInfo, snap)
 			if diff := cmp.Diff(tc.wantRetryAt, gotRetryAt); diff != "" {
 				t.Errorf("getAssignments retryAt (-want,+got):\n%s", diff)
 			}
+			if diff := cmp.Diff(tc.wantBlocking, gotBlocking); diff != "" {
+				t.Errorf("getAssignments blockingLimit (-want,+got):\n%s", diff)
+			}
 			if leaked := sched.preemptor.TakeRetryAt(); leaked != nil {
 				t.Errorf("preemptor.TakeRetryAt() = %v after getAssignments, want nil", leaked)
+			}
+			if leakedBlocking := sched.preemptor.TakeBlockingLimit(); leakedBlocking != nil {
+				t.Errorf("preemptor.TakeBlockingLimit() = %v after getAssignments, want nil", leakedBlocking)
 			}
 		})
 	}
@@ -339,7 +351,7 @@ func TestSchedulePreemptionRetry(t *testing.T) {
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
-						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 1 more needed, insufficient unused quota for cpu in flavor spot, 1 more needed",
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 1 more needed, insufficient unused quota for cpu in flavor spot, 1 more needed; preemptions blocked by PreemptionLimit per-workload (aggregation PreemptedWorkload) until 2026-01-01T00:00:10Z",
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{
@@ -383,9 +395,13 @@ func TestSchedulePreemptionRetry(t *testing.T) {
 			wantClusterQueueRequeueDelays: map[kueue.ClusterQueueReference]time.Duration{
 				"limits-cq": 10 * time.Second,
 			},
-			eventCmpOpts: ignoreEventMessageCmpOpts,
 			wantEvents: []utiltesting.EventRecord{
-				utiltesting.MakeEventRecord("default", "incoming", kueue.WorkloadQuotaReservedReasonWaitingForQuota, corev1.EventTypeWarning).Obj(),
+				{
+					Key:       client.ObjectKey{Namespace: "default", Name: "incoming"},
+					Reason:    kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+					EventType: corev1.EventTypeWarning,
+					Message:   "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 1 more needed, insufficient unused quota for cpu in flavor spot, 1 more needed; preemptions blocked by PreemptionLimit per-workload (aggregation PreemptedWorkload) until 2026-01-01T00:00:10Z",
+				},
 			},
 		},
 		"reduced count of partially admissible workload arms PreemptionLimit retry delay": {
@@ -444,7 +460,7 @@ func TestSchedulePreemptionRetry(t *testing.T) {
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadQuotaReservedReasonExceedsMaxQuota,
-						Message:            "couldn't assign flavors to pod set main: insufficient quota for cpu in flavor on-demand, previously considered podsets requests (0) + current podset request (4) > maximum capacity (2)",
+						Message:            "couldn't assign flavors to pod set main: insufficient quota for cpu in flavor on-demand, previously considered podsets requests (0) + current podset request (4) > maximum capacity (2); preemptions blocked by PreemptionLimit per-workload (aggregation PreemptedWorkload) until 2026-01-01T00:00:10Z",
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					Condition(metav1.Condition{

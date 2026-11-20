@@ -61,7 +61,7 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 		wantConsumed policy.ConsumedLimits
 		wantOK       bool
 		wantTaken    preemptionCounts
-		wantRetryAt  *time.Time
+		wantBlocking *policy.BlockingPreemptionLimit
 	}{
 		"target consuming no limit is allowed and takes nothing": {
 			wantOK: true,
@@ -92,11 +92,19 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			taken:            preemptionCounts{"global": {policy.GlobalScopeValue: 1}},
 			wantOK:           false,
 			wantTaken:        preemptionCounts{"global": {policy.GlobalScopeValue: 1}},
-			wantRetryAt:      new(now.Add(30 * time.Second)),
+			wantBlocking: &policy.BlockingPreemptionLimit{
+				Limit:   "global",
+				Scope:   kueuealpha.GlobalPreemptionLimitScope,
+				RetryAt: new(now.Add(30 * time.Second)),
+			},
 		},
 		"limit of 0 blocks the target": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Clone().Limit(0).Obj()},
 			wantOK:           false,
+			wantBlocking: &policy.BlockingPreemptionLimit{
+				Limit: "global",
+				Scope: kueuealpha.GlobalPreemptionLimitScope,
+			},
 		},
 		"multiple applicable limits are all consumed and taken from the budget": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Obj(), *perCQ.Obj()},
@@ -112,6 +120,10 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			taken:            preemptionCounts{"per-cq": {"preempted-cq": 1}},
 			wantOK:           false,
 			wantTaken:        preemptionCounts{"per-cq": {"preempted-cq": 1}},
+			wantBlocking: &policy.BlockingPreemptionLimit{
+				Limit: "per-cq",
+				Scope: kueuealpha.PreemptedCQLimitScope,
+			},
 		},
 		"scope values of a limit have independent budgets": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*perCQ.Obj()},
@@ -140,8 +152,12 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 				"global": {policy.GlobalScopeValue: {now.Add(-50 * time.Second)}},
 				"per-cq": {"preempted-cq": {now.Add(-15 * time.Second)}},
 			},
-			wantOK:      false,
-			wantRetryAt: new(now.Add(45 * time.Second)),
+			wantOK: false,
+			wantBlocking: &policy.BlockingPreemptionLimit{
+				Limit:   "per-cq",
+				Scope:   kueuealpha.PreemptedCQLimitScope,
+				RetryAt: new(now.Add(45 * time.Second)),
+			},
 		},
 		"non-expiring blocking limit overrides expiring limit on the same target": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Clone().Limit(0).Obj(), *perCQ.Obj()},
@@ -149,12 +165,20 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 				"per-cq": {"preempted-cq": {now.Add(-50 * time.Second)}},
 			},
 			wantOK: false,
+			wantBlocking: &policy.BlockingPreemptionLimit{
+				Limit: "global",
+				Scope: kueuealpha.GlobalPreemptionLimitScope,
+			},
 		},
 		"taken preemptions alone reaching the limit return nil retry time": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Clone().Limit(2).Obj()},
 			taken:            preemptionCounts{"global": {policy.GlobalScopeValue: 2}},
 			wantOK:           false,
 			wantTaken:        preemptionCounts{"global": {policy.GlobalScopeValue: 2}},
+			wantBlocking: &policy.BlockingPreemptionLimit{
+				Limit: "global",
+				Scope: kueuealpha.GlobalPreemptionLimitScope,
+			},
 		},
 	}
 	for name, tc := range cases {
@@ -169,7 +193,7 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 				budget.taken = tc.taken
 			}
 
-			gotConsumed, gotRetryAt, ok := budget.TryConsume(preemptor, cmp.Or(tc.target, target), "unmatchedRuleReference", preemptorCQ, targetCQ)
+			gotConsumed, gotBlocking, ok := budget.TryConsume(preemptor, cmp.Or(tc.target, target), "unmatchedRuleReference", preemptorCQ, targetCQ)
 
 			if ok != tc.wantOK {
 				t.Errorf("TryConsume() ok = %v, want %v", ok, tc.wantOK)
@@ -180,8 +204,8 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			if diff := gocmp.Diff(tc.wantTaken, budget.taken, cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Unexpected taken preemptions (-want,+got):\n%s", diff)
 			}
-			if diff := gocmp.Diff(tc.wantRetryAt, gotRetryAt); diff != "" {
-				t.Errorf("Unexpected retryAt (-want,+got):\n%s", diff)
+			if diff := gocmp.Diff(tc.wantBlocking, gotBlocking); diff != "" {
+				t.Errorf("Unexpected blocking limit (-want,+got):\n%s", diff)
 			}
 		})
 	}

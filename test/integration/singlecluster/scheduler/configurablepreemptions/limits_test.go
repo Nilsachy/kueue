@@ -17,6 +17,7 @@ limitations under the License.
 package configurablepreemptions
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
@@ -472,6 +473,18 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 
 					highBeta2 = createWorkload("high-beta-2", lqBeta.Name, 100, "1")
 					behavioral.ExpectWorkloadsToBePending(ctx, k8sClient, highBeta2)
+					gomega.Eventually(func(g gomega.Gomega) {
+						var got kueue.Workload
+						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(highBeta2), &got)).To(gomega.Succeed())
+						cond := meta.FindStatusCondition(got.Status.Conditions, kueue.WorkloadQuotaReserved)
+						g.Expect(cond).NotTo(gomega.BeNil())
+						g.Expect(cond.Status).To(gomega.Equal(metav1.ConditionFalse))
+						g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonWaitingForQuota))
+						g.Expect(cond.Message).To(gomega.ContainSubstring(
+							fmt.Sprintf("; preemptions blocked by PreemptionLimit %s (aggregation %s) until %s",
+								limit.Name, limit.Spec.Scope, fakeClock.Now().Add(limitWindowSeconds*time.Second).UTC().Format(time.RFC3339)),
+						))
+					}, behavioral.Timeout, behavioral.ShortInterval).Should(gomega.Succeed())
 					expectWorkloadsNotEvictedConsistently(lowBeta2)
 					expectPreemptionLimitCounts(limit, []kueuealpha.PreemptionLimitCount{
 						{Name: string(policy.GlobalScopeValue), Value: 2},

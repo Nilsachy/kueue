@@ -64,6 +64,13 @@ type PreemptionEvaluator struct {
 	preemptionLimiter *limits.PreemptionLimiter
 	// retryAt is the earliest time a skipped candidate may become eligible.
 	retryAt *time.Time
+	// blockingLimit holds information about the preemption limit blocking the
+	// selection of some candidates. If multiple PreemptionLimits are blocking
+	// selection, it contains the limit expected to unlock candidates at the
+	// earliest possible time. If selection is blocked and the limit is not
+	// expected to elapse at any point, RetryAt is nil; otherwise
+	// retryAt <= blockingLimit.RetryAt.
+	blockingLimit *policy.BlockingPreemptionLimit
 }
 
 // NewPreemptionEvaluator returns the PreemptionEvaluator of the given preemptor for the
@@ -137,6 +144,15 @@ func (p *PreemptionEvaluator) RetryAt() *time.Time {
 		return nil
 	}
 	return p.retryAt
+}
+
+// BlockingLimit returns the recorded BlockingPreemptionLimit, or nil if no
+// candidate was skipped because of a PreemptionLimit.
+func (p *PreemptionEvaluator) BlockingLimit() *policy.BlockingPreemptionLimit {
+	if p == nil {
+		return nil
+	}
+	return p.blockingLimit
 }
 
 // FindCandidates evaluates candidates across applicable PreemptionConfig
@@ -218,9 +234,10 @@ func (p *PreemptionEvaluator) iterateOverCandidates(
 	for _, candidate := range candidates {
 		targetCQ := snapshot.ClusterQueue(candidate.WlInfo.ClusterQueue)
 		for ruleReference, selectorIndexes := range candidate.RuleNameToSelectorIndexes.InOrder {
-			consumedLimits, retryAt, withinLimits := budget.TryConsume(p.preemptor, candidate.WlInfo, ruleReference, preemptorCQ, targetCQ)
+			consumedLimits, blockingLimit, withinLimits := budget.TryConsume(p.preemptor, candidate.WlInfo, ruleReference, preemptorCQ, targetCQ)
 			if !withinLimits {
-				p.retryAt = cmputil.EarliestTime(p.retryAt, retryAt)
+				p.retryAt = cmputil.EarliestTime(p.retryAt, blockingLimit.RetryAt)
+				p.blockingLimit = p.blockingLimit.Earlier(blockingLimit)
 				continue
 			}
 			if !yield(&policy.Target{

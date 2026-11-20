@@ -54,6 +54,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/fairsharing"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/limits"
+	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
 	afs "sigs.k8s.io/kueue/pkg/util/admissionfairsharing"
 	"sigs.k8s.io/kueue/pkg/util/api"
 	"sigs.k8s.io/kueue/pkg/util/expectations"
@@ -300,14 +301,26 @@ func (e *entry) markAssumed() {
 	e.status = assumed
 }
 
-// recordAssignment stores a flavor assignment, its preemption targets, and
-// any retry timestamp. FlavorScanState aliases the stored assignment's
-// FlavorScanState so it tracks any later mutation.
-func (e *entry) recordAssignment(a flavorassigner.Assignment, targets []*preemption.Target, retryAt *time.Time) {
+// recordAssignment stores a flavor assignment, its preemption targets, and any
+// retry timestamp, appending any blocking PreemptionLimit to inadmissibleMsg.
+// FlavorScanState aliases the stored assignment's FlavorScanState so it tracks
+// any later mutation.
+func (e *entry) recordAssignment(
+	a flavorassigner.Assignment,
+	targets []*preemption.Target,
+	retryAt *time.Time,
+	blockingLimit *policy.BlockingPreemptionLimit,
+) {
 	e.assignment = a
 	e.preemptionTargets = targets
 	e.retryAt = retryAt
 	e.inadmissibleMsg = e.assignment.Message()
+	if blockingLimit != nil {
+		if e.inadmissibleMsg != "" {
+			e.inadmissibleMsg += "; "
+		}
+		e.inadmissibleMsg += blockingLimit.Message()
+	}
 	e.FlavorScanState = &e.assignment.FlavorScanState
 }
 
@@ -851,8 +864,8 @@ func (s *Scheduler) nominateWorkload(ctx context.Context, log logr.Logger, h qca
 			}
 		}
 	} else {
-		assignment, targets, retryAt := s.getAssignments(ctx, &e.Info, snap)
-		e.recordAssignment(assignment, targets, retryAt)
+		assignment, targets, retryAt, blockingLimit := s.getAssignments(ctx, &e.Info, snap)
+		e.recordAssignment(assignment, targets, retryAt, blockingLimit)
 		return e, true
 	}
 	return e, false
@@ -903,8 +916,8 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 	if !needsLimitsRecompute {
 		e.NominationMapping = e.readResourceToFlavorMapping()
 	}
-	newAssignment, newTargets, newRetryAt := s.getAssignments(ctx, &e.Info, snapshot)
-	e.recordAssignment(newAssignment, newTargets, newRetryAt)
+	newAssignment, newTargets, newRetryAt, newBlockingLimit := s.getAssignments(ctx, &e.Info, snapshot)
+	e.recordAssignment(newAssignment, newTargets, newRetryAt, newBlockingLimit)
 	if needsOverlapRecompute {
 		if revertRemoval != nil {
 			revertRemoval()
@@ -1586,6 +1599,7 @@ func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap 
 	fullAssignment flavorassigner.Assignment,
 	targets []*preemption.Target,
 	retryAt *time.Time,
+	blockingLimit *policy.BlockingPreemptionLimit,
 ) {
 	log := log.FromContext(ctx)
 	cq := snap.ClusterQueue(wl.ClusterQueue)
@@ -1631,11 +1645,12 @@ func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap 
 		}
 	}
 
-	// Always drain so a skipped flavor's retry timestamp doesn't leak across calls.
+	// Always drain so a skipped flavor's retry state doesn't leak across calls.
 	retryAt = s.preemptor.TakeRetryAt()
+	blockingLimit = s.preemptor.TakeBlockingLimit()
 	fullAssignment, targets = *assignmentPlan.Assignment, assignmentPlan.PreemptionTargets
 	if assignmentPlan.CanFit() {
-		retryAt = nil
+		retryAt, blockingLimit = nil, nil
 		targets = append(slicePreemptTargets, targets...)
 	}
 	return
