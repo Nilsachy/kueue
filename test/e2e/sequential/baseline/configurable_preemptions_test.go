@@ -238,7 +238,7 @@ var _ = ginkgo.Describe("Configurable Preemption", ginkgo.Label("feature:configu
 					var gotMid1 batchv1.Job
 					g.Expect(k8sClient.Get(ctx, midJob1Key, &gotMid1)).To(gomega.Succeed())
 					g.Expect(gotMid1.Spec.Suspend).To(gomega.Equal(new(false)))
-				}, behavioral.LongConsistentDuration, behavioral.Interval).Should(gomega.Succeed())
+				}, behavioral.ConsistentDuration, behavioral.ShortInterval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("Increasing the limit and checking recorded counts in status", func() {
