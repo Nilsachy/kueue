@@ -107,8 +107,8 @@ type ConsumedLimits map[PreemptionLimitReference]ConsumedLimit
 
 // BlockingPreemptionLimit identifies a PreemptionLimit blocking preemption and
 // when that limit is expected to elapse. RetryAt is nil when waiting for
-// recorded events to expire cannot unblock it (e.g., spec.limit is 0, or taken
-// preemptions alone exhaust spec.limit).
+// recorded events to expire cannot unblock it (e.g., spec.limit is 0, or already
+// selected preemption candidates alone exhaust spec.limit).
 type BlockingPreemptionLimit struct {
 	Limit   PreemptionLimitReference
 	Scope   kueuealpha.PreemptionLimitScope
