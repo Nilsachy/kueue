@@ -112,6 +112,11 @@ func (ls limitState) isCompatibleWith(limit *kueuealpha.PreemptionLimit) bool {
 		utilslices.CmpNoOrder(ls.limit.Spec.RuleNames, limit.Spec.RuleNames)
 }
 
+func (ls limitState) isLimitRelaxed(limit *kueuealpha.PreemptionLimit) bool {
+	return limit.Spec.Limit > ls.limit.Spec.Limit ||
+		limit.Spec.LimitWindowSeconds < ls.limit.Spec.LimitWindowSeconds
+}
+
 // counts returns the number of events within the window (windowStart, now] of
 // the tracked PreemptionLimit, by scope value. Scope values with 0 events are
 // omitted.
@@ -208,17 +213,26 @@ func (t *PreemptionLimitTracker) Counts(now time.Time, limit policy.PreemptionLi
 //     the last reset generation;
 //   - limit or window change only: updates the stored limit while preserving
 //     recorded events and the last reset generation.
-func (t *PreemptionLimitTracker) Sync(limit *kueuealpha.PreemptionLimit) {
+//
+// Sync returns true when existing limit configuration was updated in a way
+// which required to count limits from the clear state or it allows now to
+// potentially fit more workloads.
+func (t *PreemptionLimitTracker) Sync(limit *kueuealpha.PreemptionLimit) bool {
 	ref := policy.PreemptionLimitReference(limit.Name)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	ls, found := t.limits[ref]
 	if !found || !ls.isCompatibleWith(limit) {
 		t.limits[ref] = newLimitState(limit)
-		return
+		return found
 	}
+
+	limitRelaxed := ls.isLimitRelaxed(limit)
+
 	ls.limit = trackedCopy(limit)
 	t.limits[ref] = ls
+
+	return limitRelaxed
 }
 
 // Prune drops recorded events of limit that are older than its window ending at
@@ -242,8 +256,15 @@ func (t *PreemptionLimitTracker) Prune(now time.Time, limit policy.PreemptionLim
 }
 
 // Forget stops tracking limit, dropping all its events.
-func (t *PreemptionLimitTracker) Forget(limit policy.PreemptionLimitReference) {
+// Returns true if limit was present and got successfully removed.
+func (t *PreemptionLimitTracker) Forget(limit policy.PreemptionLimitReference) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.limits, limit)
+
+	_, found := t.limits[limit]
+	if found {
+		delete(t.limits, limit)
+	}
+
+	return found
 }

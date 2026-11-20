@@ -350,15 +350,18 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 	cases := map[string]struct {
 		initialLimits trackedLimits
 		// synced, if set, is passed to Sync instead of limit.
-		synced *kueuealpha.PreemptionLimit
-		want   trackedLimits
+		synced     *kueuealpha.PreemptionLimit
+		want       trackedLimits
+		wantResult bool
 	}{
 		"untracked limit starts being tracked": {
-			want: tracked(trackedLimit(limit, nil)),
+			want:       tracked(trackedLimit(limit, nil)),
+			wantResult: false,
 		},
 		"untracked limit starts being tracked with its selectors": {
-			synced: allSelectors,
-			want:   tracked(trackedLimit(allSelectors, nil)),
+			synced:     allSelectors,
+			want:       tracked(trackedLimit(allSelectors, nil)),
+			wantResult: false,
 		},
 		"other limits are untouched": {
 			initialLimits: tracked(
@@ -370,71 +373,109 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 				withResetGeneration(trackedLimit(limitAndWindowIncreased, ScopeEvents{"cq-a": {now}}), 1),
 				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}}),
 			),
+			wantResult: true,
+		},
+		"limit increase updates the limit, and keeps the events and the reset generation": {
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {expired, now}})),
+			synced:        limitBase.Clone().Generation(2).Limit(10).Obj(),
+			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).Limit(10).Obj(), ScopeEvents{"cq-a": {expired, now}}), 1)),
+			wantResult:    true,
+		},
+		"limit decrease updates the limit, and keeps the events and the reset generation": {
+			initialLimits: tracked(trackedLimit(limitBase.Clone().Limit(10).Obj(), ScopeEvents{"cq-a": {expired, now}})),
+			synced:        limitBase.Clone().Generation(2).Limit(5).Obj(),
+			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).Limit(5).Obj(), ScopeEvents{"cq-a": {expired, now}}), 1)),
+			wantResult:    false,
 		},
 		"limit and window increase update the limit, and keep the events and the reset generation": {
 			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {expired, now}})),
 			synced:        limitAndWindowIncreased,
 			// The expired event is kept because the limit and window increased, and the reset generation is updated to the new limit's generation.
-			want: tracked(withResetGeneration(trackedLimit(limitAndWindowIncreased, ScopeEvents{"cq-a": {expired, now}}), 1)),
+			want:       tracked(withResetGeneration(trackedLimit(limitAndWindowIncreased, ScopeEvents{"cq-a": {expired, now}}), 1)),
+			wantResult: true,
+		},
+		"limit and window decrease update the limit, and keep the events and the reset generation": {
+			initialLimits: tracked(trackedLimit(limitBase.Clone().Limit(10).Obj(), ScopeEvents{"cq-a": {expired, now}})),
+			synced:        limitBase.Clone().Generation(2).Limit(5).LimitWindowSeconds(10).Obj(),
+			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).Limit(5).LimitWindowSeconds(10).Obj(), ScopeEvents{"cq-a": {expired, now}}), 1)),
+			wantResult:    true,
+		},
+		"window increase updates the limit, and keeps the events and the reset generation": {
+			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {expired, now}})),
+			synced:        limitBase.Clone().Generation(2).LimitWindowSeconds(windowSeconds + 1).Obj(),
+			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).LimitWindowSeconds(windowSeconds+1).Obj(), ScopeEvents{"cq-a": {expired, now}}), 1)),
+			wantResult:    false,
 		},
 		"window decrease updates the limit, and keeps the events and the reset generation": {
 			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {expired, now}})),
 			synced:        windowHalved,
 			want:          tracked(withResetGeneration(trackedLimit(windowHalved, ScopeEvents{"cq-a": {expired, now}}), 1)),
+			wantResult:    true,
 		},
 		"unchanged selectors keep the events": {
 			initialLimits: tracked(trackedLimit(allSelectors, ScopeEvents{"cq-a": {now}})),
 			synced:        allSelectors,
 			want:          tracked(trackedLimit(allSelectors, ScopeEvents{"cq-a": {now}})),
+			wantResult:    false,
 		},
 		"limit recreated with the same name resets the events": {
 			initialLimits: tracked(trackedLimit(recreatedLimit, ScopeEvents{"cq-a": {now}})),
 			want:          tracked(trackedLimit(limit, nil)),
+			wantResult:    true,
 		},
 		"scope change resets the events and updates the reset generation": {
 			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {now}})),
 			synced:        rescoped,
 			want:          tracked(trackedLimit(rescoped, nil)),
+			wantResult:    true,
 		},
 		"config selector change resets the events": {
 			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {now}})),
 			synced:        limitBase.Clone().Generation(2).ConfigSelector(selector("tier", "gold")).Obj(),
 			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).ConfigSelector(selector("tier", "gold")).Obj(), nil)),
+			wantResult:    true,
 		},
 		"preemptor ClusterQueue selector change resets the events": {
 			initialLimits: tracked(trackedLimit(limitBase.Clone().PreemptorClusterQueueSelector(selector("side", "preemptor")).Obj(), ScopeEvents{"cq-a": {now}})),
 			synced:        limitBase.Clone().Generation(2).PreemptorClusterQueueSelector(selector("side", "other")).Obj(),
 			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).PreemptorClusterQueueSelector(selector("side", "other")).Obj(), nil)),
+			wantResult:    true,
 		},
 		"preempted ClusterQueue selector change resets the events": {
 			initialLimits: tracked(trackedLimit(limitBase.Clone().PreemptedClusterQueueSelector(selector("side", "preempted")).Obj(), ScopeEvents{"cq-a": {now}})),
 			synced:        limitBase.Clone().Generation(2).Obj(),
 			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).Obj(), nil)),
+			wantResult:    true,
 		},
 		"should reset events when first ruleName is added": {
 			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {now}})),
 			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-1").Obj(),
 			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-1").Obj(), nil)),
+			wantResult:    true,
 		},
 		"should reset events when ruleName is added": {
 			initialLimits: tracked(trackedLimit(limitBase.Clone().RuleNames("test-rule-1").Obj(), ScopeEvents{"cq-a": {now}})),
 			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-1", "test-rule-2").Obj(),
 			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-1", "test-rule-2").Obj(), nil)),
+			wantResult:    true,
 		},
 		"should reset events when one of the ruleNames is removed": {
 			initialLimits: tracked(trackedLimit(limitBase.Clone().RuleNames("test-rule-1", "test-rule-2").Obj(), ScopeEvents{"cq-a": {now}})),
 			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-1").Obj(),
 			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-1").Obj(), nil)),
+			wantResult:    true,
 		},
 		"should keep events when ruleNames are in different order": {
 			initialLimits: tracked(trackedLimit(limitBase.Clone().RuleNames("test-rule-1", "test-rule-2").Obj(), ScopeEvents{"cq-a": {now}})),
 			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-2", "test-rule-1").Obj(),
 			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-2", "test-rule-1").Obj(), ScopeEvents{"cq-a": {now}}), 1)),
+			wantResult:    false,
 		},
 		"should reset events when ruleNames entry got updated": {
 			initialLimits: tracked(trackedLimit(limitBase.Clone().RuleNames("test-rule-1").Obj(), ScopeEvents{"cq-a": {now}})),
 			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-2").Obj(),
 			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-2").Obj(), nil)),
+			wantResult:    true,
 		},
 	}
 	for name, tc := range cases {
@@ -447,7 +488,10 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 			if tc.synced != nil {
 				synced = tc.synced
 			}
-			tracker.Sync(synced)
+			gotResult := tracker.Sync(synced)
+			if diff := cmp.Diff(tc.wantResult, gotResult); diff != "" {
+				t.Errorf("Unexpected Sync return value (-want,+got):\n%s", diff)
+			}
 			if diff := cmp.Diff(tc.want, tracker.limits, cmpTrackedLimits...); diff != "" {
 				t.Errorf("Unexpected tracked limits (-want,+got):\n%s", diff)
 			}
@@ -581,26 +625,32 @@ func TestPreemptionLimitTrackerForget(t *testing.T) {
 	cases := map[string]struct {
 		initialLimits trackedLimits
 		want          trackedLimits
+		wantResult    bool
 	}{
 		"only the given limit is forgotten": {
 			initialLimits: tracked(
 				trackedLimit(forgottenLimit, ScopeEvents{"cq-a": {now}, "cq-b": {now}}),
 				trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}}),
 			),
-			want: tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}})),
+			want:       tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}})),
+			wantResult: true,
 		},
 		"unknown limit is a no-op": {
 			initialLimits: tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}})),
 			want:          tracked(trackedLimit(otherLimit, ScopeEvents{policy.GlobalScopeValue: {now}})),
+			wantResult:    false,
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			tracker := NewPreemptionLimitTracker()
 			tracker.limits = tc.initialLimits
-			tracker.Forget(policy.PreemptionLimitReference(forgottenLimit.Name))
+			gotResult := tracker.Forget(policy.PreemptionLimitReference(forgottenLimit.Name))
 			if diff := cmp.Diff(tc.want, tracker.limits, cmpTrackedLimits...); diff != "" {
 				t.Errorf("Unexpected tracked limits (-want,+got):\n%s", diff)
+			}
+			if diff := cmp.Diff(tc.wantResult, gotResult); diff != "" {
+				t.Errorf("Unexpected result returned (-want,+got):\n%s", diff)
 			}
 		})
 	}

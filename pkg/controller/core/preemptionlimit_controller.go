@@ -25,6 +25,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -34,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
+	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/limits"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
@@ -52,6 +54,7 @@ type PreemptionLimitReconciler struct {
 	tracker       *limits.PreemptionLimitTracker
 	clock         clock.Clock
 	roleTracker   *roletracker.RoleTracker
+	manager       *qcache.Manager
 	pruneInterval time.Duration
 }
 
@@ -79,6 +82,7 @@ func NewPreemptionLimitReconciler(
 	client client.Client,
 	tracker *limits.PreemptionLimitTracker,
 	roleTracker *roletracker.RoleTracker,
+	manager *qcache.Manager,
 	opts ...PreemptionLimitReconcilerOption,
 ) *PreemptionLimitReconciler {
 	r := &PreemptionLimitReconciler{
@@ -86,6 +90,7 @@ func NewPreemptionLimitReconciler(
 		tracker:       tracker,
 		clock:         realClock,
 		roleTracker:   roleTracker,
+		manager:       manager,
 		pruneInterval: preemptionLimitPruneInterval,
 	}
 	for _, opt := range opts {
@@ -116,14 +121,20 @@ func (r *PreemptionLimitReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if apierrors.IsNotFound(err) {
 			// Preemptions picked before the deletion but recorded after it are
 			// dropped by Record, as the PreemptionLimit is no longer tracked.
-			ctrl.LoggerFrom(ctx).V(2).Info("PreemptionLimit is deleted, forgetting its preemption events")
-			r.tracker.Forget(policy.PreemptionLimitReference(req.Name))
+			removed := r.tracker.Forget(policy.PreemptionLimitReference(req.Name))
+
+			if removed {
+				ctrl.LoggerFrom(ctx).V(2).Info("PreemptionLimit is deleted, forgetting its preemption events")
+				qcache.NotifyRetryInadmissible(r.manager, sets.New(r.manager.GetClusterQueueNames()...))
+			}
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	now := r.clock.Now()
-	r.tracker.Sync(&limit)
+	if r.tracker.Sync(&limit) {
+		qcache.NotifyRetryInadmissible(r.manager, sets.New(r.manager.GetClusterQueueNames()...))
+	}
 	r.tracker.Prune(now, policy.PreemptionLimitReference(limit.Name))
 
 	limit.Status = r.preemptionLimitStatus(now, &limit)

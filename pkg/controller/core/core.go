@@ -176,6 +176,7 @@ func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.
 			mgr.GetClient(),
 			opts.PreemptionLimitTracker,
 			opts.RoleTracker,
+			qManager,
 			plOpts...,
 		)
 		if err := plRec.SetupWithManager(mgr); err != nil {
