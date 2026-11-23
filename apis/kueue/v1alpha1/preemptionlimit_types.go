@@ -100,11 +100,11 @@ type PreemptionLimitSpec struct {
 	// +optional
 	PreemptorClusterQueueSelector *metav1.LabelSelector `json:"preemptorClusterQueueSelector,omitempty"`
 
-	// preemptedClusterQueueSelector selects ClusterQueues of preempted workloads to which this limit applies.
-	// If not set, this limit applies to preempted workloads from all ClusterQueues.
+	// preempteeClusterQueueSelector selects ClusterQueues of preemptee workloads to which this limit applies.
+	// If not set, this limit applies to preemptee workloads from all ClusterQueues.
 	//
 	// +optional
-	PreemptedClusterQueueSelector *metav1.LabelSelector `json:"preemptedClusterQueueSelector,omitempty"`
+	PreempteeClusterQueueSelector *metav1.LabelSelector `json:"preempteeClusterQueueSelector,omitempty"`
 
 	// ruleNames restricts the limit to specific rule names within matching PreemptionConfigs.
 	// Preemption rules are evaluated based on trigger type (Always, InsufficientQuota,
