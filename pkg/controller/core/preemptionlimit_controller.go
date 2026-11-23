@@ -109,7 +109,7 @@ func NewPreemptionLimitReconciler(
 //   - starts tracking a new PreemptionLimit, as preemptions are only recorded
 //     for tracked ones;
 //   - resets recorded events for a PreemptionLimit that was recreated or whose
-//     scope or selectors changed, as past events no longer count toward it;
+//     aggregation or selectors changed, as past events no longer count toward it;
 //   - otherwise keeps recorded events (e.g. on a limit or window change).
 //
 // It then prunes events that fell out of the window, and updates the status
@@ -157,12 +157,12 @@ func (r *PreemptionLimitReconciler) preemptionLimitStatus(now time.Time, limit *
 	}
 
 	status.Counts = make([]kueuealpha.PreemptionLimitCount, 0, len(counts))
-	for scope, count := range counts {
+	for aggregationKey, count := range counts {
 		status.Counts = append(status.Counts, kueuealpha.PreemptionLimitCount{
 			// No need to additionally validate name length because it is created from
 			// existing validated values and maxLength is calculated as combination of
 			// existing name length constraints.
-			Name:  string(scope),
+			Name:  string(aggregationKey),
 			Value: count,
 		})
 	}

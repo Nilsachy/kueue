@@ -69,30 +69,30 @@ type PreemptionConfigRuleReference string
 // PreemptionLimitReference is a dedicated type to reference PreemptionLimit
 type PreemptionLimitReference string
 
-// PreemptionLimitScopeValue identifies a scoped entity within a PreemptionLimit
+// PreemptionLimitAggregationKey identifies an aggregation unit within a PreemptionLimit
 // (e.g. "Global", a ClusterQueue name, or "<namespace>/<workload-name>").
-type PreemptionLimitScopeValue string
+type PreemptionLimitAggregationKey string
 
-// GlobalScopeValue is the scope value for a PreemptionLimit with GlobalPreemptionLimitScope.
-const GlobalScopeValue = PreemptionLimitScopeValue(kueuealpha.GlobalPreemptionLimitScope)
+// GlobalAggregationKey is the aggregation key for a PreemptionLimit with GlobalLimitAggregation.
+const GlobalAggregationKey = PreemptionLimitAggregationKey(kueuealpha.GlobalLimitAggregation)
 
-// PreemptionLimitScopeCounts maps each scope value of a single PreemptionLimit
+// PreemptionLimitAggregationCounts maps each aggregation key of a single PreemptionLimit
 // to its number of preemptions.
-type PreemptionLimitScopeCounts = map[PreemptionLimitScopeValue]int32
+type PreemptionLimitAggregationCounts = map[PreemptionLimitAggregationKey]int32
 
-// ConsumedLimit is the scope value of a PreemptionLimit consumed by a
+// ConsumedLimit is the aggregation key of a PreemptionLimit consumed by a
 // preemption.
 type ConsumedLimit struct {
-	ScopeValue PreemptionLimitScopeValue
+	AggregationKey PreemptionLimitAggregationKey
 	// uid and generation identify the version of the PreemptionLimit
-	// ScopeValue was resolved against (see IsStaleFor).
+	// AggregationKey was resolved against (see IsStaleFor).
 	uid        types.UID
 	generation int64
 }
 
-// NewConsumedLimit returns the scopeValue of limit consumed by a preemption.
-func NewConsumedLimit(limit *kueuealpha.PreemptionLimit, scopeValue PreemptionLimitScopeValue) ConsumedLimit {
-	return ConsumedLimit{ScopeValue: scopeValue, uid: limit.UID, generation: limit.Generation}
+// NewConsumedLimit returns the aggregationKey of limit consumed by a preemption.
+func NewConsumedLimit(limit *kueuealpha.PreemptionLimit, aggregationKey PreemptionLimitAggregationKey) ConsumedLimit {
+	return ConsumedLimit{AggregationKey: aggregationKey, uid: limit.UID, generation: limit.Generation}
 }
 
 // IsStaleFor reports whether c was resolved against another PreemptionLimit
@@ -110,17 +110,17 @@ type ConsumedLimits map[PreemptionLimitReference]ConsumedLimit
 // recorded events to expire cannot unblock it (e.g., spec.limit is 0, or already
 // selected preemption candidates alone exhaust spec.limit).
 type BlockingPreemptionLimit struct {
-	Limit   PreemptionLimitReference
-	Scope   kueuealpha.PreemptionLimitScope
-	RetryAt *time.Time
+	Limit       PreemptionLimitReference
+	Aggregation kueuealpha.PreemptionLimitAggregation
+	RetryAt     *time.Time
 }
 
 // Message formats the human-readable reason why preemptions were blocked by the limit.
 func (b BlockingPreemptionLimit) Message() string {
 	if b.RetryAt == nil {
-		return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s)", b.Limit, b.Scope)
+		return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s)", b.Limit, b.Aggregation)
 	}
-	return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s) until %s", b.Limit, b.Scope, b.RetryAt.UTC().Format(time.RFC3339))
+	return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s) until %s", b.Limit, b.Aggregation, b.RetryAt.UTC().Format(time.RFC3339))
 }
 
 // Earlier returns whichever of b and other is expected to elapse sooner (keeping

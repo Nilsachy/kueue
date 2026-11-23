@@ -49,13 +49,13 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 	lastUpdateTime := new(metav1.NewTime(now))
 	errTest := errors.New("test error")
 	allClusterQueues := sets.New[kueue.ClusterQueueReference]("cq-a", "cq-b", "cq-c", "cq-d")
-	limitBase := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.PreemptorCQLimitScope).Generation(1).Limit(10).LimitWindowSeconds(60)
+	limitBase := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.ByPreemptorCQLimitAggregation).Generation(1).Limit(10).LimitWindowSeconds(60)
 	limit := limitBase.Clone().Obj()
-	otherLimit := utiltestingalpha.MakePreemptionLimit("other-limit", kueuealpha.GlobalPreemptionLimitScope).Generation(1).LimitWindowSeconds(60).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("other-limit", kueuealpha.GlobalLimitAggregation).Generation(1).LimitWindowSeconds(60).Obj()
 	// recorded holds the preemptions of "limit" recorded before it is
 	// reconciled, by timestamp.
 	type recorded map[time.Time]policy.ConsumedLimits
-	limitConsumed := func(v policy.PreemptionLimitScopeValue) policy.ConsumedLimits {
+	limitConsumed := func(v policy.PreemptionLimitAggregationKey) policy.ConsumedLimits {
 		return policy.ConsumedLimits{"limit": policy.NewConsumedLimit(limit, v)}
 	}
 	seeded := recorded{
@@ -76,11 +76,11 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 	overMaxPreemptions := make(recorded, preemptionLimitCountMaxItems+2)
 	overMaxPreemptions[now] = limitConsumed("high")
 	overMaxPreemptions[now.Add(-time.Millisecond)] = limitConsumed("high")
-	overMaxCounts := policy.PreemptionLimitScopeCounts{"high": 2}
+	overMaxCounts := policy.PreemptionLimitAggregationCounts{"high": 2}
 	for i := range preemptionLimitCountMaxItems {
-		scopeValue := policy.PreemptionLimitScopeValue(fmt.Sprintf("cq-%04d", i))
-		overMaxPreemptions[now.Add(-time.Duration(i+2)*time.Millisecond)] = limitConsumed(scopeValue)
-		overMaxCounts[scopeValue] = 1
+		aggregationKey := policy.PreemptionLimitAggregationKey(fmt.Sprintf("cq-%04d", i))
+		overMaxPreemptions[now.Add(-time.Duration(i+2)*time.Millisecond)] = limitConsumed(aggregationKey)
+		overMaxCounts[aggregationKey] = 1
 	}
 	wantTopCounts := make([]kueuealpha.PreemptionLimitCount, 0, preemptionLimitCountMaxItems)
 	wantTopCounts = append(wantTopCounts, kueuealpha.PreemptionLimitCount{Name: "high", Value: 2})
@@ -100,7 +100,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 		wantResult  reconcile.Result
 		wantErr     error
 		// wantCounts are the preemptions within the window of "limit".
-		wantCounts policy.PreemptionLimitScopeCounts
+		wantCounts policy.PreemptionLimitAggregationCounts
 		// wantLimitStatus, if set, is the status of "limit" after the reconcile.
 		wantLimitStatus           *kueuealpha.PreemptionLimitStatus
 		wantRequeuedClusterQueues *sets.Set[kueue.ClusterQueueReference]
@@ -114,13 +114,13 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			recorded:   seeded,
 			opts:       []PreemptionLimitReconcilerOption{WithPreemptionLimitPruneInterval(100 * time.Millisecond)},
 			wantResult: reconcile.Result{RequeueAfter: 100 * time.Millisecond},
-			wantCounts: policy.PreemptionLimitScopeCounts{"cq-a": 1, "cq-b": 1},
+			wantCounts: policy.PreemptionLimitAggregationCounts{"cq-a": 1, "cq-b": 1},
 		},
 		"unchanged limit keeps its events and reports them in its status": {
 			limit:      limit,
 			recorded:   seeded,
 			wantResult: reconcile.Result{RequeueAfter: preemptionLimitPruneInterval},
-			wantCounts: policy.PreemptionLimitScopeCounts{"cq-a": 1, "cq-b": 1},
+			wantCounts: policy.PreemptionLimitAggregationCounts{"cq-a": 1, "cq-b": 1},
 			wantLimitStatus: &kueuealpha.PreemptionLimitStatus{
 				LastUpdateTime: lastUpdateTime,
 				Counts: []kueuealpha.PreemptionLimitCount{
@@ -134,7 +134,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			limit:      limitBase.Clone().Generation(2).Limit(20).LimitWindowSeconds(2 * 3600).Obj(),
 			recorded:   seeded,
 			wantResult: reconcile.Result{RequeueAfter: preemptionLimitPruneInterval},
-			wantCounts: policy.PreemptionLimitScopeCounts{"cq-a": 2, "cq-b": 1},
+			wantCounts: policy.PreemptionLimitAggregationCounts{"cq-a": 2, "cq-b": 1},
 			wantLimitStatus: &kueuealpha.PreemptionLimitStatus{
 				LastUpdateTime: lastUpdateTime,
 				Counts: []kueuealpha.PreemptionLimitCount{
@@ -148,7 +148,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			limit:      limitBase.Clone().Generation(2).Limit(5).Obj(),
 			recorded:   seeded,
 			wantResult: reconcile.Result{RequeueAfter: preemptionLimitPruneInterval},
-			wantCounts: policy.PreemptionLimitScopeCounts{"cq-a": 1, "cq-b": 1},
+			wantCounts: policy.PreemptionLimitAggregationCounts{"cq-a": 1, "cq-b": 1},
 			wantLimitStatus: &kueuealpha.PreemptionLimitStatus{
 				LastUpdateTime: lastUpdateTime,
 				Counts: []kueuealpha.PreemptionLimitCount{
@@ -158,8 +158,8 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			},
 			wantRequeuedClusterQueues: new(sets.New[kueue.ClusterQueueReference]()),
 		},
-		"scope change resets the events": {
-			limit:      limitBase.Clone().Generation(2).Scope(kueuealpha.PreemptedCQLimitScope).Obj(),
+		"aggregation change resets the events": {
+			limit:      limitBase.Clone().Generation(2).Aggregation(kueuealpha.ByPreempteeCQLimitAggregation).Obj(),
 			recorded:   seeded,
 			wantResult: reconcile.Result{RequeueAfter: preemptionLimitPruneInterval},
 			wantLimitStatus: &kueuealpha.PreemptionLimitStatus{
@@ -192,7 +192,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			limit:      limit,
 			recorded:   multiplePreemptions,
 			wantResult: reconcile.Result{RequeueAfter: preemptionLimitPruneInterval},
-			wantCounts: policy.PreemptionLimitScopeCounts{"cq-a": 2, "cq-b": 1, "cq-c": 3, "cq-d": 2},
+			wantCounts: policy.PreemptionLimitAggregationCounts{"cq-a": 2, "cq-b": 1, "cq-c": 3, "cq-d": 2},
 			wantLimitStatus: &kueuealpha.PreemptionLimitStatus{
 				LastUpdateTime: lastUpdateTime,
 				Counts: []kueuealpha.PreemptionLimitCount{
@@ -232,7 +232,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 				},
 			},
 			wantErr:                   errTest,
-			wantCounts:                policy.PreemptionLimitScopeCounts{"cq-a": 1, "cq-b": 1},
+			wantCounts:                policy.PreemptionLimitAggregationCounts{"cq-a": 1, "cq-b": 1},
 			wantRequeuedClusterQueues: new(sets.New[kueue.ClusterQueueReference]()),
 		},
 		"status update error is returned and the events are kept": {
@@ -244,7 +244,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 				},
 			},
 			wantErr:                   errTest,
-			wantCounts:                policy.PreemptionLimitScopeCounts{"cq-a": 1, "cq-b": 1},
+			wantCounts:                policy.PreemptionLimitAggregationCounts{"cq-a": 1, "cq-b": 1},
 			wantRequeuedClusterQueues: new(sets.New[kueue.ClusterQueueReference]()),
 		},
 	}
@@ -292,7 +292,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			for ts, consumedLimits := range tc.recorded {
 				tracker.Record(ts, consumedLimits)
 			}
-			tracker.Record(now, policy.ConsumedLimits{"other-limit": policy.NewConsumedLimit(otherLimit, policy.GlobalScopeValue)})
+			tracker.Record(now, policy.ConsumedLimits{"other-limit": policy.NewConsumedLimit(otherLimit, policy.GlobalAggregationKey)})
 
 			// Clean up queued workloads if there were some before testing
 			requeuer.ProcessRequeues(ctx)
@@ -327,7 +327,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 			if diff := cmp.Diff(tc.wantCounts, tracker.Counts(now, "limit"), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Unexpected counts of the reconciled limit (-want,+got):\n%s", diff)
 			}
-			wantOtherCounts := policy.PreemptionLimitScopeCounts{policy.GlobalScopeValue: 1}
+			wantOtherCounts := policy.PreemptionLimitAggregationCounts{policy.GlobalAggregationKey: 1}
 			if diff := cmp.Diff(wantOtherCounts, tracker.Counts(now, "other-limit")); diff != "" {
 				t.Errorf("Unexpected counts of the other limit (-want,+got):\n%s", diff)
 			}

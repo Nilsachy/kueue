@@ -170,7 +170,7 @@ var _ = ginkgo.Describe("Configurable Preemption", ginkgo.Label("feature:configu
 		var preemptionLimit *kueuealpha.PreemptionLimit
 
 		ginkgo.BeforeEach(func() {
-			preemptionLimit = utiltestingalpha.MakePreemptionLimit("limit-"+ns.Name, kueuealpha.GlobalPreemptionLimitScope).
+			preemptionLimit = utiltestingalpha.MakePreemptionLimit("limit-"+ns.Name, kueuealpha.GlobalLimitAggregation).
 				Limit(1).
 				LimitWindowSeconds(300).
 				Obj()
@@ -258,7 +258,7 @@ var _ = ginkgo.Describe("Configurable Preemption", ginkgo.Label("feature:configu
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(preemptionLimit), &got)).To(gomega.Succeed())
 					g.Expect(got.Status.LastUpdateTime).NotTo(gomega.BeNil())
 					g.Expect(got.Status.Counts).To(gomega.BeComparableTo([]kueuealpha.PreemptionLimitCount{
-						{Name: string(policy.GlobalScopeValue), Value: 1},
+						{Name: string(policy.GlobalAggregationKey), Value: 1},
 					}, cmpopts.EquateEmpty()))
 				}, behavioral.Timeout, behavioral.Interval).Should(gomega.Succeed())
 			})

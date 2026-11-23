@@ -40,7 +40,7 @@ func TestNewPreemptionLimitMatcher(t *testing.T) {
 	invalidSelector := &metav1.LabelSelector{
 		MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "tier", Operator: "invalid"}},
 	}
-	limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60)
+	limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60)
 
 	cases := map[string]struct {
 		limit       *kueuealpha.PreemptionLimit
@@ -166,7 +166,7 @@ func TestPreemptionLimitMatcherMatches(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.GlobalPreemptionLimitScope).
+			limit := utiltestingalpha.MakePreemptionLimit("limit", kueuealpha.GlobalLimitAggregation).
 				LimitWindowSeconds(60).
 				PreemptorClusterQueueSelector(tc.preemptorClusterQueueSelector).
 				PreemptedClusterQueueSelector(tc.preemptedClusterQueueSelector).
@@ -183,21 +183,21 @@ func TestPreemptionLimitMatcherMatches(t *testing.T) {
 	}
 }
 
-func TestPreemptionLimitMatcherScopeValue(t *testing.T) {
+func TestPreemptionLimitMatcherAggregationKey(t *testing.T) {
 	preemptor := &workload.Info{Obj: utiltestingapi.MakeWorkload("preemptor", "ns").Obj(), ClusterQueue: "preemptor-cq"}
 	target := &workload.Info{Obj: utiltestingapi.MakeWorkload("target", "ns").Obj(), ClusterQueue: "preempted-cq"}
 
-	cases := map[kueuealpha.PreemptionLimitScope]policy.PreemptionLimitScopeValue{
-		kueuealpha.GlobalPreemptionLimitScope:  policy.GlobalScopeValue,
-		kueuealpha.PreemptorCQLimitScope:       "preemptor-cq",
-		kueuealpha.PreemptedCQLimitScope:       "preempted-cq",
-		kueuealpha.PreemptedWorkloadLimitScope: "ns/target",
+	cases := map[kueuealpha.PreemptionLimitAggregation]policy.PreemptionLimitAggregationKey{
+		kueuealpha.GlobalLimitAggregation:              policy.GlobalAggregationKey,
+		kueuealpha.ByPreemptorCQLimitAggregation:       "preemptor-cq",
+		kueuealpha.ByPreempteeCQLimitAggregation:       "preempted-cq",
+		kueuealpha.ByPreempteeWorkloadLimitAggregation: "ns/target",
 	}
-	for scope, want := range cases {
-		t.Run(string(scope), func(t *testing.T) {
-			matcher := &preemptionLimitMatcher{limit: utiltestingalpha.MakePreemptionLimit("limit", scope).LimitWindowSeconds(60).Obj()}
-			if got := matcher.scopeValue(preemptor, target); got != want {
-				t.Errorf("scopeValue() = %q, want %q", got, want)
+	for aggregation, want := range cases {
+		t.Run(string(aggregation), func(t *testing.T) {
+			matcher := &preemptionLimitMatcher{limit: utiltestingalpha.MakePreemptionLimit("limit", aggregation).LimitWindowSeconds(60).Obj()}
+			if got := matcher.aggregationKey(preemptor, target); got != want {
+				t.Errorf("aggregationKey() = %q, want %q", got, want)
 			}
 		})
 	}

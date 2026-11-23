@@ -1165,7 +1165,7 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).Obj(),
 		).Obj()
 	const perCQLimitName = "per-cq"
-	perCQLimit := utiltestingalpha.MakePreemptionLimit(perCQLimitName, kueuealpha.PreemptedCQLimitScope).
+	perCQLimit := utiltestingalpha.MakePreemptionLimit(perCQLimitName, kueuealpha.ByPreempteeCQLimitAggregation).
 		Limit(1).LimitWindowSeconds(60).Obj()
 	clusterQueues := []*kueue.ClusterQueue{
 		utiltestingapi.MakeClusterQueue("cq-a").Cohort("cohort").
@@ -1195,7 +1195,7 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 	}
 
 	cases := map[string]struct {
-		recordedAt   map[policy.PreemptionLimitScopeValue]time.Time
+		recordedAt   map[policy.PreemptionLimitAggregationKey]time.Time
 		attempts     []searchAttempt
 		wantTargets  []string
 		wantRetryAt  *time.Time
@@ -1203,7 +1203,7 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 	}{
 		"TakeRetryAt return nil when no strategies run": {},
 		"failed candidate search records earliest retry and TakeRetryAt clears it": {
-			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
+			recordedAt: map[policy.PreemptionLimitAggregationKey]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 				"cq-b": now.Add(-20 * time.Second),
 			},
@@ -1212,13 +1212,13 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			},
 			wantRetryAt: new(now.Add(15 * time.Second)),
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   perCQLimitName,
-				Scope:   kueuealpha.PreemptedCQLimitScope,
-				RetryAt: new(now.Add(15 * time.Second)),
+				Limit:       perCQLimitName,
+				Aggregation: kueuealpha.ByPreempteeCQLimitAggregation,
+				RetryAt:     new(now.Add(15 * time.Second)),
 			},
 		},
 		"TakeRetryAt returns earliest across multiple failed searches": {
-			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
+			recordedAt: map[policy.PreemptionLimitAggregationKey]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 				"cq-b": now.Add(-20 * time.Second),
 			},
@@ -1228,13 +1228,13 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			},
 			wantRetryAt: new(now.Add(15 * time.Second)),
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   perCQLimitName,
-				Scope:   kueuealpha.PreemptedCQLimitScope,
-				RetryAt: new(now.Add(15 * time.Second)),
+				Limit:       perCQLimitName,
+				Aggregation: kueuealpha.ByPreempteeCQLimitAggregation,
+				RetryAt:     new(now.Add(15 * time.Second)),
 			},
 		},
 		"rejected strategy verification preserves retry from skipped candidates": {
-			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
+			recordedAt: map[policy.PreemptionLimitAggregationKey]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 			},
 			attempts: []searchAttempt{
@@ -1242,13 +1242,13 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			},
 			wantRetryAt: new(now.Add(15 * time.Second)),
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   perCQLimitName,
-				Scope:   kueuealpha.PreemptedCQLimitScope,
-				RetryAt: new(now.Add(15 * time.Second)),
+				Limit:       perCQLimitName,
+				Aggregation: kueuealpha.ByPreempteeCQLimitAggregation,
+				RetryAt:     new(now.Add(15 * time.Second)),
 			},
 		},
 		"failed earlier strategy does not set retry when subsequent strategy succeeds": {
-			recordedAt: map[policy.PreemptionLimitScopeValue]time.Time{
+			recordedAt: map[policy.PreemptionLimitAggregationKey]time.Time{
 				"cq-a": now.Add(-45 * time.Second),
 			},
 			attempts: []searchAttempt{

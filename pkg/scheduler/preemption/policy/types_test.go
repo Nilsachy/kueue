@@ -33,26 +33,26 @@ func TestBlockingPreemptionLimitMessage(t *testing.T) {
 	}{
 		"non-expiring limit omits until timestamp": {
 			block: BlockingPreemptionLimit{
-				Limit: "blocked",
-				Scope: kueuealpha.GlobalPreemptionLimitScope,
+				Limit:       "blocked",
+				Aggregation: kueuealpha.GlobalLimitAggregation,
 			},
 			want: "preemptions blocked by PreemptionLimit blocked (aggregation Global)",
 		},
 		"expiring limit formats timestamp as UTC RFC3339": {
 			block: BlockingPreemptionLimit{
-				Limit:   "per-cq",
-				Scope:   kueuealpha.PreemptedCQLimitScope,
-				RetryAt: new(time.Date(2026, time.January, 1, 0, 1, 0, 0, time.UTC)),
+				Limit:       "per-cq",
+				Aggregation: kueuealpha.ByPreempteeCQLimitAggregation,
+				RetryAt:     new(time.Date(2026, time.January, 1, 0, 1, 0, 0, time.UTC)),
 			},
-			want: "preemptions blocked by PreemptionLimit per-cq (aggregation PreemptedClusterQueue) until 2026-01-01T00:01:00Z",
+			want: "preemptions blocked by PreemptionLimit per-cq (aggregation ByPreempteeClusterQueue) until 2026-01-01T00:01:00Z",
 		},
 		"non-UTC timestamp is normalized to UTC RFC3339": {
 			block: BlockingPreemptionLimit{
-				Limit:   "per-cq",
-				Scope:   kueuealpha.PreemptorCQLimitScope,
-				RetryAt: new(time.Date(2026, time.January, 1, 2, 1, 0, 0, utcPlus2)),
+				Limit:       "per-cq",
+				Aggregation: kueuealpha.ByPreemptorCQLimitAggregation,
+				RetryAt:     new(time.Date(2026, time.January, 1, 2, 1, 0, 0, utcPlus2)),
 			},
-			want: "preemptions blocked by PreemptionLimit per-cq (aggregation PreemptorClusterQueue) until 2026-01-01T00:01:00Z",
+			want: "preemptions blocked by PreemptionLimit per-cq (aggregation ByPreemptorClusterQueue) until 2026-01-01T00:01:00Z",
 		},
 	}
 

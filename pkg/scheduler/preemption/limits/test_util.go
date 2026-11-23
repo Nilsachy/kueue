@@ -24,11 +24,11 @@ import (
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
 )
 
-// ScopeEvents maps each scope value of a single PreemptionLimit to its recorded timestamps.
-type ScopeEvents = map[policy.PreemptionLimitScopeValue]events
+// AggregationEvents maps each aggregation key of a single PreemptionLimit to its recorded timestamps.
+type AggregationEvents = map[policy.PreemptionLimitAggregationKey]events
 
-// EventsByLimit maps each PreemptionLimit to its recorded timestamps by scope value.
-type EventsByLimit = map[policy.PreemptionLimitReference]ScopeEvents
+// EventsByLimit maps each PreemptionLimit to its recorded timestamps by aggregation key.
+type EventsByLimit = map[policy.PreemptionLimitReference]AggregationEvents
 
 // NewTrackerForTest returns a PreemptionLimitTracker with preemptionLimits
 // synced and any provided events pre-populated.
@@ -37,8 +37,8 @@ func NewTrackerForTest(preemptionLimits []kueuealpha.PreemptionLimit, eventsByLi
 	for i := range preemptionLimits {
 		ref := policy.PreemptionLimitReference(preemptionLimits[i].Name)
 		ls := newLimitState(&preemptionLimits[i])
-		if scopes, ok := eventsByLimit[ref]; ok {
-			maps.Copy(ls.eventsByScopeValue, scopes)
+		if keys, ok := eventsByLimit[ref]; ok {
+			maps.Copy(ls.eventsByAggregationKey, keys)
 		}
 		tracker.limits[ref] = ls
 	}
