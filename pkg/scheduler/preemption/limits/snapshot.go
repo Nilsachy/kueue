@@ -39,32 +39,32 @@ type PreemptionLimitsSnapshot struct {
 	// the snapshot was taken, plus ones added with `Record` method.
 	recorded preemptionCounts
 	// earliestEvent holds the earliest timestamp among the recorded preemptions
-	// of each limit and scope value.
-	earliestEvent map[policy.PreemptionLimitReference]map[policy.PreemptionLimitScopeValue]time.Time
+	// of each limit and aggregation key.
+	earliestEvent map[policy.PreemptionLimitReference]map[policy.PreemptionLimitAggregationKey]time.Time
 }
 
 // Record updates the snapshot by recording a preemption at ts for every
-// PreemptionLimit and scope value in consumedLimits.
+// PreemptionLimit and aggregation key in consumedLimits.
 func (s *PreemptionLimitsSnapshot) Record(ts time.Time, consumedLimits policy.ConsumedLimits) {
 	for limit, consumed := range consumedLimits {
-		s.record(limit, consumed.ScopeValue, 1, ts)
+		s.record(limit, consumed.AggregationKey, 1, ts)
 	}
 }
 
 func (s *PreemptionLimitsSnapshot) record(
 	limit policy.PreemptionLimitReference,
-	scopeValue policy.PreemptionLimitScopeValue,
+	aggregationKey policy.PreemptionLimitAggregationKey,
 	count int32,
 	earliest time.Time,
 ) {
-	s.recorded.add(limit, scopeValue, count)
-	scopes, found := s.earliestEvent[limit]
+	s.recorded.add(limit, aggregationKey, count)
+	keys, found := s.earliestEvent[limit]
 	if !found {
-		scopes = make(map[policy.PreemptionLimitScopeValue]time.Time)
-		s.earliestEvent[limit] = scopes
+		keys = make(map[policy.PreemptionLimitAggregationKey]time.Time)
+		s.earliestEvent[limit] = keys
 	}
-	if existing, found := scopes[scopeValue]; !found || earliest.Before(existing) {
-		scopes[scopeValue] = earliest
+	if existing, found := keys[aggregationKey]; !found || earliest.Before(existing) {
+		keys[aggregationKey] = earliest
 	}
 }
 
@@ -77,8 +77,8 @@ func (s *PreemptionLimitsSnapshot) WithinLimits(preemptions []policy.ConsumedLim
 	taken := preemptionCounts{}
 	for _, consumedLimits := range preemptions {
 		for limit, consumed := range consumedLimits {
-			taken.add(limit, consumed.ScopeValue, 1)
-			if taken[limit][consumed.ScopeValue] > s.allowance(limit, consumed.ScopeValue) {
+			taken.add(limit, consumed.AggregationKey, 1)
+			if taken[limit][consumed.AggregationKey] > s.allowance(limit, consumed.AggregationKey) {
 				return false
 			}
 		}
@@ -86,34 +86,34 @@ func (s *PreemptionLimitsSnapshot) WithinLimits(preemptions []policy.ConsumedLim
 	return true
 }
 
-// scope returns the scope of limit in the snapshot, or an empty string if limit
+// aggregation returns the aggregation of limit in the snapshot, or an empty string if limit
 // is not in the snapshot.
-func (s *PreemptionLimitsSnapshot) scope(limit policy.PreemptionLimitReference) kueuealpha.PreemptionLimitScope {
+func (s *PreemptionLimitsSnapshot) aggregation(limit policy.PreemptionLimitReference) kueuealpha.PreemptionLimitAggregation {
 	preemptionLimit, found := s.limitByName[limit]
 	if !found {
 		return ""
 	}
-	return preemptionLimit.Spec.Scope
+	return preemptionLimit.Spec.Aggregation
 }
 
 // allowance returns how many more preemptions are allowed for limit and
-// scopeValue in the snapshot, or 0 if limit is not in the snapshot.
-func (s *PreemptionLimitsSnapshot) allowance(limit policy.PreemptionLimitReference, scopeValue policy.PreemptionLimitScopeValue) int32 {
+// aggregationKey in the snapshot, or 0 if limit is not in the snapshot.
+func (s *PreemptionLimitsSnapshot) allowance(limit policy.PreemptionLimitReference, aggregationKey policy.PreemptionLimitAggregationKey) int32 {
 	preemptionLimit, found := s.limitByName[limit]
 	if !found {
 		return 0
 	}
-	return preemptionLimit.Spec.Limit - s.recorded[limit][scopeValue]
+	return preemptionLimit.Spec.Limit - s.recorded[limit][aggregationKey]
 }
 
 // nextSlotTime returns the time when the earliest recorded preemption for limit
-// and scopeValue expires, or nil if none is recorded or limit allows no preemptions.
-func (s *PreemptionLimitsSnapshot) nextSlotTime(limit policy.PreemptionLimitReference, scopeValue policy.PreemptionLimitScopeValue) *time.Time {
+// and aggregationKey expires, or nil if none is recorded or limit allows no preemptions.
+func (s *PreemptionLimitsSnapshot) nextSlotTime(limit policy.PreemptionLimitReference, aggregationKey policy.PreemptionLimitAggregationKey) *time.Time {
 	preemptionLimit, found := s.limitByName[limit]
 	if !found || preemptionLimit.Spec.Limit <= 0 {
 		return nil
 	}
-	earliest, found := s.earliestEvent[limit][scopeValue]
+	earliest, found := s.earliestEvent[limit][aggregationKey]
 	if !found {
 		return nil
 	}

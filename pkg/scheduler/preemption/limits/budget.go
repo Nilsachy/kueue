@@ -57,32 +57,32 @@ func (b *PreemptionLimitBudget) TryConsume(
 	}
 	var blockingLimit *policy.BlockingPreemptionLimit
 	for limit, consumed := range consumedLimits {
-		if b.remaining(limit, consumed.ScopeValue) > 0 {
+		if b.remaining(limit, consumed.AggregationKey) > 0 {
 			continue
 		}
-		slotTime := b.limiter.snapshot.nextSlotTime(limit, consumed.ScopeValue)
+		slotTime := b.limiter.snapshot.nextSlotTime(limit, consumed.AggregationKey)
 		if slotTime == nil {
 			blockingLimit = &policy.BlockingPreemptionLimit{
-				Limit: limit,
-				Scope: b.limiter.snapshot.scope(limit),
+				Limit:       limit,
+				Aggregation: b.limiter.snapshot.aggregation(limit),
 			}
-			b.logSkipped(target, blockingLimit, consumed.ScopeValue)
+			b.logSkipped(target, blockingLimit, consumed.AggregationKey)
 			return nil, blockingLimit, false
 		}
 		if blockingLimit == nil || slotTime.After(*blockingLimit.RetryAt) {
 			blockingLimit = &policy.BlockingPreemptionLimit{
-				Limit:   limit,
-				Scope:   b.limiter.snapshot.scope(limit),
-				RetryAt: slotTime,
+				Limit:       limit,
+				Aggregation: b.limiter.snapshot.aggregation(limit),
+				RetryAt:     slotTime,
 			}
 		}
 	}
 	if blockingLimit != nil {
-		b.logSkipped(target, blockingLimit, consumedLimits[blockingLimit.Limit].ScopeValue)
+		b.logSkipped(target, blockingLimit, consumedLimits[blockingLimit.Limit].AggregationKey)
 		return nil, blockingLimit, false
 	}
 	for limit, consumed := range consumedLimits {
-		b.taken.add(limit, consumed.ScopeValue, 1)
+		b.taken.add(limit, consumed.AggregationKey, 1)
 	}
 	return consumedLimits, nil, true
 }
@@ -90,7 +90,7 @@ func (b *PreemptionLimitBudget) TryConsume(
 func (b *PreemptionLimitBudget) logSkipped(
 	target *workload.Info,
 	blockingLimit *policy.BlockingPreemptionLimit,
-	scopeValue policy.PreemptionLimitScopeValue,
+	aggregationKey policy.PreemptionLimitAggregationKey,
 ) {
 	log := b.limiter.log.V(5)
 	if blockingLimit.RetryAt != nil {
@@ -99,11 +99,12 @@ func (b *PreemptionLimitBudget) logSkipped(
 	log.Info("Skipping preemption candidate exceeding a PreemptionLimit",
 		"candidate", klog.KObj(target.Obj),
 		"preemptionLimit", blockingLimit.Limit,
-		"scopeValue", scopeValue,
+		"aggregation", blockingLimit.Aggregation,
+		"aggregationKey", aggregationKey,
 	)
 }
 
-// remaining returns how many more preemptions can be taken from this budget for limit and scopeValue.
-func (b *PreemptionLimitBudget) remaining(limit policy.PreemptionLimitReference, scopeValue policy.PreemptionLimitScopeValue) int32 {
-	return b.limiter.snapshot.allowance(limit, scopeValue) - b.taken[limit][scopeValue]
+// remaining returns how many more preemptions can be taken from this budget for limit and aggregationKey.
+func (b *PreemptionLimitBudget) remaining(limit policy.PreemptionLimitReference, aggregationKey policy.PreemptionLimitAggregationKey) int32 {
+	return b.limiter.snapshot.allowance(limit, aggregationKey) - b.taken[limit][aggregationKey]
 }

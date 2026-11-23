@@ -21,12 +21,12 @@ package v1alpha1
 // PreemptionLimitCountApplyConfiguration represents a declarative configuration of the PreemptionLimitCount type for use
 // with apply.
 //
-// PreemptionLimitCount tracks the number of preemptions for a single scoped entity.
+// PreemptionLimitCount tracks the number of preemptions for a single aggregation unit.
 type PreemptionLimitCountApplyConfiguration struct {
-	// name identifies the scoped entity.
-	// For Global scope it is "Global".
-	// For PreemptorClusterQueue and PreemptedClusterQueue scopes it is the ClusterQueue name.
-	// For PreemptedWorkload scope it is "<namespace>/<workload-name>".
+	// name identifies the aggregation unit.
+	// For Global aggregation it is "Global".
+	// For ByPreemptorClusterQueue and ByPreempteeClusterQueue aggregations it is the ClusterQueue name.
+	// For ByPreempteeWorkload aggregation it is "<namespace>/<workload-name>".
 	//
 	Name *string `json:"name,omitempty"`
 	// value is the number of preemptions recorded within the sliding time window.

@@ -64,6 +64,14 @@ spec:
             spec:
               description: spec defines the desired state of the PreemptionLimit.
               properties:
+                aggregation:
+                  description: aggregation specifies the grouping level for counting preemption events under this limit.
+                  enum:
+                    - Global
+                    - ByPreemptorClusterQueue
+                    - ByPreempteeClusterQueue
+                    - ByPreempteeWorkload
+                  type: string
                 configSelector:
                   description: |-
                     configSelector selects PreemptionConfigs to which this limit applies.
@@ -113,8 +121,8 @@ spec:
                 limit:
                   description: |-
                     limit defines how many preemption events can occur within the given time window.
-                    An event is defined as a confirmed (preemptor, preempted) eviction pair.
-                    Setting limit to 0 blocks all preemptions under this limit's scope.
+                    An event is defined as a confirmed (preemptor, preemptee) eviction pair.
+                    Setting limit to 0 blocks all matching preemptions under this limit.
                   format: int32
                   minimum: 0
                   type: integer
@@ -233,19 +241,11 @@ spec:
                   maxItems: 64
                   type: array
                   x-kubernetes-list-type: set
-                scope:
-                  description: scope specifies the entity boundary for this preemption limit.
-                  enum:
-                    - Global
-                    - PreemptorClusterQueue
-                    - PreemptedClusterQueue
-                    - PreemptedWorkload
-                  type: string
               required:
+                - aggregation
                 - configSelector
                 - limit
                 - limitWindowSeconds
-                - scope
               type: object
             status:
               description: status defines the observed state of the PreemptionLimit.
@@ -255,14 +255,14 @@ spec:
                     counts is periodically updated, for reference only.
                     Restricted to the top 1000 counts to fit within CRD size limits.
                   items:
-                    description: PreemptionLimitCount tracks the number of preemptions for a single scoped entity.
+                    description: PreemptionLimitCount tracks the number of preemptions for a single aggregation unit.
                     properties:
                       name:
                         description: |-
-                          name identifies the scoped entity.
-                          For Global scope it is "Global".
-                          For PreemptorClusterQueue and PreemptedClusterQueue scopes it is the ClusterQueue name.
-                          For PreemptedWorkload scope it is "<namespace>/<workload-name>".
+                          name identifies the aggregation unit.
+                          For Global aggregation it is "Global".
+                          For ByPreemptorClusterQueue and ByPreempteeClusterQueue aggregations it is the ClusterQueue name.
+                          For ByPreempteeWorkload aggregation it is "<namespace>/<workload-name>".
                         maxLength: 317
                         minLength: 1
                         type: string

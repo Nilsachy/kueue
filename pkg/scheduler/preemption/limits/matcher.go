@@ -30,7 +30,7 @@ import (
 )
 
 // preemptionLimitMatcher determines whether a PreemptionLimit applies to a
-// preemption and which scope value it counts against.
+// preemption and which aggregation key it counts against.
 type preemptionLimitMatcher struct {
 	limit                         *kueuealpha.PreemptionLimit
 	preemptorClusterQueueSelector labels.Selector
@@ -101,17 +101,17 @@ func (m *preemptionLimitMatcher) matchRuleNames(ruleReference policy.PreemptionC
 	return slices.Contains(m.limit.Spec.RuleNames, string(ruleReference))
 }
 
-// scopeValue returns the scope value that preempting target for preemptor counts against.
-func (m *preemptionLimitMatcher) scopeValue(preemptor, target *workload.Info) policy.PreemptionLimitScopeValue {
-	switch m.limit.Spec.Scope {
-	case kueuealpha.PreemptorCQLimitScope:
-		return policy.PreemptionLimitScopeValue(preemptor.ClusterQueue)
-	case kueuealpha.PreemptedCQLimitScope:
-		return policy.PreemptionLimitScopeValue(target.ClusterQueue)
-	case kueuealpha.PreemptedWorkloadLimitScope:
-		return policy.PreemptionLimitScopeValue(workload.Key(target.Obj))
+// aggregationKey returns the aggregation key that preempting target for preemptor counts against.
+func (m *preemptionLimitMatcher) aggregationKey(preemptor, target *workload.Info) policy.PreemptionLimitAggregationKey {
+	switch m.limit.Spec.Aggregation {
+	case kueuealpha.ByPreemptorCQLimitAggregation:
+		return policy.PreemptionLimitAggregationKey(preemptor.ClusterQueue)
+	case kueuealpha.ByPreempteeCQLimitAggregation:
+		return policy.PreemptionLimitAggregationKey(target.ClusterQueue)
+	case kueuealpha.ByPreempteeWorkloadLimitAggregation:
+		return policy.PreemptionLimitAggregationKey(workload.Key(target.Obj))
 	default:
-		// GlobalPreemptionLimitScope, as the API admits no other scope.
-		return policy.GlobalScopeValue
+		// GlobalLimitAggregation, as the API admits no other aggregation.
+		return policy.GlobalAggregationKey
 	}
 }

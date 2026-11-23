@@ -390,13 +390,13 @@ type PreemptionLimitWrapper struct {
 	kueuealpha.PreemptionLimit
 }
 
-// MakePreemptionLimit creates a PreemptionLimit wrapper with the given scope.
+// MakePreemptionLimit creates a PreemptionLimit wrapper with the given aggregation.
 // Its UID defaults to the name suffixed with "-uid".
-func MakePreemptionLimit(name string, scope kueuealpha.PreemptionLimitScope) *PreemptionLimitWrapper {
+func MakePreemptionLimit(name string, aggregation kueuealpha.PreemptionLimitAggregation) *PreemptionLimitWrapper {
 	w := &PreemptionLimitWrapper{
 		Name: name,
 		Spec: kueuealpha.PreemptionLimitSpec{
-			Scope: scope,
+			Aggregation: aggregation,
 		},
 	}
 	return w.UID(types.UID(name + "-uid"))
@@ -412,9 +412,9 @@ func (pl *PreemptionLimitWrapper) Obj() *kueuealpha.PreemptionLimit {
 	return &pl.PreemptionLimit
 }
 
-// Scope sets the scope of the PreemptionLimit.
-func (pl *PreemptionLimitWrapper) Scope(scope kueuealpha.PreemptionLimitScope) *PreemptionLimitWrapper {
-	pl.Spec.Scope = scope
+// Aggregation sets the aggregation of the PreemptionLimit.
+func (pl *PreemptionLimitWrapper) Aggregation(aggregation kueuealpha.PreemptionLimitAggregation) *PreemptionLimitWrapper {
+	pl.Spec.Aggregation = aggregation
 	return pl
 }
 

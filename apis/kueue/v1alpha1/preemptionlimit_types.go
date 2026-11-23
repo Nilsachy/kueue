@@ -53,40 +53,40 @@ type PreemptionLimitList struct {
 	Items           []PreemptionLimit `json:"items"`
 }
 
-// PreemptionLimitScope specifies the entity boundary for a preemption limit.
+// PreemptionLimitAggregation specifies the grouping level for counting preemption events.
 // Possible values are:
 // - "Global": restricts the total number of preemption events across the entire cluster within the sliding time window.
-// - "PreemptorClusterQueue": restricts the number of preemption events triggered by workloads originating from a specific ClusterQueue within the sliding time window.
-// - "PreemptedClusterQueue": restricts the number of preemption events targeting workloads belonging to a specific ClusterQueue within the sliding time window.
-// - "PreemptedWorkload": restricts how many times an individual workload can be preempted within the sliding time window.
+// - "ByPreemptorClusterQueue": restricts the number of preemption events triggered by workloads originating from a specific ClusterQueue within the sliding time window.
+// - "ByPreempteeClusterQueue": restricts the number of preemption events targeting workloads belonging to a specific ClusterQueue within the sliding time window.
+// - "ByPreempteeWorkload": restricts how many times an individual workload can be preempted within the sliding time window.
 //
-// +kubebuilder:validation:Enum=Global;PreemptorClusterQueue;PreemptedClusterQueue;PreemptedWorkload
-type PreemptionLimitScope string
+// +kubebuilder:validation:Enum=Global;ByPreemptorClusterQueue;ByPreempteeClusterQueue;ByPreempteeWorkload
+type PreemptionLimitAggregation string
 
 const (
-	// GlobalPreemptionLimitScope restricts the total number of preemption events
+	// GlobalLimitAggregation restricts the total number of preemption events
 	// across the entire cluster within the sliding time window.
-	GlobalPreemptionLimitScope PreemptionLimitScope = "Global"
+	GlobalLimitAggregation PreemptionLimitAggregation = "Global"
 
-	// PreemptorCQLimitScope restricts the number of preemption events triggered by workloads
+	// ByPreemptorCQLimitAggregation restricts the number of preemption events triggered by workloads
 	// originating from a specific ClusterQueue within the sliding time window.
-	PreemptorCQLimitScope PreemptionLimitScope = "PreemptorClusterQueue"
+	ByPreemptorCQLimitAggregation PreemptionLimitAggregation = "ByPreemptorClusterQueue"
 
-	// PreemptedCQLimitScope restricts the number of preemption events targeting workloads
+	// ByPreempteeCQLimitAggregation restricts the number of preemption events targeting workloads
 	// belonging to a specific ClusterQueue within the sliding time window.
-	PreemptedCQLimitScope PreemptionLimitScope = "PreemptedClusterQueue"
+	ByPreempteeCQLimitAggregation PreemptionLimitAggregation = "ByPreempteeClusterQueue"
 
-	// PreemptedWorkloadLimitScope restricts how many times an individual workload
+	// ByPreempteeWorkloadLimitAggregation restricts how many times an individual workload
 	// can be preempted within the sliding time window.
-	PreemptedWorkloadLimitScope PreemptionLimitScope = "PreemptedWorkload"
+	ByPreempteeWorkloadLimitAggregation PreemptionLimitAggregation = "ByPreempteeWorkload"
 )
 
 // PreemptionLimitSpec defines the desired state of PreemptionLimit
 type PreemptionLimitSpec struct {
-	// scope specifies the entity boundary for this preemption limit.
+	// aggregation specifies the grouping level for counting preemption events under this limit.
 	//
 	// +required
-	Scope PreemptionLimitScope `json:"scope,omitempty"`
+	Aggregation PreemptionLimitAggregation `json:"aggregation,omitempty"`
 
 	// configSelector selects PreemptionConfigs to which this limit applies.
 	// An empty selector ({}) matches all PreemptionConfigs.
@@ -122,8 +122,8 @@ type PreemptionLimitSpec struct {
 	RuleNames []string `json:"ruleNames,omitempty"`
 
 	// limit defines how many preemption events can occur within the given time window.
-	// An event is defined as a confirmed (preemptor, preempted) eviction pair.
-	// Setting limit to 0 blocks all preemptions under this limit's scope.
+	// An event is defined as a confirmed (preemptor, preemptee) eviction pair.
+	// Setting limit to 0 blocks all matching preemptions under this limit.
 	//
 	// +required
 	// +kubebuilder:validation:Minimum=0
@@ -155,12 +155,12 @@ type PreemptionLimitStatus struct {
 	Counts []PreemptionLimitCount `json:"counts,omitempty"`
 }
 
-// PreemptionLimitCount tracks the number of preemptions for a single scoped entity.
+// PreemptionLimitCount tracks the number of preemptions for a single aggregation unit.
 type PreemptionLimitCount struct {
-	// name identifies the scoped entity.
-	// For Global scope it is "Global".
-	// For PreemptorClusterQueue and PreemptedClusterQueue scopes it is the ClusterQueue name.
-	// For PreemptedWorkload scope it is "<namespace>/<workload-name>".
+	// name identifies the aggregation unit.
+	// For Global aggregation it is "Global".
+	// For ByPreemptorClusterQueue and ByPreempteeClusterQueue aggregations it is the ClusterQueue name.
+	// For ByPreempteeWorkload aggregation it is "<namespace>/<workload-name>".
 	//
 	// +required
 	// +kubebuilder:validation:MinLength=1

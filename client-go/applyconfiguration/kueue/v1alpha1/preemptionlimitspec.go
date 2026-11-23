@@ -28,9 +28,9 @@ import (
 //
 // PreemptionLimitSpec defines the desired state of PreemptionLimit
 type PreemptionLimitSpecApplyConfiguration struct {
-	// scope specifies the entity boundary for this preemption limit.
+	// aggregation specifies the grouping level for counting preemption events under this limit.
 	//
-	Scope *kueuev1alpha1.PreemptionLimitScope `json:"scope,omitempty"`
+	Aggregation *kueuev1alpha1.PreemptionLimitAggregation `json:"aggregation,omitempty"`
 	// configSelector selects PreemptionConfigs to which this limit applies.
 	// An empty selector ({}) matches all PreemptionConfigs.
 	//
@@ -52,8 +52,8 @@ type PreemptionLimitSpecApplyConfiguration struct {
 	//
 	RuleNames []string `json:"ruleNames,omitempty"`
 	// limit defines how many preemption events can occur within the given time window.
-	// An event is defined as a confirmed (preemptor, preempted) eviction pair.
-	// Setting limit to 0 blocks all preemptions under this limit's scope.
+	// An event is defined as a confirmed (preemptor, preemptee) eviction pair.
+	// Setting limit to 0 blocks all matching preemptions under this limit.
 	//
 	Limit *int32 `json:"limit,omitempty"`
 	// limitWindowSeconds specifies the sliding time window duration, in seconds.
@@ -68,11 +68,11 @@ func PreemptionLimitSpec() *PreemptionLimitSpecApplyConfiguration {
 	return &PreemptionLimitSpecApplyConfiguration{}
 }
 
-// WithScope sets the Scope field in the declarative configuration to the given value
+// WithAggregation sets the Aggregation field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Scope field is set to the value of the last call.
-func (b *PreemptionLimitSpecApplyConfiguration) WithScope(value kueuev1alpha1.PreemptionLimitScope) *PreemptionLimitSpecApplyConfiguration {
-	b.Scope = &value
+// If called multiple times, the Aggregation field is set to the value of the last call.
+func (b *PreemptionLimitSpecApplyConfiguration) WithAggregation(value kueuev1alpha1.PreemptionLimitAggregation) *PreemptionLimitSpecApplyConfiguration {
+	b.Aggregation = &value
 	return b
 }
 

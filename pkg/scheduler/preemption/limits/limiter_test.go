@@ -49,16 +49,16 @@ func TestNewPreemptionLimiter(t *testing.T) {
 	}{
 		"limits applying to the config are kept by name, the others are dropped": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
-				*utiltestingalpha.MakePreemptionLimit("any-config", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).Obj(),
-				*utiltestingalpha.MakePreemptionLimit("silver", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).
+				*utiltestingalpha.MakePreemptionLimit("any-config", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).Obj(),
+				*utiltestingalpha.MakePreemptionLimit("silver", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).
 					ConfigSelector(metav1.LabelSelector{MatchLabels: map[string]string{"tier": "silver"}}).Obj(),
 			},
 			want: []policy.PreemptionLimitReference{"any-config"},
 		},
 		"invalid limit is an error": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
-				*utiltestingalpha.MakePreemptionLimit("any-config", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).Obj(),
-				*utiltestingalpha.MakePreemptionLimit("invalid", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).
+				*utiltestingalpha.MakePreemptionLimit("any-config", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).Obj(),
+				*utiltestingalpha.MakePreemptionLimit("invalid", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).
 					ConfigSelector(metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "tier", Operator: "invalid"}},
 					}).Obj(),
@@ -90,9 +90,9 @@ func TestPreemptionLimiterConsumedLimits(t *testing.T) {
 	targetCQ := &schdcache.ClusterQueueSnapshot{Name: "preempted-cq", Labels: map[string]string{"side": "preempted"}}
 	preemptor := &workload.Info{Obj: utiltestingapi.MakeWorkload("preemptor", "ns").Obj(), ClusterQueue: "preempting-cq"}
 	target := &workload.Info{Obj: utiltestingapi.MakeWorkload("target", "ns").UID("target").Obj(), ClusterQueue: "preempted-cq"}
-	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).Obj()
-	preemptedWorkloadLimit := utiltestingalpha.MakePreemptionLimit("preempted-workload", kueuealpha.PreemptedWorkloadLimitScope).LimitWindowSeconds(60).Obj()
-	globalLimitWithRuleName := utiltestingalpha.MakePreemptionLimit("matching-rule", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).Obj()
+	preempteeWorkloadLimit := utiltestingalpha.MakePreemptionLimit("preemptee-workload", kueuealpha.ByPreempteeWorkloadLimitAggregation).LimitWindowSeconds(60).Obj()
+	globalLimitWithRuleName := utiltestingalpha.MakePreemptionLimit("matching-rule", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).
 		RuleNames("otherRule", testRuleReference).Obj()
 
 	cases := map[string]struct {
@@ -108,25 +108,25 @@ func TestPreemptionLimiterConsumedLimits(t *testing.T) {
 		"limits matching the ClusterQueues are consumed together, the others are not": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
 				*globalLimit,
-				*preemptedWorkloadLimit,
-				*utiltestingalpha.MakePreemptionLimit("other-cqs", kueuealpha.PreemptedCQLimitScope).LimitWindowSeconds(60).
+				*preempteeWorkloadLimit,
+				*utiltestingalpha.MakePreemptionLimit("other-cqs", kueuealpha.ByPreempteeCQLimitAggregation).LimitWindowSeconds(60).
 					PreemptedClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"side": "other"}}).Obj(),
 			},
 			want: policy.ConsumedLimits{
-				"global":             policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue),
-				"preempted-workload": policy.NewConsumedLimit(preemptedWorkloadLimit, "ns/target"),
+				"global":             policy.NewConsumedLimit(globalLimit, policy.GlobalAggregationKey),
+				"preemptee-workload": policy.NewConsumedLimit(preempteeWorkloadLimit, "ns/target"),
 			},
 		},
 		"limits matching the ruleName are consumed, limits for other rules are not": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
 				*globalLimit,
 				*globalLimitWithRuleName,
-				*utiltestingalpha.MakePreemptionLimit("other-rule", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).
+				*utiltestingalpha.MakePreemptionLimit("other-rule", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).
 					RuleNames("otherRule").Obj(),
 			},
 			want: policy.ConsumedLimits{
-				"global":        policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue),
-				"matching-rule": policy.NewConsumedLimit(globalLimitWithRuleName, policy.GlobalScopeValue)},
+				"global":        policy.NewConsumedLimit(globalLimit, policy.GlobalAggregationKey),
+				"matching-rule": policy.NewConsumedLimit(globalLimitWithRuleName, policy.GlobalAggregationKey)},
 		},
 		"evicted target consumes nothing": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*globalLimit},
