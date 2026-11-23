@@ -242,7 +242,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				behavioral.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lq)
 
 				limit = kueuetestalpha1.MakePreemptionLimit("canary-rollout-limit", kueuealpha.GlobalPreemptionLimitScope).
-					ConfigSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"rollout": "canary"}}).
+					ConfigSelector(metav1.LabelSelector{MatchLabels: map[string]string{"rollout": "canary"}}).
 					Limit(0).
 					LimitWindowSeconds(limitWindowSeconds).
 					Obj()
@@ -739,7 +739,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				lqPreemptor = utiltestingapi.MakeLocalQueue("lq-status-preemptor", ns.Name).ClusterQueue(cqPreemptor.Name).Obj()
 				behavioral.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lqVictimA, lqVictimB, lqPreemptor)
 
-				prodConfigSelector := &metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}}
+				prodConfigSelector := metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}}
 				preemptedCQLimit = kueuetestalpha1.MakePreemptionLimit("status-preempted-cq-limit", kueuealpha.PreemptedCQLimitScope).
 					ConfigSelector(prodConfigSelector).
 					Limit(5).

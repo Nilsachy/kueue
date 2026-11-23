@@ -170,7 +170,7 @@ func TestPreemptionLimitReconcile(t *testing.T) {
 		"selector change resets the events": {
 			limit: limitBase.Clone().
 				Generation(2).
-				ConfigSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"tier": "gold"}}).
+				ConfigSelector(metav1.LabelSelector{MatchLabels: map[string]string{"tier": "gold"}}).
 				Obj(),
 			recorded:   seeded,
 			wantResult: reconcile.Result{RequeueAfter: preemptionLimitPruneInterval},

@@ -67,7 +67,7 @@ spec:
                 configSelector:
                   description: |-
                     configSelector selects PreemptionConfigs to which this limit applies.
-                    If not set, it applies to all PreemptionConfigs.
+                    An empty selector ({}) matches all PreemptionConfigs.
                   properties:
                     matchExpressions:
                       description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
@@ -242,6 +242,7 @@ spec:
                     - PreemptedWorkload
                   type: string
               required:
+                - configSelector
                 - limit
                 - limitWindowSeconds
                 - scope
