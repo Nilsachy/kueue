@@ -89,10 +89,10 @@ type PreemptionLimitSpec struct {
 	Scope PreemptionLimitScope `json:"scope,omitempty"`
 
 	// configSelector selects PreemptionConfigs to which this limit applies.
-	// If not set, it applies to all PreemptionConfigs.
+	// An empty selector ({}) matches all PreemptionConfigs.
 	//
-	// +optional
-	ConfigSelector *metav1.LabelSelector `json:"configSelector,omitempty"`
+	// +required
+	ConfigSelector metav1.LabelSelector `json:"configSelector"`
 
 	// preemptorClusterQueueSelector selects ClusterQueues of preempting workloads to which this limit applies.
 	// If not set, this limit applies to preempting workloads from all ClusterQueues.
