@@ -91,7 +91,7 @@ func TestPreemptionLimiterConsumedLimits(t *testing.T) {
 	preemptor := &workload.Info{Obj: utiltestingapi.MakeWorkload("preemptor", "ns").Obj(), ClusterQueue: "preempting-cq"}
 	target := &workload.Info{Obj: utiltestingapi.MakeWorkload("target", "ns").UID("target").Obj(), ClusterQueue: "preempted-cq"}
 	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).Obj()
-	preemptedWorkloadLimit := utiltestingalpha.MakePreemptionLimit("preempted-workload", kueuealpha.ByPreempteeWorkloadLimitAggregation).LimitWindowSeconds(60).Obj()
+	preempteeWorkloadLimit := utiltestingalpha.MakePreemptionLimit("preemptee-workload", kueuealpha.ByPreempteeWorkloadLimitAggregation).LimitWindowSeconds(60).Obj()
 	globalLimitWithRuleName := utiltestingalpha.MakePreemptionLimit("matching-rule", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).
 		RuleNames("otherRule", testRuleReference).Obj()
 
@@ -108,13 +108,13 @@ func TestPreemptionLimiterConsumedLimits(t *testing.T) {
 		"limits matching the ClusterQueues are consumed together, the others are not": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
 				*globalLimit,
-				*preemptedWorkloadLimit,
+				*preempteeWorkloadLimit,
 				*utiltestingalpha.MakePreemptionLimit("other-cqs", kueuealpha.ByPreempteeCQLimitAggregation).LimitWindowSeconds(60).
 					PreemptedClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"side": "other"}}).Obj(),
 			},
 			want: policy.ConsumedLimits{
 				"global":             policy.NewConsumedLimit(globalLimit, policy.GlobalAggregationKey),
-				"preempted-workload": policy.NewConsumedLimit(preemptedWorkloadLimit, "ns/target"),
+				"preemptee-workload": policy.NewConsumedLimit(preempteeWorkloadLimit, "ns/target"),
 			},
 		},
 		"limits matching the ruleName are consumed, limits for other rules are not": {

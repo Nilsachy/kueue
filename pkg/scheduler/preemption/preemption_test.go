@@ -4825,10 +4825,10 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 			now,
 		)
 	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).Obj()
-	perPreemptedWorkloadLimit := utiltestingalpha.MakePreemptionLimit("per-preempted-workload", kueuealpha.ByPreempteeWorkloadLimitAggregation).LimitWindowSeconds(60).Obj()
+	perPreempteeWorkloadLimit := utiltestingalpha.MakePreemptionLimit("per-preemptee-workload", kueuealpha.ByPreempteeWorkloadLimitAggregation).LimitWindowSeconds(60).Obj()
 	consumedLimits := policy.ConsumedLimits{
 		"global":                 policy.NewConsumedLimit(globalLimit, policy.GlobalAggregationKey),
-		"per-preempted-workload": policy.NewConsumedLimit(perPreemptedWorkloadLimit, "default/victim"),
+		"per-preemptee-workload": policy.NewConsumedLimit(perPreempteeWorkloadLimit, "default/victim"),
 	}
 	configurableReasonData := &policy.ConfigurablePreemptionReasonData{
 		ConfigName:     "config",
@@ -4836,7 +4836,7 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 	}
 	wantCounts := map[policy.PreemptionLimitReference]policy.PreemptionLimitAggregationCounts{
 		"global":                 {policy.GlobalAggregationKey: 1},
-		"per-preempted-workload": {"default/victim": 1},
+		"per-preemptee-workload": {"default/victim": 1},
 	}
 	evictionErr := errors.New("simulated eviction error")
 
@@ -4918,7 +4918,7 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 			// Only the PreemptionLimits synced by the PreemptionLimitReconciler are tracked.
 			tracker := limits.NewPreemptionLimitTracker()
 			tracker.Sync(globalLimit)
-			tracker.Sync(perPreemptedWorkloadLimit)
+			tracker.Sync(perPreempteeWorkloadLimit)
 			fakeClock := clocktesting.NewFakeClock(now)
 			preemptor := New(cl, workload.Ordering{}, &utiltesting.EventRecorder{}, nil, false, fakeClock, nil, preemptexpectations.New(), nil, tracker)
 
@@ -4950,7 +4950,7 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 			}
 
 			evictedAt := fakeClock.Now()
-			for _, limit := range []policy.PreemptionLimitReference{"global", "per-preempted-workload"} {
+			for _, limit := range []policy.PreemptionLimitReference{"global", "per-preemptee-workload"} {
 				if diff := cmp.Diff(tc.wantCounts[limit], tracker.Counts(evictedAt, limit), cmpopts.EquateEmpty()); diff != "" {
 					t.Errorf("Unexpected counts for PreemptionLimit %q (-want,+got):\n%s", limit, diff)
 				}

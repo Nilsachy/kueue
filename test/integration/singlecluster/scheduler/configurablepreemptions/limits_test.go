@@ -696,7 +696,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 		ginkgo.When("reporting PreemptionLimitStatus across preemptions, spec changes, and window expiration", func() {
 			var (
 				config           *kueuealpha.PreemptionConfig
-				preemptedCQLimit *kueuealpha.PreemptionLimit
+				preempteeCQLimit *kueuealpha.PreemptionLimit
 				shortGlobalLimit *kueuealpha.PreemptionLimit
 				cqVictimA        *kueue.ClusterQueue
 				cqVictimB        *kueue.ClusterQueue
@@ -740,7 +740,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				behavioral.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lqVictimA, lqVictimB, lqPreemptor)
 
 				prodConfigSelector := &metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}}
-				preemptedCQLimit = kueuetestalpha1.MakePreemptionLimit("status-preempted-cq-limit", kueuealpha.ByPreempteeCQLimitAggregation).
+				preempteeCQLimit = kueuetestalpha1.MakePreemptionLimit("status-preemptee-cq-limit", kueuealpha.ByPreempteeCQLimitAggregation).
 					ConfigSelector(prodConfigSelector).
 					Limit(5).
 					LimitWindowSeconds(longLimitWindowSeconds).
@@ -750,7 +750,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 					Limit(5).
 					LimitWindowSeconds(limitWindowSeconds).
 					Obj()
-				createPreemptionLimitAndWaitForSync(preemptedCQLimit)
+				createPreemptionLimitAndWaitForSync(preempteeCQLimit)
 				createPreemptionLimitAndWaitForSync(shortGlobalLimit)
 			})
 
@@ -762,7 +762,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, cqVictimA, true)
 				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, cqVictimB, true)
 				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, cqPreemptor, true)
-				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, preemptedCQLimit, true)
+				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, preempteeCQLimit, true)
 				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, shortGlobalLimit, true)
 				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, config, true)
 			})
@@ -783,7 +783,7 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 					behavioral.FinishEvictionForWorkloads(ctx, k8sClient, victimB1, victimB2, victimA1)
 					behavioral.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, preemptor)
 
-					expectPreemptionLimitCounts(preemptedCQLimit, wantCQCounts)
+					expectPreemptionLimitCounts(preempteeCQLimit, wantCQCounts)
 					expectPreemptionLimitCounts(shortGlobalLimit, []kueuealpha.PreemptionLimitCount{
 						{Name: string(policy.GlobalAggregationKey), Value: 3},
 					})
@@ -792,18 +792,18 @@ var _ = ginkgo.Describe("PreemptionLimits", ginkgo.Label("feature:configurablepr
 				ginkgo.By("Pruning expired counts from status once the short sliding window elapses", func() {
 					fakeClock.Step(nextWindowOffset)
 					expectPreemptionLimitCounts(shortGlobalLimit, nil)
-					expectPreemptionLimitCounts(preemptedCQLimit, wantCQCounts)
+					expectPreemptionLimitCounts(preempteeCQLimit, wantCQCounts)
 				})
 
 				ginkgo.By("Preserving status counts when only limit changes", func() {
-					updatePreemptionLimit(preemptedCQLimit, func(pl *kueuealpha.PreemptionLimit) {
+					updatePreemptionLimit(preempteeCQLimit, func(pl *kueuealpha.PreemptionLimit) {
 						pl.Spec.Limit = 10
 					})
 					// With 2 recorded preemptions on cqVictimB, allowance for 4 more only becomes true once Limit=10 is synced.
-					waitForLimitAllowance(preemptedCQLimit.Name, policy.PreemptionLimitAggregationKey(cqVictimB.Name), 4)
+					waitForLimitAllowance(preempteeCQLimit.Name, policy.PreemptionLimitAggregationKey(cqVictimB.Name), 4)
 					gomega.Consistently(func(g gomega.Gomega) {
 						var got kueuealpha.PreemptionLimit
-						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(preemptedCQLimit), &got)).To(gomega.Succeed())
+						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(preempteeCQLimit), &got)).To(gomega.Succeed())
 						g.Expect(got.Status.Counts).To(gomega.Equal(wantCQCounts))
 					}, behavioral.ConsistentDuration, behavioral.ShortInterval).Should(gomega.Succeed())
 				})

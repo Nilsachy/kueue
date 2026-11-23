@@ -185,12 +185,12 @@ func TestPreemptionLimitMatcherMatches(t *testing.T) {
 
 func TestPreemptionLimitMatcherAggregationKey(t *testing.T) {
 	preemptor := &workload.Info{Obj: utiltestingapi.MakeWorkload("preemptor", "ns").Obj(), ClusterQueue: "preemptor-cq"}
-	target := &workload.Info{Obj: utiltestingapi.MakeWorkload("target", "ns").Obj(), ClusterQueue: "preempted-cq"}
+	target := &workload.Info{Obj: utiltestingapi.MakeWorkload("target", "ns").Obj(), ClusterQueue: "preemptee-cq"}
 
 	cases := map[kueuealpha.PreemptionLimitAggregation]policy.PreemptionLimitAggregationKey{
 		kueuealpha.GlobalLimitAggregation:              policy.GlobalAggregationKey,
 		kueuealpha.ByPreemptorCQLimitAggregation:       "preemptor-cq",
-		kueuealpha.ByPreempteeCQLimitAggregation:       "preempted-cq",
+		kueuealpha.ByPreempteeCQLimitAggregation:       "preemptee-cq",
 		kueuealpha.ByPreempteeWorkloadLimitAggregation: "ns/target",
 	}
 	for aggregation, want := range cases {
