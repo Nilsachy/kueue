@@ -55,7 +55,7 @@ func (e *selectorError) Unwrap() error {
 // newPreemptionLimitMatcher returns the matcher for limit, or nil if limit
 // doesn't apply to config. It returns an error if a selector it needs is invalid.
 func newPreemptionLimitMatcher(limit *kueuealpha.PreemptionLimit, config *kueuealpha.PreemptionConfig) (*preemptionLimitMatcher, error) {
-	configSelector, err := selectorOrEverything(limit.Spec.ConfigSelector)
+	configSelector, err := metav1.LabelSelectorAsSelector(&limit.Spec.ConfigSelector)
 	if err != nil {
 		return nil, &selectorError{PreemptionLimit: limit.Name, Selector: "configSelector", Err: err}
 	}

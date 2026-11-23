@@ -437,7 +437,7 @@ func (pl *PreemptionLimitWrapper) LimitWindowSeconds(seconds int32) *PreemptionL
 }
 
 // ConfigSelector sets the selector of the PreemptionConfigs the limit applies to.
-func (pl *PreemptionLimitWrapper) ConfigSelector(selector *metav1.LabelSelector) *PreemptionLimitWrapper {
+func (pl *PreemptionLimitWrapper) ConfigSelector(selector metav1.LabelSelector) *PreemptionLimitWrapper {
 	pl.Spec.ConfigSelector = selector
 	return pl
 }

@@ -32,7 +32,7 @@ type PreemptionLimitSpecApplyConfiguration struct {
 	//
 	Aggregation *kueuev1alpha1.PreemptionLimitAggregation `json:"aggregation,omitempty"`
 	// configSelector selects PreemptionConfigs to which this limit applies.
-	// If not set, it applies to all PreemptionConfigs.
+	// An empty selector ({}) matches all PreemptionConfigs.
 	//
 	ConfigSelector *v1.LabelSelectorApplyConfiguration `json:"configSelector,omitempty"`
 	// preemptorClusterQueueSelector selects ClusterQueues of preempting workloads to which this limit applies.

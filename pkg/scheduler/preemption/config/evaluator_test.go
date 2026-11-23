@@ -1089,7 +1089,7 @@ func TestNewEvaluatorForPreemptionConfigPreemptionLimits(t *testing.T) {
 		"limits not selecting the PreemptionConfig are neither enforced nor attached": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
 				*utiltestingalpha.MakePreemptionLimit("other-configs", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(windowSeconds).
-					ConfigSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"tier": "other"}}).Obj(),
+					ConfigSelector(metav1.LabelSelector{MatchLabels: map[string]string{"tier": "other"}}).Obj(),
 			},
 			admitted: []kueue.Workload{
 				*unitWl.Clone().Name("a1").SimpleReserveQuota("a", "default", now).Obj(),

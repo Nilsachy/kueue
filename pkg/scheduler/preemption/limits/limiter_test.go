@@ -51,7 +51,7 @@ func TestNewPreemptionLimiter(t *testing.T) {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
 				*utiltestingalpha.MakePreemptionLimit("any-config", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).Obj(),
 				*utiltestingalpha.MakePreemptionLimit("silver", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).
-					ConfigSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"tier": "silver"}}).Obj(),
+					ConfigSelector(metav1.LabelSelector{MatchLabels: map[string]string{"tier": "silver"}}).Obj(),
 			},
 			want: []policy.PreemptionLimitReference{"any-config"},
 		},
@@ -59,7 +59,7 @@ func TestNewPreemptionLimiter(t *testing.T) {
 			preemptionLimits: []kueuealpha.PreemptionLimit{
 				*utiltestingalpha.MakePreemptionLimit("any-config", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).Obj(),
 				*utiltestingalpha.MakePreemptionLimit("invalid", kueuealpha.GlobalLimitAggregation).LimitWindowSeconds(60).
-					ConfigSelector(&metav1.LabelSelector{
+					ConfigSelector(metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "tier", Operator: "invalid"}},
 					}).Obj(),
 			},

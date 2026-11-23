@@ -35,8 +35,8 @@ import (
 
 func TestNewPreemptionLimitMatcher(t *testing.T) {
 	config := utiltestingalpha.MakePreemptionConfig("config").Label("tier", "gold").Obj()
-	selectsGold := &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "gold"}}
-	selectsSilver := &metav1.LabelSelector{MatchLabels: map[string]string{"tier": "silver"}}
+	selectsGold := metav1.LabelSelector{MatchLabels: map[string]string{"tier": "gold"}}
+	selectsSilver := metav1.LabelSelector{MatchLabels: map[string]string{"tier": "silver"}}
 	invalidSelector := &metav1.LabelSelector{
 		MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "tier", Operator: "invalid"}},
 	}
@@ -47,7 +47,7 @@ func TestNewPreemptionLimitMatcher(t *testing.T) {
 		wantApplies bool
 		wantErr     *selectorError
 	}{
-		"limit without configSelector applies": {
+		"limit with empty configSelector applies": {
 			limit:       limit.Clone().Obj(),
 			wantApplies: true,
 		},
@@ -59,7 +59,7 @@ func TestNewPreemptionLimitMatcher(t *testing.T) {
 			limit: limit.Clone().ConfigSelector(selectsSilver).Obj(),
 		},
 		"invalid configSelector is an error": {
-			limit:   limit.Clone().ConfigSelector(invalidSelector).Obj(),
+			limit:   limit.Clone().ConfigSelector(*invalidSelector).Obj(),
 			wantErr: &selectorError{PreemptionLimit: "limit", Selector: "configSelector"},
 		},
 		"invalid preemptorClusterQueueSelector of a limit applying to the config is an error": {
