@@ -108,7 +108,7 @@ func (ls limitState) isCompatibleWith(limit *kueuealpha.PreemptionLimit) bool {
 		ls.limit.Spec.Aggregation == limit.Spec.Aggregation &&
 		equality.Semantic.DeepEqual(ls.limit.Spec.ConfigSelector, limit.Spec.ConfigSelector) &&
 		equality.Semantic.DeepEqual(ls.limit.Spec.PreemptorClusterQueueSelector, limit.Spec.PreemptorClusterQueueSelector) &&
-		equality.Semantic.DeepEqual(ls.limit.Spec.PreemptedClusterQueueSelector, limit.Spec.PreemptedClusterQueueSelector) &&
+		equality.Semantic.DeepEqual(ls.limit.Spec.PreempteeClusterQueueSelector, limit.Spec.PreempteeClusterQueueSelector) &&
 		utilslices.CmpNoOrder(ls.limit.Spec.RuleNames, limit.Spec.RuleNames)
 }
 

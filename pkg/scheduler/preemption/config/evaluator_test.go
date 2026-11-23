@@ -1322,7 +1322,7 @@ func TestPreemptionEvaluatorRetryAt(t *testing.T) {
 	}
 	zeroBLimit := utiltestingalpha.MakePreemptionLimit("zero-b", kueuealpha.ByPreempteeCQLimitAggregation).
 		Limit(0).LimitWindowSeconds(windowSeconds).
-		PreemptedClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"cq": "b"}}).Obj()
+		PreempteeClusterQueueSelector(&metav1.LabelSelector{MatchLabels: map[string]string{"cq": "b"}}).Obj()
 	lowTierRuleLimit := utiltestingalpha.MakePreemptionLimit("low-tier-rule-limit", kueuealpha.GlobalLimitAggregation).
 		Limit(1).LimitWindowSeconds(windowSeconds).RuleNames("low-tier-rule").Obj()
 	anyTierRuleLimit := utiltestingalpha.MakePreemptionLimit("any-tier-rule-limit", kueuealpha.GlobalLimitAggregation).
