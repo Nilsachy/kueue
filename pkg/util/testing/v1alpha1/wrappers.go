@@ -390,13 +390,13 @@ type PreemptionLimitWrapper struct {
 	kueuealpha.PreemptionLimit
 }
 
-// MakePreemptionLimit creates a PreemptionLimit wrapper with the given scope.
+// MakePreemptionLimit creates a PreemptionLimit wrapper with the given aggregation.
 // Its UID defaults to the name suffixed with "-uid".
-func MakePreemptionLimit(name string, scope kueuealpha.PreemptionLimitScope) *PreemptionLimitWrapper {
+func MakePreemptionLimit(name string, aggregation kueuealpha.PreemptionLimitAggregation) *PreemptionLimitWrapper {
 	w := &PreemptionLimitWrapper{
 		Name: name,
 		Spec: kueuealpha.PreemptionLimitSpec{
-			Scope: scope,
+			Aggregation: aggregation,
 		},
 	}
 	return w.UID(types.UID(name + "-uid"))
@@ -412,9 +412,9 @@ func (pl *PreemptionLimitWrapper) Obj() *kueuealpha.PreemptionLimit {
 	return &pl.PreemptionLimit
 }
 
-// Scope sets the scope of the PreemptionLimit.
-func (pl *PreemptionLimitWrapper) Scope(scope kueuealpha.PreemptionLimitScope) *PreemptionLimitWrapper {
-	pl.Spec.Scope = scope
+// Aggregation sets the aggregation of the PreemptionLimit.
+func (pl *PreemptionLimitWrapper) Aggregation(aggregation kueuealpha.PreemptionLimitAggregation) *PreemptionLimitWrapper {
+	pl.Spec.Aggregation = aggregation
 	return pl
 }
 
@@ -430,14 +430,14 @@ func (pl *PreemptionLimitWrapper) Limit(limit int32) *PreemptionLimitWrapper {
 	return pl
 }
 
-// LimitWindowSeconds sets the sliding window duration, in seconds.
-func (pl *PreemptionLimitWrapper) LimitWindowSeconds(seconds int32) *PreemptionLimitWrapper {
-	pl.Spec.LimitWindowSeconds = seconds
+// WindowSeconds sets the sliding window duration, in seconds.
+func (pl *PreemptionLimitWrapper) WindowSeconds(seconds int32) *PreemptionLimitWrapper {
+	pl.Spec.WindowSeconds = seconds
 	return pl
 }
 
 // ConfigSelector sets the selector of the PreemptionConfigs the limit applies to.
-func (pl *PreemptionLimitWrapper) ConfigSelector(selector *metav1.LabelSelector) *PreemptionLimitWrapper {
+func (pl *PreemptionLimitWrapper) ConfigSelector(selector metav1.LabelSelector) *PreemptionLimitWrapper {
 	pl.Spec.ConfigSelector = selector
 	return pl
 }
@@ -448,20 +448,14 @@ func (pl *PreemptionLimitWrapper) PreemptorClusterQueueSelector(selector *metav1
 	return pl
 }
 
-// PreemptedClusterQueueSelector sets the selector of the preempted ClusterQueues the limit applies to.
-func (pl *PreemptionLimitWrapper) PreemptedClusterQueueSelector(selector *metav1.LabelSelector) *PreemptionLimitWrapper {
-	pl.Spec.PreemptedClusterQueueSelector = selector
+// PreempteeClusterQueueSelector sets the selector of the preemptee ClusterQueues the limit applies to.
+func (pl *PreemptionLimitWrapper) PreempteeClusterQueueSelector(selector *metav1.LabelSelector) *PreemptionLimitWrapper {
+	pl.Spec.PreempteeClusterQueueSelector = selector
 	return pl
 }
 
 // Generation sets the generation of the PreemptionLimit.
 func (pl *PreemptionLimitWrapper) Generation(generation int64) *PreemptionLimitWrapper {
 	pl.ObjectMeta.Generation = generation
-	return pl
-}
-
-// RuleNames sets the rule names the limit applies to.
-func (pl *PreemptionLimitWrapper) RuleNames(ruleNames ...string) *PreemptionLimitWrapper {
-	pl.Spec.RuleNames = ruleNames
 	return pl
 }

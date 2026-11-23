@@ -36,11 +36,11 @@ import (
 
 func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	global := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		Limit(3).LimitWindowSeconds(60)
+	global := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).
+		Limit(3).WindowSeconds(60)
 	globalOne := global.Clone().Limit(1)
-	perCQ := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptedCQLimitScope).
-		Limit(1).LimitWindowSeconds(60)
+	perCQ := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.ByPreempteeCQLimitAggregation).
+		Limit(1).WindowSeconds(60)
 	globalConsumed := policy.NewConsumedLimit(global.Obj(), policy.GlobalScopeValue)
 	perCQConsumed := policy.NewConsumedLimit(perCQ.Obj(), "preempted-cq")
 	twoRecordedGlobalEvents := EventsByLimit{
@@ -93,17 +93,17 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			wantOK:           false,
 			wantTaken:        preemptionCounts{"global": {policy.GlobalScopeValue: 1}},
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   "global",
-				Scope:   kueuealpha.GlobalPreemptionLimitScope,
-				RetryAt: new(now.Add(30 * time.Second)),
+				Limit:       "global",
+				Aggregation: kueuealpha.GlobalLimitAggregation,
+				RetryAt:     new(now.Add(30 * time.Second)),
 			},
 		},
 		"limit of 0 blocks the target": {
 			preemptionLimits: []kueuealpha.PreemptionLimit{*global.Clone().Limit(0).Obj()},
 			wantOK:           false,
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit: "global",
-				Scope: kueuealpha.GlobalPreemptionLimitScope,
+				Limit:       "global",
+				Aggregation: kueuealpha.GlobalLimitAggregation,
 			},
 		},
 		"multiple applicable limits are all consumed and taken from the budget": {
@@ -121,8 +121,8 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			wantOK:           false,
 			wantTaken:        preemptionCounts{"per-cq": {"preempted-cq": 1}},
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit: "per-cq",
-				Scope: kueuealpha.PreemptedCQLimitScope,
+				Limit:       "per-cq",
+				Aggregation: kueuealpha.ByPreempteeCQLimitAggregation,
 			},
 		},
 		"scope values of a limit have independent budgets": {
@@ -154,9 +154,9 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			},
 			wantOK: false,
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   "per-cq",
-				Scope:   kueuealpha.PreemptedCQLimitScope,
-				RetryAt: new(now.Add(45 * time.Second)),
+				Limit:       "per-cq",
+				Aggregation: kueuealpha.ByPreempteeCQLimitAggregation,
+				RetryAt:     new(now.Add(45 * time.Second)),
 			},
 		},
 		"non-expiring blocking limit overrides expiring limit on the same target": {
@@ -166,8 +166,8 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			},
 			wantOK: false,
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit: "global",
-				Scope: kueuealpha.GlobalPreemptionLimitScope,
+				Limit:       "global",
+				Aggregation: kueuealpha.GlobalLimitAggregation,
 			},
 		},
 		"taken preemptions alone reaching the limit return nil retry time": {
@@ -176,8 +176,8 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 			wantOK:           false,
 			wantTaken:        preemptionCounts{"global": {policy.GlobalScopeValue: 2}},
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit: "global",
-				Scope: kueuealpha.GlobalPreemptionLimitScope,
+				Limit:       "global",
+				Aggregation: kueuealpha.GlobalLimitAggregation,
 			},
 		},
 	}
@@ -193,7 +193,7 @@ func TestPreemptionLimitBudgetTryConsume(t *testing.T) {
 				budget.taken = tc.taken
 			}
 
-			gotConsumed, gotBlocking, ok := budget.TryConsume(preemptor, cmp.Or(tc.target, target), "unmatchedRuleReference", preemptorCQ, targetCQ)
+			gotConsumed, gotBlocking, ok := budget.TryConsume(preemptor, cmp.Or(tc.target, target), preemptorCQ, targetCQ)
 
 			if ok != tc.wantOK {
 				t.Errorf("TryConsume() ok = %v, want %v", ok, tc.wantOK)

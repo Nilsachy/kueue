@@ -45,7 +45,7 @@ import (
 // a PreemptionLimit are pruned.
 const preemptionLimitPruneInterval = time.Minute
 
-const preemptionLimitCountMaxItems = 1000
+const preemptionLimitTopAggregatedCountsMaxItems = 100
 
 // PreemptionLimitReconciler aligns the in-memory representation of the PreemptionLimits
 // (see PreemptionLimitTracker) with their current specs.
@@ -151,31 +151,34 @@ func (r *PreemptionLimitReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 func (r *PreemptionLimitReconciler) preemptionLimitStatus(now time.Time, limit *kueuealpha.PreemptionLimit) kueuealpha.PreemptionLimitStatus {
 	counts := r.tracker.Counts(now, policy.PreemptionLimitReference(limit.Name))
 
-	lastUpdateTime := metav1.NewTime(now)
-	status := kueuealpha.PreemptionLimitStatus{
-		LastUpdateTime: &lastUpdateTime,
+	window := &kueuealpha.PreemptionLimitWindowStatus{
+		LastUpdateTime: metav1.NewTime(now),
 	}
 
-	status.Counts = make([]kueuealpha.PreemptionLimitCount, 0, len(counts))
-	for scope, count := range counts {
-		status.Counts = append(status.Counts, kueuealpha.PreemptionLimitCount{
-			// No need to additionally validate name length because it is created from
-			// existing validated values and maxLength is calculated as combination of
-			// existing name length constraints.
-			Name:  string(scope),
-			Value: count,
+	if len(counts) > 0 {
+		window.TopAggregatedCounts = make([]kueuealpha.PreemptionLimitTopAggregatedCount, 0, len(counts))
+		for key, count := range counts {
+			window.TopAggregatedCounts = append(window.TopAggregatedCounts, kueuealpha.PreemptionLimitTopAggregatedCount{
+				// No need to additionally validate key length because it is created from
+				// existing validated values and maxLength is calculated as combination of
+				// existing name length constraints.
+				Key:   string(key),
+				Value: count,
+			})
+		}
+
+		slices.SortFunc(window.TopAggregatedCounts, func(a, b kueuealpha.PreemptionLimitTopAggregatedCount) int {
+			return cmp.Or(-cmp.Compare(a.Value, b.Value), cmp.Compare(a.Key, b.Key))
 		})
+
+		if len(window.TopAggregatedCounts) > preemptionLimitTopAggregatedCountsMaxItems {
+			window.TopAggregatedCounts = window.TopAggregatedCounts[:preemptionLimitTopAggregatedCountsMaxItems]
+		}
 	}
 
-	slices.SortFunc(status.Counts, func(a, b kueuealpha.PreemptionLimitCount) int {
-		return cmp.Or(-cmp.Compare(a.Value, b.Value), cmp.Compare(a.Name, b.Name))
-	})
-
-	if len(status.Counts) > preemptionLimitCountMaxItems {
-		status.Counts = status.Counts[:preemptionLimitCountMaxItems]
+	return kueuealpha.PreemptionLimitStatus{
+		Window: window,
 	}
-
-	return status
 }
 
 // SetupWithManager sets up the controller with the Manager. It keeps the default

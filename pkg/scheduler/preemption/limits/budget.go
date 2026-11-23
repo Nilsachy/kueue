@@ -48,10 +48,9 @@ func (l *PreemptionLimiter) NewBudget() *PreemptionLimitBudget {
 // with the strictest BlockingPreemptionLimit across the exhausted limits on target.
 func (b *PreemptionLimitBudget) TryConsume(
 	preemptor, target *workload.Info,
-	ruleReference policy.PreemptionConfigRuleReference,
 	preemptorCQ, targetCQ *schdcache.ClusterQueueSnapshot,
 ) (policy.ConsumedLimits, *policy.BlockingPreemptionLimit, bool) {
-	consumedLimits := b.limiter.consumedLimits(preemptor, target, ruleReference, preemptorCQ, targetCQ)
+	consumedLimits := b.limiter.consumedLimits(preemptor, target, preemptorCQ, targetCQ)
 	if len(consumedLimits) == 0 {
 		return nil, nil, true
 	}
@@ -63,17 +62,17 @@ func (b *PreemptionLimitBudget) TryConsume(
 		slotTime := b.limiter.snapshot.nextSlotTime(limit, consumed.ScopeValue)
 		if slotTime == nil {
 			blockingLimit = &policy.BlockingPreemptionLimit{
-				Limit: limit,
-				Scope: b.limiter.snapshot.scope(limit),
+				Limit:       limit,
+				Aggregation: b.limiter.snapshot.aggregation(limit),
 			}
 			b.logSkipped(target, blockingLimit, consumed.ScopeValue)
 			return nil, blockingLimit, false
 		}
 		if blockingLimit == nil || slotTime.After(*blockingLimit.RetryAt) {
 			blockingLimit = &policy.BlockingPreemptionLimit{
-				Limit:   limit,
-				Scope:   b.limiter.snapshot.scope(limit),
-				RetryAt: slotTime,
+				Limit:       limit,
+				Aggregation: b.limiter.snapshot.aggregation(limit),
+				RetryAt:     slotTime,
 			}
 		}
 	}

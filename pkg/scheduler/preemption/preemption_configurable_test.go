@@ -1165,8 +1165,8 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			utiltestingalpha.MakeCandidateSelector(kueuealpha.AnyClusterQueue).Obj(),
 		).Obj()
 	const perCQLimitName = "per-cq"
-	perCQLimit := utiltestingalpha.MakePreemptionLimit(perCQLimitName, kueuealpha.PreemptedCQLimitScope).
-		Limit(1).LimitWindowSeconds(60).Obj()
+	perCQLimit := utiltestingalpha.MakePreemptionLimit(perCQLimitName, kueuealpha.ByPreempteeCQLimitAggregation).
+		Limit(1).WindowSeconds(60).Obj()
 	clusterQueues := []*kueue.ClusterQueue{
 		utiltestingapi.MakeClusterQueue("cq-a").Cohort("cohort").
 			Annotation(kueuealpha.PreemptionConfigNameAnnotation, "cfg").
@@ -1212,9 +1212,9 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			},
 			wantRetryAt: new(now.Add(15 * time.Second)),
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   perCQLimitName,
-				Scope:   kueuealpha.PreemptedCQLimitScope,
-				RetryAt: new(now.Add(15 * time.Second)),
+				Limit:       perCQLimitName,
+				Aggregation: kueuealpha.ByPreempteeCQLimitAggregation,
+				RetryAt:     new(now.Add(15 * time.Second)),
 			},
 		},
 		"TakeRetryAt returns earliest across multiple failed searches": {
@@ -1228,9 +1228,9 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			},
 			wantRetryAt: new(now.Add(15 * time.Second)),
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   perCQLimitName,
-				Scope:   kueuealpha.PreemptedCQLimitScope,
-				RetryAt: new(now.Add(15 * time.Second)),
+				Limit:       perCQLimitName,
+				Aggregation: kueuealpha.ByPreempteeCQLimitAggregation,
+				RetryAt:     new(now.Add(15 * time.Second)),
 			},
 		},
 		"rejected strategy verification preserves retry from skipped candidates": {
@@ -1242,9 +1242,9 @@ func TestGetTargetsWithStrategyRetryAt(t *testing.T) {
 			},
 			wantRetryAt: new(now.Add(15 * time.Second)),
 			wantBlocking: &policy.BlockingPreemptionLimit{
-				Limit:   perCQLimitName,
-				Scope:   kueuealpha.PreemptedCQLimitScope,
-				RetryAt: new(now.Add(15 * time.Second)),
+				Limit:       perCQLimitName,
+				Aggregation: kueuealpha.ByPreempteeCQLimitAggregation,
+				RetryAt:     new(now.Add(15 * time.Second)),
 			},
 		},
 		"failed earlier strategy does not set retry when subsequent strategy succeeds": {

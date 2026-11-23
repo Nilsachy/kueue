@@ -71,10 +71,10 @@ func selector(key, value string) *metav1.LabelSelector {
 func TestPreemptionLimitTrackerSnapshot(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	cutoff := now.Add(-60 * time.Second)
-	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
-		Generation(1).LimitWindowSeconds(60).Obj()
-	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		Generation(1).LimitWindowSeconds(3600).Obj()
+	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.ByPreemptorCQLimitAggregation).
+		Generation(1).WindowSeconds(60).Obj()
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).
+		Generation(1).WindowSeconds(3600).Obj()
 
 	type earliestEvents = map[policy.PreemptionLimitReference]map[policy.PreemptionLimitScopeValue]time.Time
 
@@ -143,10 +143,10 @@ func TestPreemptionLimitTrackerSnapshot(t *testing.T) {
 func TestPreemptionLimitTrackerCounts(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	cutoff := now.Add(-60 * time.Second)
-	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
-		Generation(1).LimitWindowSeconds(60).Obj()
-	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		Generation(1).LimitWindowSeconds(60).Obj()
+	perCQLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.ByPreemptorCQLimitAggregation).
+		Generation(1).WindowSeconds(60).Obj()
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).
+		Generation(1).WindowSeconds(60).Obj()
 
 	cases := map[string]struct {
 		initialLimits trackedLimits
@@ -188,11 +188,11 @@ func TestPreemptionLimitTrackerRecord(t *testing.T) {
 	t1 := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	t2 := t1.Add(time.Second)
 	t3 := t2.Add(time.Second)
-	globalLimitBase := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		Generation(1).LimitWindowSeconds(60)
+	globalLimitBase := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).
+		Generation(1).WindowSeconds(60)
 	globalLimit := globalLimitBase.Clone().Obj()
-	perCQLimitBase := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
-		Generation(1).LimitWindowSeconds(60)
+	perCQLimitBase := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.ByPreemptorCQLimitAggregation).
+		Generation(1).WindowSeconds(60)
 	perCQLimit := perCQLimitBase.Clone().Obj()
 	oldPerCQLimit := perCQLimitBase.Clone().UID("old-uid").Obj()
 
@@ -302,8 +302,8 @@ func TestPreemptionLimitTrackerRecord(t *testing.T) {
 func TestPreemptionLimitTrackerRecordConcurrent(t *testing.T) {
 	const goroutines, recordsPerGoroutine = 10, 100
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		Generation(1).LimitWindowSeconds(60).Obj()
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).
+		Generation(1).WindowSeconds(60).Obj()
 	globalRef := policy.PreemptionLimitReference(globalLimit.Name)
 	consumed := policy.ConsumedLimits{globalRef: policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue)}
 
@@ -332,20 +332,20 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 	const windowSeconds = 60
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	expired := now.Add(-time.Hour)
-	limitBase := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
-		Generation(1).LimitWindowSeconds(windowSeconds)
+	limitBase := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.ByPreemptorCQLimitAggregation).
+		Generation(1).WindowSeconds(windowSeconds)
 	limit := limitBase.Clone().Obj()
-	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).
+		Generation(1).WindowSeconds(windowSeconds).Obj()
 	recreatedLimit := limitBase.Clone().UID("old-uid").Obj()
 	allSelectors := limitBase.Clone().
-		ConfigSelector(selector("tier", "gold")).
+		ConfigSelector(*selector("tier", "gold")).
 		PreemptorClusterQueueSelector(selector("side", "preemptor")).
-		PreemptedClusterQueueSelector(selector("side", "preempted")).
+		PreempteeClusterQueueSelector(selector("side", "preemptee")).
 		Obj()
-	limitAndWindowIncreased := limitBase.Clone().Generation(2).Limit(10).LimitWindowSeconds(2 * windowSeconds).Obj()
-	windowHalved := limitBase.Clone().Generation(2).LimitWindowSeconds(windowSeconds / 2).Obj()
-	rescoped := limitBase.Clone().Generation(2).Scope(kueuealpha.PreemptedCQLimitScope).Obj()
+	limitAndWindowIncreased := limitBase.Clone().Generation(2).Limit(10).WindowSeconds(2 * windowSeconds).Obj()
+	windowHalved := limitBase.Clone().Generation(2).WindowSeconds(windowSeconds / 2).Obj()
+	reaggregated := limitBase.Clone().Generation(2).Aggregation(kueuealpha.ByPreempteeCQLimitAggregation).Obj()
 
 	cases := map[string]struct {
 		initialLimits trackedLimits
@@ -396,14 +396,14 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 		},
 		"limit and window decrease update the limit, and keep the events and the reset generation": {
 			initialLimits: tracked(trackedLimit(limitBase.Clone().Limit(10).Obj(), ScopeEvents{"cq-a": {expired, now}})),
-			synced:        limitBase.Clone().Generation(2).Limit(5).LimitWindowSeconds(10).Obj(),
-			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).Limit(5).LimitWindowSeconds(10).Obj(), ScopeEvents{"cq-a": {expired, now}}), 1)),
+			synced:        limitBase.Clone().Generation(2).Limit(5).WindowSeconds(10).Obj(),
+			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).Limit(5).WindowSeconds(10).Obj(), ScopeEvents{"cq-a": {expired, now}}), 1)),
 			wantResult:    true,
 		},
 		"window increase updates the limit, and keeps the events and the reset generation": {
 			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {expired, now}})),
-			synced:        limitBase.Clone().Generation(2).LimitWindowSeconds(windowSeconds + 1).Obj(),
-			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).LimitWindowSeconds(windowSeconds+1).Obj(), ScopeEvents{"cq-a": {expired, now}}), 1)),
+			synced:        limitBase.Clone().Generation(2).WindowSeconds(windowSeconds + 1).Obj(),
+			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).WindowSeconds(windowSeconds+1).Obj(), ScopeEvents{"cq-a": {expired, now}}), 1)),
 			wantResult:    false,
 		},
 		"window decrease updates the limit, and keeps the events and the reset generation": {
@@ -423,16 +423,16 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 			want:          tracked(trackedLimit(limit, nil)),
 			wantResult:    true,
 		},
-		"scope change resets the events and updates the reset generation": {
+		"aggregation change resets the events and updates the reset generation": {
 			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {now}})),
-			synced:        rescoped,
-			want:          tracked(trackedLimit(rescoped, nil)),
+			synced:        reaggregated,
+			want:          tracked(trackedLimit(reaggregated, nil)),
 			wantResult:    true,
 		},
 		"config selector change resets the events": {
 			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {now}})),
-			synced:        limitBase.Clone().Generation(2).ConfigSelector(selector("tier", "gold")).Obj(),
-			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).ConfigSelector(selector("tier", "gold")).Obj(), nil)),
+			synced:        limitBase.Clone().Generation(2).ConfigSelector(*selector("tier", "gold")).Obj(),
+			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).ConfigSelector(*selector("tier", "gold")).Obj(), nil)),
 			wantResult:    true,
 		},
 		"preemptor ClusterQueue selector change resets the events": {
@@ -441,40 +441,10 @@ func TestPreemptionLimitTrackerSync(t *testing.T) {
 			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).PreemptorClusterQueueSelector(selector("side", "other")).Obj(), nil)),
 			wantResult:    true,
 		},
-		"preempted ClusterQueue selector change resets the events": {
-			initialLimits: tracked(trackedLimit(limitBase.Clone().PreemptedClusterQueueSelector(selector("side", "preempted")).Obj(), ScopeEvents{"cq-a": {now}})),
+		"preemptee ClusterQueue selector change resets the events": {
+			initialLimits: tracked(trackedLimit(limitBase.Clone().PreempteeClusterQueueSelector(selector("side", "preemptee")).Obj(), ScopeEvents{"cq-a": {now}})),
 			synced:        limitBase.Clone().Generation(2).Obj(),
 			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).Obj(), nil)),
-			wantResult:    true,
-		},
-		"should reset events when first ruleName is added": {
-			initialLimits: tracked(trackedLimit(limit, ScopeEvents{"cq-a": {now}})),
-			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-1").Obj(),
-			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-1").Obj(), nil)),
-			wantResult:    true,
-		},
-		"should reset events when ruleName is added": {
-			initialLimits: tracked(trackedLimit(limitBase.Clone().RuleNames("test-rule-1").Obj(), ScopeEvents{"cq-a": {now}})),
-			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-1", "test-rule-2").Obj(),
-			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-1", "test-rule-2").Obj(), nil)),
-			wantResult:    true,
-		},
-		"should reset events when one of the ruleNames is removed": {
-			initialLimits: tracked(trackedLimit(limitBase.Clone().RuleNames("test-rule-1", "test-rule-2").Obj(), ScopeEvents{"cq-a": {now}})),
-			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-1").Obj(),
-			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-1").Obj(), nil)),
-			wantResult:    true,
-		},
-		"should keep events when ruleNames are in different order": {
-			initialLimits: tracked(trackedLimit(limitBase.Clone().RuleNames("test-rule-1", "test-rule-2").Obj(), ScopeEvents{"cq-a": {now}})),
-			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-2", "test-rule-1").Obj(),
-			want:          tracked(withResetGeneration(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-2", "test-rule-1").Obj(), ScopeEvents{"cq-a": {now}}), 1)),
-			wantResult:    false,
-		},
-		"should reset events when ruleNames entry got updated": {
-			initialLimits: tracked(trackedLimit(limitBase.Clone().RuleNames("test-rule-1").Obj(), ScopeEvents{"cq-a": {now}})),
-			synced:        limitBase.Clone().Generation(2).RuleNames("test-rule-2").Obj(),
-			want:          tracked(trackedLimit(limitBase.Clone().Generation(2).RuleNames("test-rule-2").Obj(), nil)),
 			wantResult:    true,
 		},
 	}
@@ -506,13 +476,13 @@ func TestPreemptionLimitTrackerPrune(t *testing.T) {
 	cutoff := now.Add(-window - pruneGracePeriod)
 	expired := cutoff.Add(-time.Nanosecond)
 	withinGracePeriod := now.Add(-window - pruneGracePeriod/2)
-	limitBase := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
-		Generation(1).LimitWindowSeconds(windowSeconds)
+	limitBase := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.ByPreemptorCQLimitAggregation).
+		Generation(1).WindowSeconds(windowSeconds)
 	limit := limitBase.Clone().Obj()
-	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
-	doubledWindowLimit := limitBase.Clone().Generation(2).LimitWindowSeconds(2 * windowSeconds).Obj()
-	halvedWindowLimit := limitBase.Clone().Generation(2).LimitWindowSeconds(windowSeconds / 2).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).
+		Generation(1).WindowSeconds(windowSeconds).Obj()
+	doubledWindowLimit := limitBase.Clone().Generation(2).WindowSeconds(2 * windowSeconds).Obj()
+	halvedWindowLimit := limitBase.Clone().Generation(2).WindowSeconds(windowSeconds / 2).Obj()
 	expiredWithDoubledWindow := now.Add(-2*window - pruneGracePeriod - time.Nanosecond)
 	withinDoubledWindow := cutoff.Add(-time.Second)
 	expiredOnlyWithHalvedWindow := now.Add(-window/2 - pruneGracePeriod - time.Second)
@@ -578,10 +548,10 @@ func TestPreemptionLimitTrackerSyncAndPruneConcurrent(t *testing.T) {
 	const windowSeconds = 60
 	start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	window := windowSeconds * time.Second
-	limit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
-		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
-	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		Generation(1).LimitWindowSeconds(windowSeconds).Obj()
+	limit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.ByPreemptorCQLimitAggregation).
+		Generation(1).WindowSeconds(windowSeconds).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).
+		Generation(1).WindowSeconds(windowSeconds).Obj()
 	limitRef := policy.PreemptionLimitReference(limit.Name)
 	otherLimitRef := policy.PreemptionLimitReference(otherLimit.Name)
 	consumed := policy.ConsumedLimits{
@@ -617,10 +587,10 @@ func TestPreemptionLimitTrackerSyncAndPruneConcurrent(t *testing.T) {
 
 func TestPreemptionLimitTrackerForget(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	forgottenLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.PreemptorCQLimitScope).
-		Generation(1).LimitWindowSeconds(60).Obj()
-	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).
-		Generation(1).LimitWindowSeconds(60).Obj()
+	forgottenLimit := utiltestingalpha.MakePreemptionLimit("per-cq", kueuealpha.ByPreemptorCQLimitAggregation).
+		Generation(1).WindowSeconds(60).Obj()
+	otherLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).
+		Generation(1).WindowSeconds(60).Obj()
 
 	cases := map[string]struct {
 		initialLimits trackedLimits

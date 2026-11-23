@@ -50,9 +50,9 @@ var _ = ginkgo.Describe("PreemptionLimit RBAC", ginkgo.Label("area:singlecluster
 
 		ginkgo.It("Should allow the full PreemptionLimit lifecycle but forbid status writes", func() {
 			preemptionLimits := adminClient.KueueV1alpha1().PreemptionLimits()
-			preemptionLimit := utiltestingalpha.MakePreemptionLimit("preemptionlimit-rbac-admin", kueuealpha.GlobalPreemptionLimitScope).
+			preemptionLimit := utiltestingalpha.MakePreemptionLimit("preemptionlimit-rbac-admin", kueuealpha.GlobalLimitAggregation).
 				Limit(1).
-				LimitWindowSeconds(60).
+				WindowSeconds(60).
 				Obj()
 			// Also removed by the last step; this covers a failure before then.
 			ginkgo.DeferCleanup(func() {
@@ -120,9 +120,9 @@ var _ = ginkgo.Describe("PreemptionLimit RBAC", ginkgo.Label("area:singlecluster
 
 		ginkgo.BeforeEach(func() {
 			// The viewer cannot create its own fixture, so the suite's admin client does it.
-			preemptionLimit = utiltestingalpha.MakePreemptionLimit("preemptionlimit-rbac-viewer", kueuealpha.GlobalPreemptionLimitScope).
+			preemptionLimit = utiltestingalpha.MakePreemptionLimit("preemptionlimit-rbac-viewer", kueuealpha.GlobalLimitAggregation).
 				Limit(1).
-				LimitWindowSeconds(60).
+				WindowSeconds(60).
 				Obj()
 			behavioral.MustCreate(ctx, k8sClient, preemptionLimit)
 			ginkgo.DeferCleanup(func() {
@@ -219,7 +219,7 @@ func expectPreemptionLimitAccessForbidden(c kueueclientset.Interface, name strin
 	})
 
 	expectPreemptionLimitAccessForbiddenForWrites(c,
-		utiltestingalpha.MakePreemptionLimit(name, kueuealpha.GlobalPreemptionLimitScope).Obj())
+		utiltestingalpha.MakePreemptionLimit(name, kueuealpha.GlobalLimitAggregation).Obj())
 }
 
 // expectPreemptionLimitAccessForbiddenForWrites asserts that c is denied every write verb on

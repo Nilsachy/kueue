@@ -86,14 +86,14 @@ func (s *PreemptionLimitsSnapshot) WithinLimits(preemptions []policy.ConsumedLim
 	return true
 }
 
-// scope returns the scope of limit in the snapshot, or an empty string if limit
-// is not in the snapshot.
-func (s *PreemptionLimitsSnapshot) scope(limit policy.PreemptionLimitReference) kueuealpha.PreemptionLimitScope {
+// aggregation returns the aggregation of limit in the snapshot, or an empty
+// string if limit is not in the snapshot.
+func (s *PreemptionLimitsSnapshot) aggregation(limit policy.PreemptionLimitReference) kueuealpha.PreemptionLimitAggregation {
 	preemptionLimit, found := s.limitByName[limit]
 	if !found {
 		return ""
 	}
-	return preemptionLimit.Spec.Scope
+	return preemptionLimit.Spec.Aggregation
 }
 
 // allowance returns how many more preemptions are allowed for limit and
@@ -117,5 +117,5 @@ func (s *PreemptionLimitsSnapshot) nextSlotTime(limit policy.PreemptionLimitRefe
 	if !found {
 		return nil
 	}
-	return new(earliest.Add(time.Duration(preemptionLimit.Spec.LimitWindowSeconds) * time.Second))
+	return new(earliest.Add(time.Duration(preemptionLimit.Spec.WindowSeconds) * time.Second))
 }

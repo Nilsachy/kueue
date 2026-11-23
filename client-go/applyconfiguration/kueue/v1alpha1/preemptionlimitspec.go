@@ -28,38 +28,30 @@ import (
 //
 // PreemptionLimitSpec defines the desired state of PreemptionLimit
 type PreemptionLimitSpecApplyConfiguration struct {
-	// scope specifies the entity boundary for this preemption limit.
+	// aggregation specifies the grouping level for counting preemption events under this limit.
 	//
-	Scope *kueuev1alpha1.PreemptionLimitScope `json:"scope,omitempty"`
+	Aggregation *kueuev1alpha1.PreemptionLimitAggregation `json:"aggregation,omitempty"`
 	// configSelector selects PreemptionConfigs to which this limit applies.
-	// If not set, it applies to all PreemptionConfigs.
+	// An empty selector ({}) matches all PreemptionConfigs.
 	//
 	ConfigSelector *v1.LabelSelectorApplyConfiguration `json:"configSelector,omitempty"`
 	// preemptorClusterQueueSelector selects ClusterQueues of preempting workloads to which this limit applies.
 	// If not set, this limit applies to preempting workloads from all ClusterQueues.
 	//
 	PreemptorClusterQueueSelector *v1.LabelSelectorApplyConfiguration `json:"preemptorClusterQueueSelector,omitempty"`
-	// preemptedClusterQueueSelector selects ClusterQueues of preempted workloads to which this limit applies.
-	// If not set, this limit applies to preempted workloads from all ClusterQueues.
+	// preempteeClusterQueueSelector selects ClusterQueues of preemptee workloads to which this limit applies.
+	// If not set, this limit applies to preemptee workloads from all ClusterQueues.
 	//
-	PreemptedClusterQueueSelector *v1.LabelSelectorApplyConfiguration `json:"preemptedClusterQueueSelector,omitempty"`
-	// ruleNames restricts the limit to specific rule names within matching PreemptionConfigs.
-	// Preemption rules are evaluated based on trigger type (Always, InsufficientQuota,
-	// QuotaFeasibleAndInsufficientTopology) and in spec.rules order per trigger.
-	// When limits are enabled and a candidate matches multiple rules, the first rule in
-	// order that satisfies the limits is used.
-	// If not set, it applies to all rules.
-	//
-	RuleNames []string `json:"ruleNames,omitempty"`
+	PreempteeClusterQueueSelector *v1.LabelSelectorApplyConfiguration `json:"preempteeClusterQueueSelector,omitempty"`
 	// limit defines how many preemption events can occur within the given time window.
-	// An event is defined as a confirmed (preemptor, preempted) eviction pair.
-	// Setting limit to 0 blocks all preemptions under this limit's scope.
+	// An event is defined as a confirmed (preemptor, preemptee) eviction pair.
+	// Setting limit to 0 blocks all matching preemptions under this limit.
 	//
 	Limit *int32 `json:"limit,omitempty"`
-	// limitWindowSeconds specifies the sliding time window duration, in seconds.
-	// Must be greater than or equal to 1 to prevent sub-second thrashing.
+	// windowSeconds specifies the sliding time window duration, in seconds.
+	// Must be between 1 (to prevent sub-second thrashing) and 604800 (7 days), inclusive.
 	//
-	LimitWindowSeconds *int32 `json:"limitWindowSeconds,omitempty"`
+	WindowSeconds *int32 `json:"windowSeconds,omitempty"`
 }
 
 // PreemptionLimitSpecApplyConfiguration constructs a declarative configuration of the PreemptionLimitSpec type for use with
@@ -68,11 +60,11 @@ func PreemptionLimitSpec() *PreemptionLimitSpecApplyConfiguration {
 	return &PreemptionLimitSpecApplyConfiguration{}
 }
 
-// WithScope sets the Scope field in the declarative configuration to the given value
+// WithAggregation sets the Aggregation field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Scope field is set to the value of the last call.
-func (b *PreemptionLimitSpecApplyConfiguration) WithScope(value kueuev1alpha1.PreemptionLimitScope) *PreemptionLimitSpecApplyConfiguration {
-	b.Scope = &value
+// If called multiple times, the Aggregation field is set to the value of the last call.
+func (b *PreemptionLimitSpecApplyConfiguration) WithAggregation(value kueuev1alpha1.PreemptionLimitAggregation) *PreemptionLimitSpecApplyConfiguration {
+	b.Aggregation = &value
 	return b
 }
 
@@ -92,21 +84,11 @@ func (b *PreemptionLimitSpecApplyConfiguration) WithPreemptorClusterQueueSelecto
 	return b
 }
 
-// WithPreemptedClusterQueueSelector sets the PreemptedClusterQueueSelector field in the declarative configuration to the given value
+// WithPreempteeClusterQueueSelector sets the PreempteeClusterQueueSelector field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the PreemptedClusterQueueSelector field is set to the value of the last call.
-func (b *PreemptionLimitSpecApplyConfiguration) WithPreemptedClusterQueueSelector(value *v1.LabelSelectorApplyConfiguration) *PreemptionLimitSpecApplyConfiguration {
-	b.PreemptedClusterQueueSelector = value
-	return b
-}
-
-// WithRuleNames adds the given value to the RuleNames field in the declarative configuration
-// and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, values provided by each call will be appended to the RuleNames field.
-func (b *PreemptionLimitSpecApplyConfiguration) WithRuleNames(values ...string) *PreemptionLimitSpecApplyConfiguration {
-	for i := range values {
-		b.RuleNames = append(b.RuleNames, values[i])
-	}
+// If called multiple times, the PreempteeClusterQueueSelector field is set to the value of the last call.
+func (b *PreemptionLimitSpecApplyConfiguration) WithPreempteeClusterQueueSelector(value *v1.LabelSelectorApplyConfiguration) *PreemptionLimitSpecApplyConfiguration {
+	b.PreempteeClusterQueueSelector = value
 	return b
 }
 
@@ -118,10 +100,10 @@ func (b *PreemptionLimitSpecApplyConfiguration) WithLimit(value int32) *Preempti
 	return b
 }
 
-// WithLimitWindowSeconds sets the LimitWindowSeconds field in the declarative configuration to the given value
+// WithWindowSeconds sets the WindowSeconds field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the LimitWindowSeconds field is set to the value of the last call.
-func (b *PreemptionLimitSpecApplyConfiguration) WithLimitWindowSeconds(value int32) *PreemptionLimitSpecApplyConfiguration {
-	b.LimitWindowSeconds = &value
+// If called multiple times, the WindowSeconds field is set to the value of the last call.
+func (b *PreemptionLimitSpecApplyConfiguration) WithWindowSeconds(value int32) *PreemptionLimitSpecApplyConfiguration {
+	b.WindowSeconds = &value
 	return b
 }

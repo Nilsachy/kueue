@@ -73,8 +73,8 @@ type PreemptionLimitReference string
 // (e.g. "Global", a ClusterQueue name, or "<namespace>/<workload-name>").
 type PreemptionLimitScopeValue string
 
-// GlobalScopeValue is the scope value for a PreemptionLimit with GlobalPreemptionLimitScope.
-const GlobalScopeValue = PreemptionLimitScopeValue(kueuealpha.GlobalPreemptionLimitScope)
+// GlobalScopeValue is the scope value for a PreemptionLimit with GlobalLimitAggregation.
+const GlobalScopeValue = PreemptionLimitScopeValue(kueuealpha.GlobalLimitAggregation)
 
 // PreemptionLimitScopeCounts maps each scope value of a single PreemptionLimit
 // to its number of preemptions.
@@ -110,17 +110,17 @@ type ConsumedLimits map[PreemptionLimitReference]ConsumedLimit
 // recorded events to expire cannot unblock it (e.g., spec.limit is 0, or already
 // selected preemption candidates alone exhaust spec.limit).
 type BlockingPreemptionLimit struct {
-	Limit   PreemptionLimitReference
-	Scope   kueuealpha.PreemptionLimitScope
-	RetryAt *time.Time
+	Limit       PreemptionLimitReference
+	Aggregation kueuealpha.PreemptionLimitAggregation
+	RetryAt     *time.Time
 }
 
 // Message formats the human-readable reason why preemptions were blocked by the limit.
 func (b BlockingPreemptionLimit) Message() string {
 	if b.RetryAt == nil {
-		return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s)", b.Limit, b.Scope)
+		return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s)", b.Limit, b.Aggregation)
 	}
-	return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s) until %s", b.Limit, b.Scope, b.RetryAt.UTC().Format(time.RFC3339))
+	return fmt.Sprintf("preemptions blocked by PreemptionLimit %s (aggregation %s) until %s", b.Limit, b.Aggregation, b.RetryAt.UTC().Format(time.RFC3339))
 }
 
 // Earlier returns whichever of b and other is expected to elapse sooner (keeping

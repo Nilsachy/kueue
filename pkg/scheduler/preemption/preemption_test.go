@@ -4824,8 +4824,8 @@ func TestIssuePreemptionsRecordsPreemptionLimits(t *testing.T) {
 				Obj(),
 			now,
 		)
-	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).LimitWindowSeconds(60).Obj()
-	perPreemptedWorkloadLimit := utiltestingalpha.MakePreemptionLimit("per-preempted-workload", kueuealpha.PreemptedWorkloadLimitScope).LimitWindowSeconds(60).Obj()
+	globalLimit := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).WindowSeconds(60).Obj()
+	perPreemptedWorkloadLimit := utiltestingalpha.MakePreemptionLimit("per-preempted-workload", kueuealpha.ByPreempteeWorkloadLimitAggregation).WindowSeconds(60).Obj()
 	consumedLimits := policy.ConsumedLimits{
 		"global":                 policy.NewConsumedLimit(globalLimit, policy.GlobalScopeValue),
 		"per-preempted-workload": policy.NewConsumedLimit(perPreemptedWorkloadLimit, "default/victim"),
@@ -5394,7 +5394,7 @@ func TestPreemptionWithPodsQuota(t *testing.T) {
 
 func TestSnapshotPreemptionLimits(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
-	global := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).Limit(1).LimitWindowSeconds(60).Obj()
+	global := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).Limit(1).WindowSeconds(60).Obj()
 
 	cases := map[string]struct {
 		disableLimits bool
@@ -5448,7 +5448,7 @@ func TestSnapshotPreemptionLimits(t *testing.T) {
 
 func TestWithinPreemptionLimits(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
-	global := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).Limit(1).LimitWindowSeconds(60).Obj()
+	global := utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).Limit(1).WindowSeconds(60).Obj()
 	globalConsumed := policy.NewConsumedLimit(global, policy.GlobalScopeValue)
 	configurable := func(consumedLimits policy.ConsumedLimits) *Target {
 		return &Target{ConfigurablePreemptionReasonData: &policy.ConfigurablePreemptionReasonData{ConsumedLimits: consumedLimits}}

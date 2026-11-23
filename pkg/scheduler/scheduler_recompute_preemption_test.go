@@ -219,8 +219,8 @@ func TestScheduleRecomputePreemptionTargets(t *testing.T) {
 					Obj(),
 			).Obj()
 	}
-	perPreemptedCQLimit := utiltestingalpha.MakePreemptionLimit("per-preempted-cq", kueuealpha.PreemptedCQLimitScope).
-		Limit(1).LimitWindowSeconds(60)
+	perPreemptedCQLimit := utiltestingalpha.MakePreemptionLimit("per-preempted-cq", kueuealpha.ByPreempteeCQLimitAggregation).
+		Limit(1).WindowSeconds(60)
 	cpuAdmission := func(cq kueue.ClusterQueueReference, flavor kueue.ResourceFlavorReference, cpu string) *kueue.Admission {
 		return utiltestingapi.MakeAdmission(cq).
 			PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
@@ -2431,7 +2431,7 @@ func TestScheduleRecomputePreemptionTargets(t *testing.T) {
 			additionalLocalQueues:   limitsLocalQueues,
 			objects: []client.Object{
 				groupConfig("cfg-one", "one"), groupConfig("cfg-two", "two"),
-				utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalPreemptionLimitScope).Limit(1).LimitWindowSeconds(60).Obj(),
+				utiltestingalpha.MakePreemptionLimit("global", kueuealpha.GlobalLimitAggregation).Limit(1).WindowSeconds(60).Obj(),
 			},
 			workloads: []kueue.Workload{
 				*limitsPreemptor("p1", "lq-p1", now.Add(-2*time.Minute)).Obj(),
@@ -2545,7 +2545,7 @@ func TestScheduleRecomputePreemptionTargets(t *testing.T) {
 			wantWorkloads: []kueue.Workload{
 				*pending(limitsPreemptor("p1", "lq-p1", now.Add(-2*time.Minute)), kueue.WorkloadQuotaReservedReasonWaitingForPreemptedWorkloads, limitsPendingPreemptionMsg).Obj(),
 				*pending(limitsPreemptor("p2", "lq-p2", now.Add(-time.Minute)), kueue.WorkloadQuotaReservedReasonWaitingForQuota,
-					fmt.Sprintf("%s, skipping flavor on-demand as it is not found in the nomination mapping for resource cpu; preemptions blocked by PreemptionLimit per-preempted-cq (aggregation PreemptedClusterQueue) until %s",
+					fmt.Sprintf("%s, skipping flavor on-demand as it is not found in the nomination mapping for resource cpu; preemptions blocked by PreemptionLimit per-preempted-cq (aggregation ByPreempteeClusterQueue) until %s",
 						limitsInsufficientQuotaMsg, now.Add(60*time.Second).UTC().Format(time.RFC3339))).Obj(),
 				*preemptedBy(limitsCandidate("v1", "lq-v", "cq-v", "one"), "p1", "cfg-one", "one").Obj(),
 				*limitsCandidate("v2", "lq-v", "cq-v", "one").Priority(1).Obj(),

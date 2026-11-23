@@ -26,7 +26,6 @@ import (
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/policy"
-	utilslices "sigs.k8s.io/kueue/pkg/util/slices"
 )
 
 // pruneGracePeriod delays pruning past the window, so that readers whose
@@ -101,20 +100,19 @@ func trackedCopy(limit *kueuealpha.PreemptionLimit) *kueuealpha.PreemptionLimit 
 }
 
 // isCompatibleWith reports whether the tracked state can continue to be used
-// for limit, i.e. whether limit has the same UID, scope, selectors and ruleNames
-// that this state was initialized with
+// for limit, i.e. whether limit has the same UID, aggregation, and selectors
+// that this state was initialized with.
 func (ls limitState) isCompatibleWith(limit *kueuealpha.PreemptionLimit) bool {
 	return ls.limit.UID == limit.UID &&
-		ls.limit.Spec.Scope == limit.Spec.Scope &&
+		ls.limit.Spec.Aggregation == limit.Spec.Aggregation &&
 		equality.Semantic.DeepEqual(ls.limit.Spec.ConfigSelector, limit.Spec.ConfigSelector) &&
 		equality.Semantic.DeepEqual(ls.limit.Spec.PreemptorClusterQueueSelector, limit.Spec.PreemptorClusterQueueSelector) &&
-		equality.Semantic.DeepEqual(ls.limit.Spec.PreemptedClusterQueueSelector, limit.Spec.PreemptedClusterQueueSelector) &&
-		utilslices.CmpNoOrder(ls.limit.Spec.RuleNames, limit.Spec.RuleNames)
+		equality.Semantic.DeepEqual(ls.limit.Spec.PreempteeClusterQueueSelector, limit.Spec.PreempteeClusterQueueSelector)
 }
 
 func (ls limitState) isLimitRelaxed(limit *kueuealpha.PreemptionLimit) bool {
 	return limit.Spec.Limit > ls.limit.Spec.Limit ||
-		limit.Spec.LimitWindowSeconds < ls.limit.Spec.LimitWindowSeconds
+		limit.Spec.WindowSeconds < ls.limit.Spec.WindowSeconds
 }
 
 // counts returns the number of events within the window (windowStart, now] of
@@ -164,7 +162,7 @@ func (t *PreemptionLimitTracker) Record(ts time.Time, consumedLimits policy.Cons
 
 // windowStart returns the exclusive start of the window of limit ending at now.
 func windowStart(now time.Time, limit *kueuealpha.PreemptionLimit) time.Time {
-	return now.Add(-time.Duration(limit.Spec.LimitWindowSeconds) * time.Second)
+	return now.Add(-time.Duration(limit.Spec.WindowSeconds) * time.Second)
 }
 
 // Snapshot returns a point-in-time snapshot of the tracked PreemptionLimits

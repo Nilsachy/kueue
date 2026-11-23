@@ -233,13 +233,13 @@ func (p *PreemptionEvaluator) iterateOverCandidates(
 	preemptorCQ := snapshot.ClusterQueue(p.preemptor.ClusterQueue)
 	for _, candidate := range candidates {
 		targetCQ := snapshot.ClusterQueue(candidate.WlInfo.ClusterQueue)
+		consumedLimits, blockingLimit, withinLimits := budget.TryConsume(p.preemptor, candidate.WlInfo, preemptorCQ, targetCQ)
+		if !withinLimits {
+			p.retryAt = cmputil.EarliestTime(p.retryAt, blockingLimit.RetryAt)
+			p.blockingLimit = p.blockingLimit.Earlier(blockingLimit)
+			continue
+		}
 		for ruleReference, selectorIndexes := range candidate.RuleNameToSelectorIndexes.InOrder {
-			consumedLimits, blockingLimit, withinLimits := budget.TryConsume(p.preemptor, candidate.WlInfo, ruleReference, preemptorCQ, targetCQ)
-			if !withinLimits {
-				p.retryAt = cmputil.EarliestTime(p.retryAt, blockingLimit.RetryAt)
-				p.blockingLimit = p.blockingLimit.Earlier(blockingLimit)
-				continue
-			}
 			if !yield(&policy.Target{
 				WorkloadInfo: candidate.WlInfo,
 				Reason:       kueue.ConfigurablePreemptionReason,
@@ -256,7 +256,7 @@ func (p *PreemptionEvaluator) iterateOverCandidates(
 				return true
 			}
 
-			// Only first matched rule within limits is processed per candidate.
+			// Only first matched rule is processed per candidate.
 			break
 		}
 	}
